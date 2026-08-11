@@ -20,6 +20,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A repo-shorthand blocker is a reference** (#104). In a "Blocked by /
+  waiting on" section, `harness#121` was dropped silently: the guard that stops
+  `PR#3` from reading as a reference rejected it too. Now a prefix that matches
+  a key in routing's `repos` resolves to that repo; any other prefix is still a
+  word. Aliases are not consulted, and a key that maps to two repos resolves to
+  nothing. `facet file` wires the edge, and `facet-graph deps check` reads the
+  section the same way.
+
 - **The squash-merge landing proof asks about each clone's own repo**, read
   from its GitHub URL. It used to ask about the issue's home repo for every
   clone, so a squash-merged commit in a second repo of the same workspace could
