@@ -427,4 +427,4 @@ platform as worth watching, and please open an issue if something looks off.
 
 ## Licence
 
-MIT.
+[Apache License 2.0](LICENSE). Copyright 2026 Riccardo Cereghino.
