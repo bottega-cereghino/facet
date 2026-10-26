@@ -20,6 +20,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A repo field written as `owner/repo` is read** (spawn). The `Repos in scope`
+  / `Repos involved` field accepted only routing keys and aliases, so
+  `acme/gateway` or a repo URL was dropped without a word and spawn fell back to
+  labels, which can pull in every repo an area label maps to. Those spellings
+  now resolve through `ownerRepoToKey`, and one routing has no key for is named
+  in the plan.
+
 - **The spawn plan says why a knowledge fragment is stale.** A fragment with no
   `last_reviewed` date printed `(STALE -- reviewed )`. It now says it was never
   reviewed, or that the date is not `YYYY-MM-DD`.

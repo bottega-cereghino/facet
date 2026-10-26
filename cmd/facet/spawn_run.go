@@ -466,6 +466,10 @@ func printPlan(ws, repo string, iss *ghx.Issue, sel []routing.Selection, hints [
 	}
 
 	fmt.Printf("\nrepos to clone, and why:\n")
+	if unknown := route.UnknownScope(iss); len(unknown) > 0 {
+		fmt.Printf("  ! the issue's repo field names %s, which %s has no key for; dropped from the scope\n",
+			strings.Join(unknown, ", "), filepath.Base(roots.Routing))
+	}
 	for _, s := range sel {
 		tag := ""
 		if s.Home {

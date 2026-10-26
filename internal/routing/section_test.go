@@ -1,6 +1,11 @@
 package routing
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+
+	"github.com/RiccardoCereghino/facet/internal/ghx"
+)
 
 // UpsertScope records the repo set a human confirmed at spawn time, so the next
 // spawn does not have to guess again. It rewrites one section of someone's issue
@@ -113,5 +118,41 @@ func TestUpsertScopeRoundTrips(t *testing.T) {
 	got := r.scopeField(out)
 	if len(got) != 2 || got[0] != "platform" || got[1] != "gateway" {
 		t.Fatalf("rewritten body parses to %v", got)
+	}
+}
+
+// A hand-written issue often names its repos as owner/repo, or by URL. Those
+// resolve through ownerRepoToKey like any other spelling, and win over labels.
+func TestScopeFieldResolvesOwnerRepo(t *testing.T) {
+	r := load(t)
+	iss := &ghx.Issue{
+		Body:   "### Repos involved\n\nacme/Gateway, https://github.com/acme/infra-core.git\n",
+		Labels: []ghx.Label{{Name: "area/monitoring"}},
+	}
+	sel, _ := r.Infer("acme/platform", iss)
+	if got := Keys(sel); !reflect.DeepEqual(got, []string{"platform", "gateway", "infra"}) {
+		t.Errorf("Infer = %v, want platform (home), gateway and infra from the field", got)
+	}
+	if u := r.UnknownScope(iss); len(u) != 0 {
+		t.Errorf("UnknownScope = %v, want none", u)
+	}
+}
+
+// An owner/repo routing has no key for is dropped from the scope; when nothing
+// in the field resolves, Infer falls back to labels, and UnknownScope names
+// what was dropped so the fallback is not mistaken for the author's answer.
+// Bare prose is never reported.
+func TestUnknownScopeNamesWhatTheFieldCouldNotResolve(t *testing.T) {
+	r := load(t)
+	iss := &ghx.Issue{
+		Body:   "### Repos in scope\n\nOldOwner/platform-ish, probably\n\n_No response_\n",
+		Labels: []ghx.Label{{Name: "area/terraform"}},
+	}
+	sel, _ := r.Infer("acme/platform", iss)
+	if got := Keys(sel); !reflect.DeepEqual(got, []string{"platform", "infra"}) {
+		t.Errorf("Infer = %v, want the label fallback: platform, infra", got)
+	}
+	if got := r.UnknownScope(iss); !reflect.DeepEqual(got, []string{"oldowner/platform-ish"}) {
+		t.Errorf("UnknownScope = %v, want [oldowner/platform-ish]", got)
 	}
 }
