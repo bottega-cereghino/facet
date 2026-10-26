@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-26
+
 ### Added
 
 - **`facet spawn --exec <command>`** runs a shell command in the home clone
@@ -671,6 +673,7 @@ Initial public release.
 - Portable by construction (OS-specific code sits behind build tags); CI runs the
   test suite on Linux, macOS, and Windows.
 
-[Unreleased]: https://github.com/RiccardoCereghino/facet/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/bottega-cereghino/facet/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/bottega-cereghino/facet/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/RiccardoCereghino/facet/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/RiccardoCereghino/facet/releases/tag/v0.1.0
