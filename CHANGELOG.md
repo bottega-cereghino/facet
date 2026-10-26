@@ -20,6 +20,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The spawn plan says why a knowledge fragment is stale.** A fragment with no
+  `last_reviewed` date printed `(STALE -- reviewed )`. It now says it was never
+  reviewed, or that the date is not `YYYY-MM-DD`.
+
 - **`reap` names every process holding the workspace** (#171). It matched a
   process only by its working directory, so a watcher started elsewhere with a
   file in the workspace open was missed, and a refusal named some holders as if
