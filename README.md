@@ -269,11 +269,17 @@ A non-zero exit warns and falls back to the built-in layout.
 
 ### Tidying up
 
-`facet issues` lists the ephemeral workspaces. `facet reap` deletes one, and
-**refuses** while there are unpushed commits, uncommitted changes, an open pull
-request, a live multiplexer session, or a tmux pane or process still rooted in
-the workspace — the states where deleting would lose work, or delete a
-directory out from under something still running in it.
+`facet issues` lists the ephemeral workspaces. `facet reap <name>` deletes a
+workspace, ephemeral or long-lived, and **refuses** while there are unpushed
+commits, uncommitted changes, stashes, an open pull request, a live multiplexer
+session, or a tmux pane or process still rooted in the workspace — the states
+where deleting would lose work, or delete a directory out from under something
+still running in it.
+
+A long-lived workspace can also hold files of its own beside its clones: notes,
+a `CLAUDE.md`. Any that are not committed in an enclosing repository (a
+versioned `~/Workspaces`, say) hold it as well, because the workspace is their
+only copy. Links are removed, never followed, so their targets are untouched.
 
 ## The issue graph lives in `facet-graph`, frozen
 

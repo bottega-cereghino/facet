@@ -77,10 +77,14 @@ func newReapCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "reap",
-		Short: "Delete an ephemeral issue workspace once its work has landed",
-		Long: "Refuses while there are unpushed commits, uncommitted changes, an open pull\n" +
-			"request, a live multiplexer session, or a tmux pane or process still rooted\n" +
-			"in the workspace.\n\n" +
+		Short: "Delete a workspace once its work has landed",
+		Long: "Deletes an issue workspace or a long-lived one. Refuses while there are\n" +
+			"unpushed commits, uncommitted changes, stashes, an open pull request, a live\n" +
+			"multiplexer session, or a tmux pane or process still rooted in the workspace.\n\n" +
+			"A long-lived workspace may also hold files of its own beside its clones. Any\n" +
+			"that are not committed in an enclosing repository (~/Workspaces is usually\n" +
+			"one) hold it too, since the workspace is their only copy. Links are removed,\n" +
+			"never followed: their targets are untouched.\n\n" +
 			"The shared mirror is never touched: a clone's objects are hardlinks, so\n" +
 			"deleting the workspace drops those names and leaves the mirror's own intact.",
 		Args: cobra.MaximumNArgs(1),
@@ -89,11 +93,15 @@ func newReapCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := workspace.InspectIssue(ws, git, gh, muxLive())
+			st, err := workspace.Inspect(ws, git, gh, muxLive())
 			if err != nil {
 				return err
 			}
-			fmt.Printf("%s  (%s#%d, %s)\n", st.Name, st.Issue.Repo, st.Issue.Number, humanBytes(st.SizeBytes))
+			if st.Issue != nil {
+				fmt.Printf("%s  (%s#%d, %s)\n", st.Name, st.Issue.Repo, st.Issue.Number, humanBytes(st.SizeBytes))
+			} else {
+				fmt.Printf("%s  (long-lived, %s)\n", st.Name, humanBytes(st.SizeBytes))
+			}
 			for _, n := range st.Notes() {
 				fmt.Println(n)
 			}
@@ -124,10 +132,13 @@ func newReapCmd() *cobra.Command {
 			}
 			fmt.Printf("removed %s\n", st.Dir)
 			fmt.Println("the shared mirror was not touched.")
+			if st.Enclosing != "" {
+				fmt.Printf("its tracked files are now deletions in %s; commit them there.\n", st.Enclosing)
+			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&path, "path", "", "issue workspace (default: working directory)")
+	cmd.Flags().StringVar(&path, "path", "", "workspace (default: working directory)")
 	cmd.Flags().BoolVar(&force, "force", false, "delete even when work would be lost")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	return cmd

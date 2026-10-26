@@ -6,6 +6,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`facet reap` deletes long-lived workspaces too** (#135, #120). A workspace
+  `facet new` made used to be refused as "not an issue workspace", and nothing
+  else removed one. It now gets the same clone checks as an issue workspace,
+  plus one of its own: files beside the clones that are not committed in an
+  enclosing repository hold the reap. Links are removed, never followed.
+
+### Fixed
+
+- **The squash-merge landing proof asks about each clone's own repo**, read
+  from its GitHub URL. It used to ask about the issue's home repo for every
+  clone, so a squash-merged commit in a second repo of the same workspace could
+  not be proven landed and held the reap as "unpushed".
+
 ### Removed
 
 - **Seat identity.** `facet spawn` no longer writes `.seat` or `.seat-issue`,
