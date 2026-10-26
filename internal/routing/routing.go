@@ -427,6 +427,23 @@ var scopeHeadings = []string{"Repos in scope", "Repos involved"}
 // empty, answered "unsure", or -- when rendered as a task list -- has
 // nothing ticked.
 func (r *Routing) scopeField(body string) []string {
+	keys, _ := r.readScopeField(body)
+	return keys
+}
+
+// UnknownScope lists the owner/repo entries in an issue's repo-scope field
+// that routing has no key for. They are dropped from the scope, and when
+// nothing else in the field resolves, Infer falls back to labels -- so spawn
+// names them rather than let the fallback pass for the author's answer.
+func (r *Routing) UnknownScope(iss *ghx.Issue) []string {
+	_, unknown := r.readScopeField(stripFences(iss.Body))
+	return unknown
+}
+
+// readScopeField is scopeField, plus the owner/repo entries it could not
+// resolve. A bare word that is no key or alias is skipped silently: the field
+// is free text, and prose around the answer is not a claim about a repo.
+func (r *Routing) readScopeField(body string) (keys, unknown []string) {
 	var section string
 	for _, name := range scopeHeadings {
 		if s := findSection(body, name); s != "" {
@@ -435,10 +452,9 @@ func (r *Routing) scopeField(body string) []string {
 		}
 	}
 	if section == "" {
-		return nil
+		return nil, nil
 	}
 	section = dropUnchecked(section)
-	var keys []string
 	seen := map[string]bool{}
 	for _, tok := range strings.FieldsFunc(section, func(c rune) bool {
 		return c == ',' || c == '\n' || c == ' ' || c == '\t' || c == '\r'
@@ -454,13 +470,20 @@ func (r *Routing) scopeField(body string) []string {
 		case "", "unsure", "none":
 			continue
 		}
-		key, ok := r.Repos[tok]
-		_ = key
 		resolved := tok
-		if !ok {
-			if alias, hit := r.Aliases[tok]; hit {
+		if _, ok := r.Repos[tok]; !ok {
+			switch alias, hit := r.Aliases[tok]; {
+			case hit:
 				resolved = alias
-			} else {
+			case strings.Contains(tok, "/"):
+				// An owner/repo spelling, or the repo's URL, as a hand-written
+				// issue often has it.
+				tok = strings.TrimSuffix(strings.TrimPrefix(tok, "https://github.com/"), ".git")
+				if resolved = r.KeyForRepo(tok); resolved == "" {
+					unknown = append(unknown, tok)
+					continue
+				}
+			default:
 				continue
 			}
 		}
@@ -469,7 +492,7 @@ func (r *Routing) scopeField(body string) []string {
 			keys = append(keys, resolved)
 		}
 	}
-	return keys
+	return keys, unknown
 }
 
 // findSection returns the body text under a `### <name>` heading.
