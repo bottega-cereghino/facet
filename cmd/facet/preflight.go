@@ -129,7 +129,12 @@ func preflight(req ghx.Requirements) (probs []ghx.Problem, notes []string, st *g
 // reason to stop, and a credential that truly cannot reach GitHub fails at the
 // issue lookup, before anything is created.
 func warnPreflight(w io.Writer, what string) {
-	probs, notes, _, err := preflight(ghx.DefaultRequirements())
+	// The token-type rule guards against another login rotating this token
+	// out, which breaks nothing about the command at hand; it stays in the
+	// full `facet preflight` report and out of the warning every spawn prints.
+	req := ghx.DefaultRequirements()
+	req.ForbiddenTokenTypes = nil
+	probs, notes, _, err := preflight(req)
 	if err != nil {
 		_, _ = fmt.Fprintf(w, "! %s: could not check the GitHub credential: %v\n\n", what, err)
 		return
