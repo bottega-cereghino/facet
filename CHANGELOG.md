@@ -20,6 +20,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`reap` names every process holding the workspace** (#171). It matched a
+  process only by its working directory, so a watcher started elsewhere with a
+  file in the workspace open was missed, and a refusal named some holders as if
+  they were all. It now matches any open file under the workspace, names each
+  process once with its pid, and prints how many holders there are.
+
 - **`spawn` never calls a workspace ready while a clone is missing** (#170).
   A clone that failed was a warning, and spawn still printed "Workspace ready",
   moved the board and ran `--claude`/`--exec` on the partial set. Now a missing
