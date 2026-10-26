@@ -194,9 +194,27 @@ func runStdin(in []byte, args ...string) ([]byte, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
+		return nil, fmt.Errorf("gh %s: %s", commandLine(args), msg)
 	}
 	return stdout.Bytes(), nil
+}
+
+// commandLine renders a failed gh call for its error. Every argument is kept
+// verbatim except a multi-line GraphQL `query=`, which is cut to its first
+// line: the query text is never the diagnostic part, and printed whole it puts
+// ten lines of request ahead of the one line that says what went wrong
+// (facet#143).
+func commandLine(args []string) string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if q, ok := strings.CutPrefix(a, "query="); ok {
+			if first, _, multi := strings.Cut(strings.TrimSpace(q), "\n"); multi {
+				a = "query=" + strings.TrimSpace(first) + " …"
+			}
+		}
+		out[i] = a
+	}
+	return strings.Join(out, " ")
 }
 
 // DevelopBranch creates an issue-linked branch and returns its name. If the

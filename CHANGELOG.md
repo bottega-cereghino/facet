@@ -27,6 +27,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "Workspace INCOMPLETE", the clones it lacks, a non-zero exit, no launch and no
   board move.
 
+- **A failed GraphQL call no longer prints its whole query** (#143). The
+  error for a failed `gh` call repeated every argument, so a GraphQL failure put
+  the full multi-line query ahead of the one line giving the reason. A
+  multi-line `query=` is now cut to its first line; every other argument is
+  kept as given.
+
 - **A repo-shorthand blocker is a reference** (#104). In a "Blocked by /
   waiting on" section, `harness#121` was dropped silently: the guard that stops
   `PR#3` from reading as a reference rejected it too. Now a prefix that matches
