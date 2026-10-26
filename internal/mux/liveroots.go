@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -62,40 +63,106 @@ func tmuxPanesUnder(dir, socket string) []string {
 }
 
 // lsofProcessesUnder lists, as human-readable descriptions naming the command
-// and pid, every process whose current working directory (lsof's "cwd" file
-// descriptor) is rooted inside dir. It is the fallback for a live process that
-// tmux does not know about at all -- one started outside any pane -- and the
-// only probe available on a host with no tmux.
+// and pid, every process holding something inside dir open: its working
+// directory, its executable, or any other file. It is the fallback for a live
+// process that tmux does not know about at all -- one started outside any
+// pane -- and the only probe available on a host with no tmux.
+//
+// It used to match the working directory alone, which missed a watcher
+// started elsewhere that keeps a file in the workspace open; a refusal then
+// named some of the holders and read as if it named all of them (facet#171).
+//
+// A macOS system service with files open but its working directory elsewhere
+// is left out: Spotlight indexing the tree, or the virtualization service
+// sharing it with a VM, would otherwise hold every workspace on the machine.
+// What runs inside such a VM is not visible from here either way. lsof sees
+// only processes this user may inspect.
 func lsofProcessesUnder(dir string) []string {
 	if _, err := exec.LookPath("lsof"); err != nil {
 		return nil
 	}
-	// -a ANDs the selections together. Without it, lsof ORs "-d cwd" (every
-	// process's cwd, system-wide) with "+D dir" (every open file under dir),
-	// which reports every process on the host instead of just the ones rooted
-	// in dir.
-	raw, err := exec.Command("lsof", "-a", "-d", "cwd", "-Fpcn", "+D", canonicalPath(dir)).Output()
+	raw, err := exec.Command("lsof", "-Fpcfn", "+D", canonicalPath(dir)).Output()
 	if err != nil && len(raw) == 0 {
 		// lsof exits non-zero with nothing on stdout when nothing matches --
 		// that is "no processes", not a failure worth surfacing.
 		return nil
 	}
 	var live []string
-	pid, cmdName := "", ""
-	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+	for _, p := range parseLsof(string(raw)) {
+		if p.cwd == "" && isSystemService(p.pid) {
+			continue
+		}
+		live = append(live, p.describe())
+	}
+	return live
+}
+
+// lsofProc is one process in lsof's output and what it holds under the
+// directory asked about.
+type lsofProc struct {
+	pid, cmd, cwd string
+	files         []string
+}
+
+// parseLsof reads lsof's -Fpcfn output into its processes, in the order lsof
+// listed them, keeping only those that hold something.
+func parseLsof(raw string) []lsofProc {
+	var procs []lsofProc
+	fd := ""
+	for _, line := range strings.Split(raw, "\n") {
 		if line == "" {
 			continue
 		}
 		switch line[0] {
 		case 'p':
-			pid = line[1:]
+			procs = append(procs, lsofProc{pid: line[1:]})
+			fd = ""
 		case 'c':
-			cmdName = line[1:]
+			if len(procs) > 0 {
+				procs[len(procs)-1].cmd = line[1:]
+			}
+		case 'f':
+			fd = line[1:]
 		case 'n':
-			live = append(live, "process "+cmdName+" (pid "+pid+") at "+line[1:])
+			switch {
+			case len(procs) == 0:
+			case fd == "cwd":
+				procs[len(procs)-1].cwd = line[1:]
+			default:
+				procs[len(procs)-1].files = append(procs[len(procs)-1].files, line[1:])
+			}
 		}
 	}
-	return live
+	out := procs[:0]
+	for _, p := range procs {
+		if p.cwd != "" || len(p.files) > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// describe names the process and where it holds the directory: its working
+// directory when that is inside, otherwise the first file it has open and how
+// many more.
+func (p lsofProc) describe() string {
+	desc := "process " + p.cmd + " (pid " + p.pid + ")"
+	switch {
+	case p.cwd != "":
+		return desc + " at " + p.cwd
+	case len(p.files) == 1:
+		return desc + " has " + p.files[0] + " open"
+	default:
+		return desc + fmt.Sprintf(" has %s and %d more file(s) open", p.files[0], len(p.files)-1)
+	}
+}
+
+// isSystemService reports whether the process runs an executable the
+// operating system ships, under /System. A process that cannot be looked up
+// is not one: when in doubt, it holds the workspace.
+var isSystemService = func(pid string) bool {
+	out, err := exec.Command("ps", "-o", "comm=", "-p", pid).Output()
+	return err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "/System/")
 }
 
 // underRoot reports whether path is root itself or lies beneath it.

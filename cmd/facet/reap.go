@@ -107,7 +107,10 @@ func newReapCmd() *cobra.Command {
 
 			blockers := st.Blockers()
 			if len(blockers) > 0 {
-				fmt.Println("\nheld by:")
+				// The count is part of the claim: this is every holder reap can
+				// see, so killing what is named and re-running should not turn
+				// up more (facet#171).
+				fmt.Printf("\nheld by %d thing(s):\n", len(blockers))
 				for _, b := range blockers {
 					fmt.Printf("  - %s\n", b)
 				}
