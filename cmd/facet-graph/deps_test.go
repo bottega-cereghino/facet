@@ -2,16 +2,11 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/RiccardoCereghino/facet/internal/ghx"
 )
-
-func writeFile(path, contents string) error {
-	return os.WriteFile(path, []byte(contents), 0o644)
-}
 
 func depsFake(body string) *treeFake {
 	f := &treeFake{issues: map[string]*ghx.Issue{

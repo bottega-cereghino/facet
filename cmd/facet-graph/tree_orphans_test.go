@@ -275,7 +275,7 @@ func TestTreeOrphansNeedsARepo(t *testing.T) {
 	if err == nil {
 		t.Fatal("orphans ran with no --repo")
 	}
-	if !strings.Contains(err.Error(), "fix: facet tree orphans --repo") {
+	if !strings.Contains(err.Error(), "fix: facet-graph tree orphans --repo") {
 		t.Errorf("the refusal does not name the invocation:\n%s", err)
 	}
 }

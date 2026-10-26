@@ -461,3 +461,7 @@ func equalSlices(a, b []string) bool {
 	}
 	return true
 }
+
+func writeFile(path, contents string) error {
+	return os.WriteFile(path, []byte(contents), 0o644)
+}

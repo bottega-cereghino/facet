@@ -2,11 +2,43 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/RiccardoCereghino/facet/internal/config"
 	"github.com/RiccardoCereghino/facet/internal/ghx"
 )
+
+// withRouting points roots at a routing file carrying extra top-level keys.
+func withRouting(t *testing.T, extra string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "routing.json")
+	contents := `{
+		"version": 1,
+		"repos": {
+			"lab": {"dir": "lab", "url": "https://example.invalid/lab.git"},
+			"doctrine": {"dir": "doctrine", "url": "https://example.invalid/doctrine.git"},
+			"harness": {"dir": "harness", "url": "https://example.invalid/harness.git"}
+		},
+		"ownerRepoToKey": {
+			"acme/lab": "lab", "acme/doctrine": "doctrine", "acme/harness": "harness"
+		},
+		"aliases": {}, "areaMap": {}, "knowledgeByArea": {}, "pathHints": {}` + extra + `
+	}`
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev := roots
+	roots = config.Roots{Routing: path}
+	t.Cleanup(func() { roots = prev })
+}
+
+func iref(owner, repo string, n int) ghx.IssueRef {
+	return ghx.IssueRef{Owner: owner, Repo: repo, Number: n}
+}
 
 const commentKinds = `,
 	"commentKinds": {
@@ -14,8 +46,8 @@ const commentKinds = `,
 		"finding": "(?m)^\\*\\*FINDING"
 	}`
 
-func commentFake() *treeFake {
-	f := &treeFake{issues: map[string]*ghx.Issue{}}
+func commentFake() *fakeGH {
+	f := &fakeGH{}
 	f.comments = map[string][]ghx.Comment{
 		"acme/lab#75": {
 			{ID: 1, Body: "## Plan\nthe first attempt", CreatedAt: "2026-08-03T10:00:00Z", UpdatedAt: "2026-08-03T10:00:00Z"},
@@ -147,7 +179,7 @@ func TestCommentLastFlagsAnEditedComment(t *testing.T) {
 func TestCommentPostRefusesAnEmptyBody(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/empty.md"
-	if err := writeFile(path, "   \n"); err != nil {
+	if err := os.WriteFile(path, []byte("   \n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := readBodyFile(path, "comment"); err == nil {
@@ -155,5 +187,45 @@ func TestCommentPostRefusesAnEmptyBody(t *testing.T) {
 	}
 	if _, err := readBodyFile("", "comment"); err == nil {
 		t.Error("a missing --body-file was accepted")
+	}
+}
+
+// The routing file is optional: --grep needs no configuration, and --kind
+// refuses only because there genuinely are no kinds declared.
+func TestCommentWorksWithNoRoutingFileAtAll(t *testing.T) {
+	prev := roots
+	roots = config.Roots{Routing: filepath.Join(t.TempDir(), "absent.json")}
+	t.Cleanup(func() { roots = prev })
+
+	f := &fakeGH{comments: map[string][]ghx.Comment{"acme/lab#46": {{ID: 1, Body: "## Plan\nx"}}}}
+	if err := runCommentList(&bytes.Buffer{}, f, iref("acme", "lab", 46), "", "Plan", true); err != nil {
+		t.Errorf("comment --grep refused without a routing file: %v", err)
+	}
+	if err := runCommentList(&bytes.Buffer{}, f, iref("acme", "lab", 46), "plan", "", true); err == nil {
+		t.Error("--kind was accepted with no kinds declared anywhere")
+	}
+}
+
+// The refusal must not teach the pattern this branch measured as wrong: an
+// unanchored form returns a heading that merely CONTAINS the word.
+func TestCommentKindRefusalDoesNotRecommendAnUnanchoredPattern(t *testing.T) {
+	withRouting(t, "")
+	err := runCommentList(&bytes.Buffer{}, commentFake(), iref("acme", "lab", 75), "plan", "", true)
+	if err == nil {
+		t.Fatal("--kind was accepted with no commentKinds block")
+	}
+	msg := err.Error()
+	// What is OFFERED after "e.g." must be the anchored form. The unanchored
+	// one may still appear -- naming it as the thing to avoid is the useful
+	// half -- so this asserts what is recommended, not what is mentioned.
+	offered, _, _ := strings.Cut(strings.SplitN(msg, "e.g. ", 2)[1], "\n")
+	if !strings.Contains(offered, "(?mi)") || !strings.Contains(offered, "#{1,6}") {
+		t.Errorf("the recommended pattern is not anchored and case-insensitive: %q", offered)
+	}
+	if strings.Contains(offered, ".*") {
+		t.Errorf("the recommended pattern is unanchored: %q", offered)
+	}
+	if !strings.Contains(msg, "anchor") {
+		t.Errorf("the fix line does not warn about anchoring:\n%s", msg)
 	}
 }

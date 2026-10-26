@@ -208,7 +208,7 @@ func writeLabelReport(w io.Writer, statuses []labelStatus, declared []string, cr
 	// hand, one repository at a time -- which is how the gap got here.
 	msg := fmt.Sprintf("%d of %d %s %s a declared label: %s\n"+
 		"  a wire into one of these records the edge and NOT the level\n"+
-		"fix: facet tree labels --create",
+		"fix: facet-graph tree labels --create",
 		len(gaps), len(statuses), plural(len(gaps), "repository", "repositories"),
 		plural(len(gaps), "is missing", "are missing"), strings.Join(gaps, ", "))
 	if len(unreadable) > 0 {

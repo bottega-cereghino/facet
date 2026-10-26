@@ -90,7 +90,7 @@ func TestScopeAddAcceptsALandingEntry(t *testing.T) {
 }
 
 // scopeIssueFake scripts ViewIssue for reportResultingTier, keyed the same
-// way treeFake keys its issues in tree_test.go.
+// way facet-graph keys its issues in its tree tests.
 type scopeIssueFake struct {
 	fakeGH
 	issues map[string]*ghx.Issue
@@ -303,4 +303,12 @@ func TestResolveScopeDirFallsBackToWorkspaceRootWithNoSeatAnywhere(t *testing.T)
 	if got != ws {
 		t.Errorf("resolveScopeDir(%s) = %s, want the workspace root %s", repoDir, got, ws)
 	}
+}
+
+func issueWith(title string, labels ...string) *ghx.Issue {
+	ls := make([]ghx.Label, 0, len(labels))
+	for _, l := range labels {
+		ls = append(ls, ghx.Label{Name: l})
+	}
+	return &ghx.Issue{Title: title, State: "OPEN", Labels: ls}
 }

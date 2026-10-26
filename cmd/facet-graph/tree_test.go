@@ -853,14 +853,13 @@ func TestTreeWireRefusesWhenAnAncestorIsItselfMisplaced(t *testing.T) {
 // These commands read GitHub, not the lab. A missing routing file means "no
 // levels and no comment kinds declared", which is a legitimate state -- not a
 // reason to refuse to render a tree that facet never built.
-func TestTreeAndCommentWorkWithNoRoutingFileAtAll(t *testing.T) {
+func TestTreeWorksWithNoRoutingFileAtAll(t *testing.T) {
 	prev := roots
 	roots = config.Roots{Routing: filepath.Join(t.TempDir(), "absent.json")}
 	t.Cleanup(func() { roots = prev })
 
 	f := wireFake()
 	f.children = map[string][]ghx.IssueRef{"acme/lab#46": {iref("acme", "doctrine", 282)}}
-	f.comments = map[string][]ghx.Comment{"acme/lab#46": {{ID: 1, Body: "## Plan\nx"}}}
 
 	var out bytes.Buffer
 	if err := runTreeShow(&out, f, iref("acme", "lab", 46), -1); err != nil {
@@ -868,38 +867,6 @@ func TestTreeAndCommentWorkWithNoRoutingFileAtAll(t *testing.T) {
 	}
 	if err := runTreeDoctor(&bytes.Buffer{}, f, iref("acme", "lab", 46), false); err != nil {
 		t.Errorf("tree doctor refused without a routing file: %v", err)
-	}
-	// --grep needs no configuration, so it must work here too.
-	if err := runCommentList(&bytes.Buffer{}, f, iref("acme", "lab", 46), "", "Plan", true); err != nil {
-		t.Errorf("comment --grep refused without a routing file: %v", err)
-	}
-	// --kind still refuses, because there genuinely are no kinds declared.
-	if err := runCommentList(&bytes.Buffer{}, f, iref("acme", "lab", 46), "plan", "", true); err == nil {
-		t.Error("--kind was accepted with no kinds declared anywhere")
-	}
-}
-
-// The refusal must not teach the pattern this branch measured as wrong: an
-// unanchored form returns a heading that merely CONTAINS the word.
-func TestCommentKindRefusalDoesNotRecommendAnUnanchoredPattern(t *testing.T) {
-	withRouting(t, "")
-	err := runCommentList(&bytes.Buffer{}, commentFake(), iref("acme", "lab", 75), "plan", "", true)
-	if err == nil {
-		t.Fatal("--kind was accepted with no commentKinds block")
-	}
-	msg := err.Error()
-	// What is OFFERED after "e.g." must be the anchored form. The unanchored
-	// one may still appear -- naming it as the thing to avoid is the useful
-	// half -- so this asserts what is recommended, not what is mentioned.
-	offered, _, _ := strings.Cut(strings.SplitN(msg, "e.g. ", 2)[1], "\n")
-	if !strings.Contains(offered, "(?mi)") || !strings.Contains(offered, "#{1,6}") {
-		t.Errorf("the recommended pattern is not anchored and case-insensitive: %q", offered)
-	}
-	if strings.Contains(offered, ".*") {
-		t.Errorf("the recommended pattern is unanchored: %q", offered)
-	}
-	if !strings.Contains(msg, "anchor") {
-		t.Errorf("the fix line does not warn about anchoring:\n%s", msg)
 	}
 }
 

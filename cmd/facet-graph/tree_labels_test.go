@@ -83,7 +83,7 @@ func TestTreeLabelsReportsEveryRepositoryIncludingTheGoodOnes(t *testing.T) {
 	if strings.Count(got, "ok") < 2 {
 		t.Errorf("the clean repositories are not accounted for:\n%s", got)
 	}
-	if !strings.Contains(err.Error(), "fix: facet tree labels --create") {
+	if !strings.Contains(err.Error(), "fix: facet-graph tree labels --create") {
 		t.Errorf("the failure does not name the remedy:\n%s", err)
 	}
 }
