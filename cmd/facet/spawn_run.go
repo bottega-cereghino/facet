@@ -160,7 +160,20 @@ func runSpawn(o spawnOpts) error {
 		return err
 	}
 
+	// Sync warns about a clone that failed and carries on, so the set on disk
+	// is checked here: a workspace missing a clone must never be announced as
+	// ready (facet#170). Without the home clone there is nothing to work in.
 	homeDir := route.Repos[homeKey].Dir
+	missing, err := missingClones(ws)
+	if err != nil {
+		return err
+	}
+	for _, name := range missing {
+		if name == homeDir {
+			return fmt.Errorf("the home clone %s could not be cloned (see the warning above)\n"+
+				"fix: `facet reap %s`, then spawn again", homeDir, wsName)
+		}
+	}
 	if branch != "" {
 		if err := checkoutIssueBranch(filepath.Join(ws, homeDir), branch); err != nil {
 			return fmt.Errorf("check out %s: %w", branch, err)
@@ -184,7 +197,7 @@ func runSpawn(o spawnOpts) error {
 	// It is never fatal. A renamed board or a `gh` without the `project` scope
 	// must not strand a workspace that is otherwise complete, exactly as a failed
 	// mirror fetch does not.
-	if target, ok := route.Target(); ok {
+	if target, ok := route.Target(); ok && len(missing) == 0 {
 		if err := gh.SetIssueStatus(target, iss.URL); err != nil {
 			rep.Warn("project %s/%d: %v", target.Owner, target.Number, err)
 		} else {
@@ -203,6 +216,14 @@ func runSpawn(o spawnOpts) error {
 	}
 
 	workDir := filepath.Join(ws, homeDir)
+	if len(missing) > 0 {
+		fmt.Printf("\nWorkspace INCOMPLETE: %s\n", ws)
+		fmt.Printf("\nwork in:    %s\n", workDir)
+		return fmt.Errorf("%d of %d clone(s) missing: %s\n"+
+			"nothing was launched and the board was not moved\n"+
+			"fix: `facet sync --via-mirror --path %s` retries them",
+			len(missing), len(sel), strings.Join(missing, ", "), ws)
+	}
 	fmt.Printf("\nWorkspace ready: %s\n", ws)
 	fmt.Printf("\nwork in:    %s\n", workDir)
 
@@ -213,6 +234,22 @@ func runSpawn(o spawnOpts) error {
 		rep.Warn("%v (the workspace is ready; open it yourself in %s)", err, workDir)
 	}
 	return nil
+}
+
+// missingClones names the clones the workspace's manifest declares that are
+// not a repository on disk, sorted.
+func missingClones(ws string) ([]string, error) {
+	_, entries, err := workspace.List(roots, ws, git)
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
+	for _, e := range entries {
+		if e.Kind == "clone" && e.Status != "ok" {
+			missing = append(missing, e.Name)
+		}
+	}
+	return missing, nil
 }
 
 // checkoutIssueBranch fetches the branch explicitly, because the mirror may have
