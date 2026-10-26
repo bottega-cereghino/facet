@@ -314,8 +314,9 @@ permissions were verified" when they were not.** The existence half is
 platform-neutral and runs everywhere.
 
 `facet spawn` runs the same checks first, before routing and before the issue
-lookup, and **warns** about each problem rather than refusing: a default `gho_`
-token is worth knowing about, not a reason to stop. A credential that cannot
+lookup, and **warns** about each problem rather than refusing. It leaves out the
+token-type rule: a default `gho_` token breaks nothing about a spawn, so only
+`facet preflight` reports it. A credential that cannot
 reach GitHub at all fails at the issue lookup, before anything is created. The
 workspace core (`new`, `add`, `sync`, `restore`) never consults the credential.
 

@@ -76,6 +76,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`spawn` no longer warns about a `gho_` token on every run.** A default
+  `gh auth login` token is one, and it breaks nothing about a spawn.
+  `facet preflight` still reports it.
+
 - **A bare `facet spawn` runs nothing.** It prints where to work and exits.
   Routing's `spawn.rc` used to make a bare spawn launch claude in this
   terminal; it now only decides whether `spawn --claude` gets Remote Control.

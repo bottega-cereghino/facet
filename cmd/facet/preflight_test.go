@@ -120,6 +120,28 @@ func TestWarnPreflightWarnsAndProceeds(t *testing.T) {
 	}
 }
 
+// A default `gh auth login` token is a gho_ token. `facet preflight` reports
+// it; spawn does not warn about it on every run, since it breaks nothing.
+func TestWarnPreflightDoesNotWarnAboutTheTokenType(t *testing.T) {
+	withFakes(t, "")
+	gh = &fakeGH{auth: &ghx.AuthStatus{
+		Host: "github.com", State: ghx.StateConfirmed,
+		Account: "someone", Active: true,
+		TokenType: "gho_", Scopes: []string{"read:org", "repo", "workflow"},
+		GitProtocol: "ssh", ConfigSource: "/dev/null",
+	}}
+
+	var buf bytes.Buffer
+	warnPreflight(&buf, "spawn")
+	if buf.Len() != 0 {
+		t.Errorf("spawn warned about a gho_ token: %q", buf.String())
+	}
+	buf.Reset()
+	if err := runPreflight(&buf); err == nil || !strings.Contains(buf.String(), "gho_") {
+		t.Errorf("facet preflight must still report a gho_ token (err %v):\n%s", err, buf.String())
+	}
+}
+
 // TestWarnPreflightSilentWhenSound: a sound credential costs no output.
 func TestWarnPreflightSilentWhenSound(t *testing.T) {
 	withFakes(t, "")
