@@ -34,6 +34,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it), a `--label` that disagrees is refused, and `file` prints the labels it
   applied.
 
+- **`spawn` uses the issue's web address.** The REST issue lookup read the
+  API's `url` (`https://api.github.com/repos/...`), so the spawn plan printed
+  it, the manifest's `issue.url` recorded it, and the board move passed it to
+  `gh project item-add`, which takes the web address. It now reads `html_url`.
+
 - **The squash-merge landing proof asks about each clone's own repo**, read
   from its GitHub URL. It used to ask about the issue's home repo for every
   clone, so a squash-merged commit in a second repo of the same workspace could
