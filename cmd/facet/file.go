@@ -86,9 +86,21 @@ func runFile(o fileOpts) error {
 		return err
 	}
 
+	// The body's ### Complexity section and the complexity/N label say the
+	// same thing, and only the label is something a tool can filter on. So the
+	// section supplies the label, before the conventions see the labels
+	// (facet#165).
+	labels, derived, err := withComplexityLabel(o.Labels, body)
+	if err != nil {
+		return err
+	}
+	if derived != "" && !repoDefines(o.Repo, derived) {
+		labels = labels[:len(labels)-1]
+	}
+
 	// Every violation at once. An agent that has to rediscover one rule per
 	// attempt will give up and file a bare issue instead.
-	if err := route.Conventions.Check(o.Title, o.Labels); err != nil {
+	if err := route.Conventions.Check(o.Title, labels); err != nil {
 		return fmt.Errorf("this issue does not satisfy the conventions:\n%w", err)
 	}
 
@@ -120,18 +132,67 @@ func runFile(o fileOpts) error {
 	}
 
 	if o.DryRun {
-		fmt.Printf("\n--dry-run: nothing was created.\n\n%s\n\n%s\n", o.Title, body)
+		fmt.Printf("\n--dry-run: nothing was created.\n\nlabels: %s\n\n%s\n\n%s\n", labelList(labels), o.Title, body)
 		return nil
 	}
 
-	url, err := gh.CreateIssue(o.Repo, o.Title, body, o.Labels)
+	url, err := gh.CreateIssue(o.Repo, o.Title, body, labels)
 	if err != nil {
 		return err
 	}
 	fmt.Println(url)
+	fmt.Printf("labels: %s\n", labelList(labels))
 
 	createBlockedByEdges(route, o.Repo, url, body)
 	return nil
+}
+
+// withComplexityLabel adds complexity/N, last, when the body's ### Complexity
+// section says N, and returns the label it added ("" when it added none). A
+// --label that names a different complexity refuses: the issue would say one
+// size in its body and another in its labels.
+func withComplexityLabel(labels []string, body string) ([]string, string, error) {
+	n, found, err := routing.ParseComplexity(body)
+	if err != nil || !found {
+		return labels, "", err
+	}
+	want := "complexity/" + n
+	for _, l := range labels {
+		if !strings.HasPrefix(l, "complexity/") {
+			continue
+		}
+		if l != want {
+			return nil, "", fmt.Errorf("the body's ### Complexity says %s and --label says %s; make them agree", n, l)
+		}
+		return labels, "", nil
+	}
+	return append(append([]string(nil), labels...), want), want, nil
+}
+
+// repoDefines reports whether repo defines label, warning when it does not or
+// cannot tell. gh refuses to create an issue with an undefined label, and a
+// label facet derived on its own must not be what stops an issue being filed.
+func repoDefines(repo, label string) bool {
+	defined, err := gh.RepoLabels(repo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "! could not list %s's labels, so %s is not applied: %v\n", repo, label, err)
+		return false
+	}
+	for _, l := range defined {
+		if l.Name == label {
+			return true
+		}
+	}
+	fmt.Fprintf(os.Stderr, "! %s does not define %s, so it is not applied; create it with `gh label create %s -R %s`\n", repo, label, label, repo)
+	return false
+}
+
+// labelList is how file reports the labels it applied.
+func labelList(labels []string) string {
+	if len(labels) == 0 {
+		return "none"
+	}
+	return strings.Join(labels, ", ")
 }
 
 // createBlockedByEdges creates a native GitHub issue-dependency edge for every

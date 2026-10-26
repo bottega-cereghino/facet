@@ -33,6 +33,7 @@ type fakeGH struct {
 	createdLabels  []string
 	createLabelErr error
 	createURL      string
+	createdWith    []string // the labels CreateIssue was given
 
 	issueIDs  map[string]int64 // "owner/repo#n" -> id
 	issueErrs map[string]error // "owner/repo#n" -> error from IssueID
@@ -99,7 +100,8 @@ func (f *fakeGH) MergedPRForSHA(_, _ string) (*ghx.PRForCommit, error) {
 func (f *fakeGH) SetIssueStatus(_ ghx.ProjectTarget, _ string) error { return nil }
 func (f *fakeGH) SetIssueBody(_ string, _ int, _ string) error       { return nil }
 func (f *fakeGH) SearchIssues(_, _ string) ([]ghx.Issue, error)      { return nil, nil }
-func (f *fakeGH) CreateIssue(_, _, _ string, _ []string) (string, error) {
+func (f *fakeGH) CreateIssue(_, _, _ string, labels []string) (string, error) {
+	f.createdWith = labels
 	return f.createURL, nil
 }
 
@@ -464,4 +466,92 @@ func equalSlices(a, b []string) bool {
 
 func writeFile(path, contents string) error {
 	return os.WriteFile(path, []byte(contents), 0o644)
+}
+
+// fileWithBody runs runFile against a fake forge with body as the issue body.
+// The repository defines complexity/1 to complexity/5.
+func fileWithBody(t *testing.T, body string, labels ...string) (*fakeGH, error) {
+	t.Helper()
+	var defined []ghx.RepoLabel
+	for n := 1; n <= 5; n++ {
+		defined = append(defined, ghx.RepoLabel{Name: fmt.Sprintf("complexity/%d", n)})
+	}
+	return fileWithBodyIn(t, map[string][]ghx.RepoLabel{"acme/gateway": defined}, body, labels...)
+}
+
+func fileWithBodyIn(t *testing.T, repoLabels map[string][]ghx.RepoLabel, body string, labels ...string) (*fakeGH, error) {
+	t.Helper()
+	withTempRouting(t, "acme/gateway")
+	fake := &fakeGH{createURL: "https://github.com/acme/gateway/issues/42", repoLabels: repoLabels}
+	prevGH := gh
+	gh = fake
+	t.Cleanup(func() { gh = prevGH })
+	bodyPath := t.TempDir() + "/body.md"
+	if err := writeFile(bodyPath, body); err != nil {
+		t.Fatal(err)
+	}
+	return fake, runFile(fileOpts{Repo: "acme/gateway", Title: "gateway: fix the thing", BodyFile: bodyPath, Labels: labels})
+}
+
+// facet#165: the ### Complexity section used to stay prose. It now applies
+// the label, beside the ones the caller passed.
+func TestRunFileAppliesTheComplexityLabelFromTheBody(t *testing.T) {
+	fake, err := fileWithBody(t, "### What\n\nx\n\n### Complexity\n\n2\n", "area/api")
+	if err != nil {
+		t.Fatalf("runFile: %v", err)
+	}
+	if want := []string{"area/api", "complexity/2"}; !equalSlices(fake.createdWith, want) {
+		t.Errorf("labels = %v, want %v", fake.createdWith, want)
+	}
+}
+
+func TestRunFileKeepsAMatchingComplexityLabel(t *testing.T) {
+	fake, err := fileWithBody(t, "### Complexity\n\nc3\n", "complexity/3")
+	if err != nil {
+		t.Fatalf("runFile: %v", err)
+	}
+	if want := []string{"complexity/3"}; !equalSlices(fake.createdWith, want) {
+		t.Errorf("labels = %v, want %v", fake.createdWith, want)
+	}
+}
+
+func TestRunFileRefusesAComplexityThatDisagrees(t *testing.T) {
+	fake, err := fileWithBody(t, "### Complexity\n\n2\n", "complexity/4")
+	if err == nil {
+		t.Fatal("a body saying 2 and a label saying 4 were filed")
+	}
+	if fake.createdWith != nil {
+		t.Errorf("an issue was created despite the refusal: %v", fake.createdWith)
+	}
+}
+
+func TestRunFileRefusesAnUnreadableComplexity(t *testing.T) {
+	if _, err := fileWithBody(t, "### Complexity\n\nsmall\n"); err == nil {
+		t.Fatal("a ### Complexity section with no number was filed")
+	}
+}
+
+// No section, no label: complexity stays optional.
+func TestRunFileWithoutAComplexitySectionAddsNothing(t *testing.T) {
+	fake, err := fileWithBody(t, "### What\n\nx\n", "area/api")
+	if err != nil {
+		t.Fatalf("runFile: %v", err)
+	}
+	if want := []string{"area/api"}; !equalSlices(fake.createdWith, want) {
+		t.Errorf("labels = %v, want %v", fake.createdWith, want)
+	}
+}
+
+// A repository that does not define the label still gets its issue: gh would
+// refuse the whole create over an undefined label, and facet derived this one
+// on its own.
+func TestRunFileSkipsAComplexityLabelTheRepoDoesNotDefine(t *testing.T) {
+	fake, err := fileWithBodyIn(t, map[string][]ghx.RepoLabel{"acme/gateway": {{Name: "area/api"}}},
+		"### Complexity\n\n2\n", "area/api")
+	if err != nil {
+		t.Fatalf("runFile: %v", err)
+	}
+	if want := []string{"area/api"}; !equalSlices(fake.createdWith, want) {
+		t.Errorf("labels = %v, want %v", fake.createdWith, want)
+	}
 }
