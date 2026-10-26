@@ -184,7 +184,7 @@ func recordLevel(w io.Writer, gh treeGH, route *routing.Routing, child ghx.Issue
 	if cerr != nil {
 		return fmt.Errorf("%s IS WIRED, and its level is NOT recorded: applying %s failed (%v), "+
 			"and %s could not be created either: %w\n"+
-			"fix: facet tree labels --repo %s --create",
+			"fix: facet-graph tree labels --repo %s --create",
 			child, label, addErr, label, cerr, child.OwnerRepo())
 	}
 	if created {
@@ -337,7 +337,7 @@ func refuseByStructure(gh treeGH, route *routing.Routing, child ghx.IssueRef, ch
 	if !ok {
 		return fmt.Errorf("%s does not itself sit at any level this structure declares, "+
 			"so where %s belongs under it cannot be judged\n"+
-			"fix: run `facet tree doctor` on the tree above %s and correct it first",
+			"fix: run `facet-graph tree doctor` on the tree above %s and correct it first",
 			parent, child, parent)
 	}
 

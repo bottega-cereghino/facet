@@ -53,21 +53,15 @@ func main() {
 	root.AddCommand(newLsCmd(), newSyncCmd(), newRestoreCmd(), newSpawnCmd(),
 		newFileCmd(), newIssuesCmd(), newReapCmd(), newAttachCmd(),
 		newNewCmd(), newAddCmd(), newRmCmd(), newVersionCmd(), newPreflightCmd(),
-		newScopeCmd(), newDateCmd(), newTreeCmd(), newCommentCmd(), newDepsCmd())
+		newScopeCmd(), newDateCmd(), newCommentCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "facet:", err)
-		os.Exit(exitCodeFor(err))
+		os.Exit(1)
 	}
 }
 
 // loadRoots fills the package-level roots from the configuration.
-//
-// Named rather than inlined into the root command's pre-run because a command
-// that needs to report a CONFIGURATION failure differently -- `tree doctor`,
-// which must not answer "I found defects" when it never read anything -- has to
-// override that pre-run, and an override that re-implemented the loading could
-// drift from it.
 func loadRoots() error {
 	var err error
 	roots, err = config.Load()

@@ -32,7 +32,7 @@ func newDepsCmd() *cobra.Command {
 		Short: "Read and check issue dependencies",
 		Long: "GitHub's issue-dependency edges: what must land before a thing, and what\n" +
 			"cannot start until it does.\n\n" +
-			"This is a different graph from `facet tree`. A parent says what an issue\n" +
+			"This is a different graph from `facet-graph tree`. A parent says what an issue\n" +
 			"is part of; a blocker says what has to happen first. Neither substitutes\n" +
 			"for the other.",
 	}

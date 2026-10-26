@@ -70,7 +70,7 @@ func newTreeOrphansCmd() *cobra.Command {
 				// Nothing was read, so nothing is reported and nothing is
 				// ruled out -- the purest could-not-look there is.
 				return withCode(exitCantLook, fmt.Errorf(
-					"no repository named\nfix: facet tree orphans --repo owner/name"))
+					"no repository named\nfix: facet-graph tree orphans --repo owner/name"))
 			}
 			return runTreeOrphans(cmd.OutOrStdout(), gh, repos, asJSON)
 		},
@@ -134,7 +134,7 @@ func newTreeLabelsCmd() *cobra.Command {
 			if len(repos) == 0 {
 				return withCode(exitCantLook, fmt.Errorf(
 					"no repository to check: the routing file maps none, and none was named\n"+
-						"fix: facet tree labels --repo owner/name"))
+						"fix: facet-graph tree labels --repo owner/name"))
 			}
 			return runTreeLabels(cmd.OutOrStdout(), gh, route, repos, create)
 		},
@@ -164,7 +164,7 @@ func newTreeWireCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if parent == "" {
-				return fmt.Errorf("a parent is required\nfix: facet tree wire %s --parent owner/repo#123", args[0])
+				return fmt.Errorf("a parent is required\nfix: facet-graph tree wire %s --parent owner/repo#123", args[0])
 			}
 			child, err := parseIssueRef(args[0])
 			if err != nil {

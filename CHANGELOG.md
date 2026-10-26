@@ -8,6 +8,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **`tree` and `deps` moved out of `facet` into a separate, frozen binary,
+  `facet-graph`** (`go install …/cmd/facet-graph@latest`). Same commands, same
+  behaviour, run as `facet-graph tree …` and `facet-graph deps …`. It keeps
+  building and its tests keep running in CI, but it is not actively maintained.
+  `facet comment` and `facet file` stay in `facet`.
 - **The workspace core no longer consults the GitHub credential.** `new`,
   `add clone`, `add link`, `sync` and `restore` used to refuse on any
   credential `facet preflight` disliked, including the default `gho_` token
