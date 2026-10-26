@@ -20,6 +20,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`spawn` never calls a workspace ready while a clone is missing** (#170).
+  A clone that failed was a warning, and spawn still printed "Workspace ready",
+  moved the board and ran `--claude`/`--exec` on the partial set. Now a missing
+  home clone fails the spawn at once; any other missing clone ends it with
+  "Workspace INCOMPLETE", the clones it lacks, a non-zero exit, no launch and no
+  board move.
+
 - **A repo-shorthand blocker is a reference** (#104). In a "Blocked by /
   waiting on" section, `harness#121` was dropped silently: the guard that stops
   `PR#3` from reading as a reference rejected it too. Now a prefix that matches
