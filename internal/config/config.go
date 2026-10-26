@@ -91,7 +91,7 @@ func ResolveWorkspace(path string) (string, error) {
 // want the strict one: `facet sync` acting on a parent directory because the one
 // you named has no manifest would be a surprise with consequences.
 //
-// Walking up is what the seat files need. Work happens inside a workspace's repo
+// Walking up is what `facet scope` needs. Work happens inside a workspace's repo
 // subdirectory, so a command run from there must still find the workspace, and
 // the leaf of the working directory is not the answer -- it is the repository's
 // name, and two workspaces can hold repositories of the same name.

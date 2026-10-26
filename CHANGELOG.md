@@ -6,6 +6,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **Seat identity.** `facet spawn` no longer writes `.seat` or `.seat-issue`,
+  and no longer generates `.catalog.json` (which needed `argano`, and made
+  spawn exit non-zero when it was missing). `--seat` and `--seat-issue` are
+  still accepted, hidden and deprecated, with no effect. `.scope` stays:
+  `facet scope list/add/remove/set` work on it alone, finding the workspace by
+  its `.workspace.json`. `landing:` scope entries and the complexity-tier report
+  after `scope remove/set` are gone.
+- **`facet date`.**
+
 ### Changed
 
 - **`tree` and `deps` moved out of `facet` into a separate, frozen binary,

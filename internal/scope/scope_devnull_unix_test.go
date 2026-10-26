@@ -1,6 +1,6 @@
 //go:build unix
 
-package seat
+package scope
 
 import (
 	"os"

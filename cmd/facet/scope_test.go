@@ -2,20 +2,19 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
+	"github.com/RiccardoCereghino/facet/internal/config"
 	"github.com/RiccardoCereghino/facet/internal/manifest"
-	"github.com/RiccardoCereghino/facet/internal/seat"
+	"github.com/RiccardoCereghino/facet/internal/scope"
 )
 
 // workspaceWithRepo builds a workspace holding one repository subdirectory, and
 // returns both paths. It is the shape that matters here: the work is done in the
-// subdirectory, so every seat-file command has to find the workspace from there.
+// subdirectory, so every scope command has to find the workspace from there.
 func workspaceWithRepo(t *testing.T) (ws, repoDir string) {
 	t.Helper()
 	ws = t.TempDir()
@@ -30,9 +29,9 @@ func workspaceWithRepo(t *testing.T) (ws, repoDir string) {
 	return ws, repoDir
 }
 
-func TestScopeListReportsSeatAndScope(t *testing.T) {
+func TestScopeListReportsTheScope(t *testing.T) {
 	ws, _ := workspaceWithRepo(t)
-	if err := seat.Write(ws, "w-example-12", []seat.Ref{{Repo: "owner/repo", Number: 12}, {Repo: "acme/tools", Number: 7}}); err != nil {
+	if err := scope.Write(ws, []scope.Ref{{Repo: "owner/repo", Number: 12}, {Repo: "acme/tools", Number: 7}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -40,146 +39,26 @@ func TestScopeListReportsSeatAndScope(t *testing.T) {
 	if err := runScopeList(&buf, ws); err != nil {
 		t.Fatalf("runScopeList: %v", err)
 	}
-	for _, want := range []string{"w-example-12", "owner/repo#12", "acme/tools#7"} {
+	for _, want := range []string{"owner/repo#12", "acme/tools#7"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("scope list output does not mention %q:\n%s", want, buf.String())
 		}
-	}
-}
-
-// TestScopeAddAcceptsALandingEntry is facet#97: a workspace whose issues are
-// filed in one repo and whose PRs land in another can now record the landing
-// repo honestly, without inventing an issue it does not cover.
-func TestScopeAddAcceptsALandingEntry(t *testing.T) {
-	ws, _ := workspaceWithRepo(t)
-	if err := seat.Write(ws, "w-example-12", []seat.Ref{{Repo: "owner/repo", Number: 12}}); err != nil {
-		t.Fatal(err)
-	}
-
-	refs, err := seat.ParseRefs([]string{"landing:owner/other"})
-	if err != nil {
-		t.Fatalf("ParseRefs: %v", err)
-	}
-	added, err := seat.AppendScope(ws, refs)
-	if err != nil {
-		t.Fatalf("AppendScope: %v", err)
-	}
-	if len(added) != 1 || added[0].String() != "landing:owner/other" {
-		t.Fatalf("AppendScope reported %v as new, want [landing:owner/other]", added)
-	}
-
-	var buf bytes.Buffer
-	if err := runScopeList(&buf, ws); err != nil {
-		t.Fatalf("runScopeList: %v", err)
-	}
-	for _, want := range []string{"owner/repo#12", "landing:owner/other"} {
-		if !strings.Contains(buf.String(), want) {
-			t.Errorf("scope list output does not mention %q:\n%s", want, buf.String())
-		}
-	}
-
-	// Round-trip: read the file back and confirm the landing entry survives
-	// exactly, alongside the issue entry it was added beside.
-	got, err := seat.ReadScope(ws)
-	if err != nil {
-		t.Fatalf("ReadScope: %v", err)
-	}
-	if len(got) != 2 || got[0].String() != "owner/repo#12" || got[1].String() != "landing:owner/other" {
-		t.Errorf("ReadScope = %v, want [owner/repo#12 landing:owner/other]", got)
-	}
-}
-
-// scopeIssueFake scripts ViewIssue for reportResultingTier, keyed the same
-// way facet-graph keys its issues in its tree tests.
-type scopeIssueFake struct {
-	fakeGH
-	issues map[string]*ghx.Issue
-}
-
-func (f *scopeIssueFake) ViewIssue(repo string, number int) (*ghx.Issue, error) {
-	iss, ok := f.issues[fmt.Sprintf("%s#%d", repo, number)]
-	if !ok {
-		return nil, fmt.Errorf("scopeIssueFake: no issue scripted for %s#%d", repo, number)
-	}
-	return iss, nil
-}
-
-// facet#112 asked that a scope edit state the worst-case tier the way `tree
-// wire` states merge authority on every edge -- a scope edit that silently
-// changes what a re-seed would derive is the same defect class.
-func TestReportResultingTierPrintsTheWorstCase(t *testing.T) {
-	f := &scopeIssueFake{issues: map[string]*ghx.Issue{
-		"acme/a#1": issueWith("small", "complexity/1"),
-		"acme/b#2": issueWith("bigger", "complexity/3"),
-	}}
-	refs, err := seat.ParseRefs([]string{"acme/a#1", "acme/b#2"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	reportResultingTier(&buf, f, refs)
-	out := buf.String()
-	if !strings.Contains(out, "c3") {
-		t.Errorf("tier report does not name the worst case c3:\n%s", out)
-	}
-	if strings.Contains(out, "c1 (") {
-		t.Errorf("tier report named the WRONG entry's tier as the worst case:\n%s", out)
-	}
-}
-
-// An issue with no complexity label, or an unreadable one, must be named
-// rather than silently excluded from the worst case -- silence here would
-// make a scope edit's own report understate what it actually covers.
-func TestReportResultingTierNamesWhatItCouldNotJudge(t *testing.T) {
-	f := &scopeIssueFake{issues: map[string]*ghx.Issue{
-		"acme/a#1": issueWith("no label at all"),
-	}}
-	refs, err := seat.ParseRefs([]string{"acme/a#1", "acme/missing#9"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	reportResultingTier(&buf, f, refs)
-	out := buf.String()
-	if !strings.Contains(out, "acme/a#1") || !strings.Contains(out, "no complexity label") {
-		t.Errorf("did not name the unlabelled issue:\n%s", out)
-	}
-	if !strings.Contains(out, "acme/missing#9") {
-		t.Errorf("did not name the issue that could not be read:\n%s", out)
-	}
-}
-
-// A landing-only scope has no issue to judge a tier from at all -- it must
-// not print a misleading "tier: c0" or crash looking one up.
-func TestReportResultingTierSkipsLandingEntries(t *testing.T) {
-	f := &scopeIssueFake{issues: map[string]*ghx.Issue{}}
-	refs, err := seat.ParseRefs([]string{"landing:acme/a"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	reportResultingTier(&buf, f, refs)
-	if buf.Len() != 0 {
-		t.Errorf("a landing-only scope printed a tier report:\n%s", buf.String())
 	}
 }
 
 // TestScopeRemoveThenListReflectsIt is the cobra-adjacent round trip: add two,
-// remove one via seat.RemoveScope (what newScopeRemoveCmd's RunE calls), and
+// remove one via scope.RemoveScope (what newScopeRemoveCmd's RunE calls), and
 // confirm scope list -- the documented way to check a workspace's scope --
 // shows exactly what remains.
 func TestScopeRemoveThenListReflectsIt(t *testing.T) {
 	ws, _ := workspaceWithRepo(t)
-	if err := seat.Write(ws, "w-example-12", []seat.Ref{
+	if err := scope.Write(ws, []scope.Ref{
 		{Repo: "owner/repo", Number: 12}, {Repo: "acme/tools", Number: 7},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	removed, _, err := seat.RemoveScope(ws, []seat.Ref{{Repo: "acme/tools", Number: 7}})
+	removed, _, err := scope.RemoveScope(ws, []scope.Ref{{Repo: "acme/tools", Number: 7}})
 	if err != nil {
 		t.Fatalf("RemoveScope: %v", err)
 	}
@@ -211,104 +90,23 @@ func TestScopeListSaysSoWhenNothingIsRecorded(t *testing.T) {
 		t.Fatalf("runScopeList: %v", err)
 	}
 	out := buf.String()
-	// Named rather than counted. A bare count told you the number was wrong and
-	// not which field had gone quiet, and it had to be edited anyway the moment
-	// .seat-issue joined the family — so it may as well say what it wants.
-	for _, field := range []string{seat.NameFile, seat.SeatIssueFile, seat.ScopeFile} {
-		if !strings.Contains(out, "none recorded in "+field) {
-			t.Errorf("%s is not reported as none recorded; a field that vanishes when unset "+
-				"cannot be told from one nobody thought to print. got:\n%s", field, out)
-		}
+	if !strings.Contains(out, "none recorded in "+scope.ScopeFile) {
+		t.Errorf("an absent scope is not reported as none recorded:\n%s", out)
 	}
 }
 
-// facet#68, the exact measured scenario: a seat's .seat/.scope were seeded
-// INSIDE its clone (the standing remedy for gad#73), not at the workspace
-// root. resolveScopeDir must land on the clone's own .seat -- matching gad's
-// walk -- rather than the workspace root's .workspace.json, which is what
-// `config.FindWorkspace` alone would find and what silently widened the
-// wrong file before this fix.
-func TestResolveScopeDirPrefersACloneSeededSeatOverTheWorkspaceRoot(t *testing.T) {
+// The work happens inside a clone, so the scope commands find the workspace by
+// walking up from there, to the nearest .workspace.json.
+func TestScopeFindsTheWorkspaceFromInsideAClone(t *testing.T) {
 	ws, repoDir := workspaceWithRepo(t)
-	// A DIFFERENT seat's identity sits at the workspace root -- the
-	// foreman's, in facet#68's own measured shape.
-	if err := seat.Write(ws, "w-m8-wave", []seat.Ref{{Repo: "acme/stele", Number: 90}}); err != nil {
+	if err := scope.Write(ws, []scope.Ref{{Repo: "owner/repo", Number: 12}}); err != nil {
 		t.Fatal(err)
 	}
-	// THIS seat's identity is seeded inside the clone it actually works in.
-	if err := seat.Write(repoDir, "w-stele-86", []seat.Ref{{Repo: "acme/stele", Number: 86}}); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := resolveScopeDir(repoDir)
+	got, err := config.FindWorkspace(repoDir)
 	if err != nil {
-		t.Fatalf("resolveScopeDir: %v", err)
-	}
-	if got != repoDir {
-		t.Fatalf("resolveScopeDir(%s) = %s, want the clone-seeded dir %s -- it found the wrong seat's .scope",
-			repoDir, got, repoDir)
-	}
-
-	// scope list from inside the clone must report the CLONE's seat, not the
-	// workspace root's -- this was facet#68's "list names the wrong seat".
-	var buf bytes.Buffer
-	if err := runScopeList(&buf, got); err != nil {
-		t.Fatalf("runScopeList: %v", err)
-	}
-	out := buf.String()
-	if !strings.Contains(out, "w-stele-86") {
-		t.Errorf("scope list did not report the clone-seeded seat:\n%s", out)
-	}
-	if strings.Contains(out, "w-m8-wave") {
-		t.Errorf("scope list reported the WRONG (workspace-root) seat:\n%s", out)
-	}
-
-	// scope add from inside the clone must widen the CLONE's .scope -- this
-	// was facet#68's "add writes the wrong file", reporting success while
-	// the file gad reads stayed unchanged.
-	added, err := seat.AppendScope(got, []seat.Ref{{Repo: "acme/stele", Number: 95}})
-	if err != nil {
-		t.Fatalf("AppendScope: %v", err)
-	}
-	if len(added) != 1 {
-		t.Fatalf("AppendScope reported %v, want one new entry", added)
-	}
-	cloneScope, err := seat.ReadScope(repoDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cloneScope) != 2 {
-		t.Errorf("the clone's own .scope = %v, want 2 entries (the widening landed on the wrong file)", cloneScope)
-	}
-	rootScope, err := seat.ReadScope(ws)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rootScope) != 1 {
-		t.Errorf("the workspace root's .scope = %v, want it UNCHANGED at 1 entry", rootScope)
-	}
-}
-
-// A workspace with no .seat anywhere in its ancestry -- the ordinary
-// facet-new case, and every workspace before .seat/.scope existed -- must
-// still resolve to the workspace root exactly as before this fix. This is
-// the regression guard for the fallback half of resolveScopeDir.
-func TestResolveScopeDirFallsBackToWorkspaceRootWithNoSeatAnywhere(t *testing.T) {
-	ws, repoDir := workspaceWithRepo(t)
-
-	got, err := resolveScopeDir(repoDir)
-	if err != nil {
-		t.Fatalf("resolveScopeDir: %v", err)
+		t.Fatalf("FindWorkspace: %v", err)
 	}
 	if got != ws {
-		t.Errorf("resolveScopeDir(%s) = %s, want the workspace root %s", repoDir, got, ws)
+		t.Errorf("FindWorkspace(%s) = %s, want %s", repoDir, got, ws)
 	}
-}
-
-func issueWith(title string, labels ...string) *ghx.Issue {
-	ls := make([]ghx.Label, 0, len(labels))
-	for _, l := range labels {
-		ls = append(ls, ghx.Label{Name: l})
-	}
-	return &ghx.Issue{Title: title, State: "OPEN", Labels: ls}
 }

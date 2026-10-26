@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/RiccardoCereghino/facet/internal/ghx"
-	"github.com/RiccardoCereghino/facet/internal/seat"
+	"github.com/RiccardoCereghino/facet/internal/scope"
 )
 
 // newTreeCmd groups the commands that read and write GitHub's sub-issue graph.
@@ -327,12 +327,12 @@ func tagCantLook(cmd *cobra.Command, args cobra.PositionalArgs) {
 
 // parseIssueRef reads "owner/repo#n".
 //
-// The validation is seat.ParseRef's, reused rather than written again so the
+// The validation is scope.ParseRef's, reused rather than written again so the
 // two cannot drift on what a well-formed reference is. Only the sentence is
 // this command's own: that function's wording names a scope file, which would
 // send someone reading a `tree` refusal to look at entirely the wrong thing.
 func parseIssueRef(s string) (ghx.IssueRef, error) {
-	r, err := seat.ParseRef(s)
+	r, err := scope.ParseRef(s)
 	if err != nil {
 		return ghx.IssueRef{}, fmt.Errorf("%q is not an issue reference\nfix: write it as owner/repo#123", s)
 	}
