@@ -4,29 +4,24 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/RiccardoCereghino/facet/internal/mux"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
 func newSpawnCmd() *cobra.Command {
 	var (
-		repo       string
-		clones     []string
-		addClones  []string
-		rmClones   []string
-		scope      []string
-		slug       string
-		base       string
-		yes        bool
-		noBranch   bool
-		dryRun     bool
-		attach     bool
-		noAttach   bool
-		ownSession bool
-		muxName    string
-		writeback  bool
-		agent      agentFlags
+		repo      string
+		clones    []string
+		addClones []string
+		rmClones  []string
+		scope     []string
+		slug      string
+		base      string
+		yes       bool
+		noBranch  bool
+		dryRun    bool
+		writeback bool
+		launchF   launchFlags
 	)
 	cmd := &cobra.Command{
 		Use:   "spawn <issue-number>",
@@ -40,21 +35,25 @@ func newSpawnCmd() *cobra.Command {
 			"Labels alone cannot decide the repo set: the same topic label is used in\n" +
 			"several repos, and a cross-repo dependency lives in the issue body. So the\n" +
 			"inference is always shown and never silently trusted.\n\n" +
-			"It sets the workspace up and stops there, spawning no shell: it just prints\n" +
-			"where to work. Opening a multiplexer and starting the agent are yours --\n" +
-			"pass --attach to have facet open it (tmux or Windows Terminal).",
+			"It sets the workspace up and stops there: it prints where to work and runs\n" +
+			"nothing. To start something there, in this terminal, pass --claude (with\n" +
+			"Remote Control when routing's spawn.rc says so, or --remote) or --exec\n" +
+			"<command>, for example --exec 'code .' or --exec 'tmux new-window -c \"$PWD\"'.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			number, err := strconv.Atoi(args[0])
 			if err != nil {
 				return fmt.Errorf("issue number: %w", err)
 			}
+			l, err := launchF.resolve(cmd.Flags())
+			if err != nil {
+				return err
+			}
 			return runSpawn(spawnOpts{
 				Number: number, Repo: repo, Clones: clones, Add: addClones, Remove: rmClones,
 				Scope: scope,
 				Slug:  slug, Base: base, Yes: yes, NoBranch: noBranch, DryRun: dryRun,
-				Attach: attach, NoAttach: noAttach, OwnSession: ownSession, Mux: muxName,
-				Writeback: writeback, Agent: agent.resolve(cmd),
+				Writeback: writeback, Launch: l,
 			})
 		},
 	}
@@ -70,24 +69,12 @@ func newSpawnCmd() *cobra.Command {
 	f.BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	f.BoolVar(&noBranch, "no-branch", false, "do not create or check out an issue branch")
 	f.BoolVar(&dryRun, "dry-run", false, "show the inference and exit, creating nothing")
-	f.BoolVar(&attach, "attach", false, "open the workspace in a multiplexer after setup (default: spawn nothing, just print where to work)")
-	f.BoolVar(&noAttach, "no-attach", false, "no-op; not opening is now the default")
-	f.BoolVar(&ownSession, "session", false, "with --attach, open in a session of its own rather than as a window")
-	f.StringVar(&muxName, "mux", "", "multiplexer to use: tmux, wt, or none")
 	f.BoolVar(&writeback, "writeback", false,
 		"record the confirmed repo set in the issue body (default: off -- a wrong "+
 			"inference would otherwise write to someone else's issue, facet#69)")
 	deprecateUnsoundFlag(f)
-	agent.register(cmd)
+	launchF.register(f)
 	return cmd
-}
-
-// muxFor resolves a launcher by name, or picks the best available.
-func muxFor(name string) mux.Launcher {
-	if name != "" {
-		return mux.ByName(name)
-	}
-	return mux.Pick()
 }
 
 type spawnOpts struct {
@@ -96,19 +83,17 @@ type spawnOpts struct {
 	Clones, Add, Remove []string
 	// Scope lists further issues the workspace covers beyond the one being
 	// spawned for.
-	Scope                        []string
-	Slug, Base                   string
-	Yes, NoBranch, DryRun        bool
-	Attach, NoAttach, OwnSession bool
-	Mux                          string
+	Scope                 []string
+	Slug, Base            string
+	Yes, NoBranch, DryRun bool
 	// Writeback records the confirmed repo set in the issue body when true.
 	// Default is false (facet#69): a wrong inference used to write to
 	// someone else's issue silently, on by default. Leaving it off means the
 	// confirmed set is simply re-inferred on every spawn, which is cheap.
 	Writeback bool
-	// Agent is what to run for the operator once the workspace is ready: in the
-	// pane when --attach opened one, in this terminal otherwise.
-	Agent agentChoice
+	// Launch is what to run in the home clone once the workspace is ready.
+	// The zero value runs nothing.
+	Launch launch
 }
 
 func issueBranchName(number int, slug string) string {

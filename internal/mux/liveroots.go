@@ -65,8 +65,7 @@ func tmuxPanesUnder(dir, socket string) []string {
 // and pid, every process whose current working directory (lsof's "cwd" file
 // descriptor) is rooted inside dir. It is the fallback for a live process that
 // tmux does not know about at all -- one started outside any pane -- and the
-// only probe available on a host with no tmux. It naturally does nothing on
-// native Windows, where lsof is not on PATH.
+// only probe available on a host with no tmux.
 func lsofProcessesUnder(dir string) []string {
 	if _, err := exec.LookPath("lsof"); err != nil {
 		return nil

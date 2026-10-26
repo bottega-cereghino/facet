@@ -655,36 +655,3 @@ func TestSpawnRC(t *testing.T) {
 		})
 	}
 }
-
-func TestResolveRCLogic(t *testing.T) {
-	// Mirror of resolveRC's precedence, kept here so the routing default and the
-	// flag overrides are exercised together: --no-rc beats --rc beats config.
-	rcOn := &Routing{Spawn: &Spawn{RC: true}}
-	rcOff := &Routing{}
-	type tc struct {
-		rc, noRC bool
-		route    *Routing
-		want     bool
-	}
-	resolve := func(c tc) bool {
-		if c.noRC {
-			return false
-		}
-		if c.rc {
-			return true
-		}
-		return c.route.SpawnRC()
-	}
-	cases := map[string]tc{
-		"config on, no flags":    {false, false, rcOn, true},
-		"config off, no flags":   {false, false, rcOff, false},
-		"flag --rc over off":     {true, false, rcOff, true},
-		"flag --no-rc over on":   {false, true, rcOn, false},
-		"both flags, no-rc wins": {true, true, rcOn, false},
-	}
-	for name, c := range cases {
-		if got := resolve(c); got != c.want {
-			t.Errorf("%s: got %v, want %v", name, got, c.want)
-		}
-	}
-}

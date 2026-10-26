@@ -51,7 +51,7 @@ func main() {
 	}
 	root.SetVersionTemplate("facet {{.Version}}\n")
 	root.AddCommand(newLsCmd(), newSyncCmd(), newRestoreCmd(), newSpawnCmd(),
-		newFileCmd(), newIssuesCmd(), newReapCmd(), newAttachCmd(),
+		newFileCmd(), newIssuesCmd(), newReapCmd(),
 		newNewCmd(), newAddCmd(), newRmCmd(), newVersionCmd(), newPreflightCmd(),
 		newScopeCmd(), newCommentCmd())
 

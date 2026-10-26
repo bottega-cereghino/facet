@@ -69,21 +69,20 @@ func (r *Routing) Target() (t ghx.ProjectTarget, ok bool) {
 }
 
 // Spawn holds defaults for `facet spawn` that belong to the setup, not the
-// binary. Optional: without it, spawn behaves as it always has (scaffold and
-// stop).
+// binary. Optional. Nothing here makes spawn launch anything: it scaffolds and
+// stops unless --claude or --exec is given.
 type Spawn struct {
-	// RC makes spawn launch `claude` with Remote Control enabled once the
-	// workspace is ready. Remote Control rides Anthropic's relay over outbound
-	// HTTPS, so an agent session survives a tailnet/tailscaled failure, which is
-	// why it is worth having on by default. The --rc/--no-rc flags override this
-	// per invocation.
+	// RC gives the claude that `spawn --claude` starts Remote Control, unless
+	// --remote says otherwise. Remote Control rides Anthropic's relay over
+	// outbound HTTPS, so an agent session survives a tailnet/tailscaled failure.
 	RC bool `json:"rc,omitempty"`
 	// SessionNamePrefix, when set, is exported as
 	// CLAUDE_REMOTE_CONTROL_SESSION_NAME_PREFIX so RC sessions are named per host.
 	SessionNamePrefix string `json:"sessionNamePrefix,omitempty"`
 }
 
-// SpawnRC reports whether spawn should launch an RC session by default. Safe on
+// SpawnRC reports whether `spawn --claude` gives claude Remote Control when
+// --remote is not given. It never makes spawn launch anything by itself. Safe on
 // a nil receiver or a routing file with no spawn block.
 func (r *Routing) SpawnRC() bool {
 	return r != nil && r.Spawn != nil && r.Spawn.RC
@@ -104,7 +103,7 @@ type Routing struct {
 	Repos   map[string]Repo `json:"repos"`
 	// Project is the board `facet spawn` moves an issue on. Optional.
 	Project *Project `json:"project,omitempty"`
-	// Spawn holds `facet spawn` defaults (e.g. Remote Control). Optional.
+	// Spawn holds `facet spawn --claude` defaults (Remote Control). Optional.
 	Spawn *Spawn `json:"spawn,omitempty"`
 	// Conventions are the rules `facet file` enforces. Optional.
 	Conventions *Conventions `json:"conventions,omitempty"`
