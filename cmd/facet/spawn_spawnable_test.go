@@ -71,7 +71,7 @@ func TestSpawnRefusesSpawnableFalse(t *testing.T) {
 	t.Cleanup(func() { gh = prevGH })
 
 	err := runSpawn(spawnOpts{
-		Repo: "acme/lab-workspaces", Number: 1, Seat: "w-example-1",
+		Repo: "acme/lab-workspaces", Number: 1,
 	})
 	if err == nil {
 		t.Fatal("spawn accepted a repo marked spawnable:false")
@@ -117,7 +117,7 @@ func TestSpawnStillReachesTheForgeForASpawnableRepo(t *testing.T) {
 	// --dry-run) and will fail for reasons unrelated to spawnable:false --
 	// that is expected and not what this test checks.
 	_ = runSpawn(spawnOpts{
-		Repo: "acme/gateway", Number: 1, Seat: "w-example-1", DryRun: true,
+		Repo: "acme/gateway", Number: 1, DryRun: true,
 	})
 	if !reached {
 		t.Error("spawn never reached ViewIssue for a repo with no spawnable:false marker")

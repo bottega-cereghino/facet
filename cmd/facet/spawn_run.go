@@ -23,47 +23,24 @@ import (
 	"github.com/RiccardoCereghino/facet/internal/mux"
 	"github.com/RiccardoCereghino/facet/internal/render"
 	"github.com/RiccardoCereghino/facet/internal/routing"
-	"github.com/RiccardoCereghino/facet/internal/seat"
+	"github.com/RiccardoCereghino/facet/internal/scope"
 	"github.com/RiccardoCereghino/facet/internal/workspace"
 )
 
 func runSpawn(o spawnOpts) error {
-	// catalogFailed carries a non-fatal failure to the end of the function, so
-	// the exit code can be non-zero without abandoning a workspace that is
-	// otherwise complete.
-	var catalogFailed string
 	if o.Repo == "" {
 		return fmt.Errorf("--repo is required (owner/name): more than one repo may host issues, and gh's notion of the current repo is not it")
 	}
-	// The seat and its scope are checked before anything else -- before the
-	// credential gate, before routing, before the issue is looked up. They cost
-	// nothing to check and a mistyped seat name should not be discovered after a
-	// branch has been created on the forge. There is deliberately no derived
-	// default: a name nobody chose is a name nobody can be held to.
-	if err := seat.ValidateName(o.Seat); err != nil {
-		return fmt.Errorf("--seat: %w", err)
-	}
-	extraScope, err := seat.ParseRefs(o.Scope)
+	// The scope is checked before anything else -- before routing, before the
+	// issue is looked up -- so a malformed --scope refuses before a branch is
+	// created on the forge.
+	extraScope, err := scope.ParseRefs(o.Scope)
 	if err != nil {
 		return fmt.Errorf("--scope: %w", err)
 	}
 	// The issue being spawned for always leads, whether or not --scope repeats it.
-	scopeRefs := seat.Dedupe(append([]seat.Ref{{Repo: o.Repo, Number: o.Number}}, extraScope...))
+	scopeRefs := scope.Dedupe(append([]scope.Ref{{Repo: o.Repo, Number: o.Number}}, extraScope...))
 
-	// Parsed here, beside --scope, so a malformed ref refuses before anything is
-	// created rather than after the clones are on disk. It is deliberately NOT
-	// added to scopeRefs: the seat issue is a different thing from the work this
-	// workspace covers, and folding it in would make `.scope` claim the seat
-	// record as work — which is exactly the conflation the third file exists to
-	// avoid.
-	var seatIssueRef seat.Ref
-	haveSeatIssue := o.SeatIssue != ""
-	if haveSeatIssue {
-		seatIssueRef, err = seat.ParseRef(o.SeatIssue)
-		if err != nil {
-			return fmt.Errorf("--seat-issue: %w", err)
-		}
-	}
 	// Before routing and before the issue lookup, so a credential problem is
 	// named up front. It warns rather than refuses; a credential that cannot
 	// reach GitHub at all fails at the issue lookup, before anything is created.
@@ -76,7 +53,7 @@ func runSpawn(o spawnOpts) error {
 	if homeKey == "" {
 		return fmt.Errorf("%s is not in %s's ownerRepoToKey", o.Repo, roots.Routing)
 	}
-	// Checked before the issue lookup, same as the seat and scope checks above:
+	// Checked before the issue lookup, same as the scope check above:
 	// a repo marked spawnable:false (the workspaces root itself, cloned into
 	// itself, is the case this exists for) should never reach the forge on the
 	// way to a refusal.
@@ -120,7 +97,7 @@ func runSpawn(o spawnOpts) error {
 	fragNames := route.Fragments(iss.LabelNames())
 	frags, fragErrs := knowledge.LoadAll(roots.Knowledge, fragNames)
 
-	printPlan(ws, o.Repo, iss, sel, hints, route, branch, o.Seat, scopeRefs, o.SeatIssue, frags, fragErrs)
+	printPlan(ws, o.Repo, iss, sel, hints, route, branch, scopeRefs, frags, fragErrs)
 
 	if o.DryRun {
 		fmt.Println("\n--dry-run: nothing was created.")
@@ -174,42 +151,12 @@ func runSpawn(o spawnOpts) error {
 
 	rep := workspace.Reporter{W: os.Stdout}
 
-	// Identity is written as soon as the directory exists and before anything is
-	// cloned into it, so a spawn that fails partway still leaves a workspace that
-	// says whose it is. Unlike the board move and the issue write-back further
-	// down, a failure here is fatal: those depend on a network and a token, this
-	// is a handful of bytes to a directory just created, and a workspace with no
-	// recorded owner is the state this exists to prevent.
-	if err := seat.Write(ws, o.Seat, scopeRefs); err != nil {
+	// The scope is written as soon as the directory exists and before anything
+	// is cloned into it, so a spawn that fails partway still says what it was for.
+	if err := scope.Write(ws, scopeRefs); err != nil {
 		return err
 	}
-	rep.Created("%s: %s", seat.NameFile, o.Seat)
-	rep.Created("%s: %s", seat.ScopeFile, seat.Join(scopeRefs))
-	// Reported, never silent. facet#65 was exactly this defect for the first two
-	// files — the one action with no line in the output — and it is closed; a
-	// third silent write would reopen it under a new name.
-	if haveSeatIssue {
-		if err := seat.WriteSeatIssue(ws, seatIssueRef); err != nil {
-			return err
-		}
-		rep.Created("%s: %s", seat.SeatIssueFile, seatIssueRef)
-	}
-	// The command catalog, so every seat has the whole tool surface at spawn
-	// for zero sessions and zero turns (facet#118). Written AFTER identity and
-	// before the clones: it needs nothing from them, and a slow probe should
-	// not sit between a workspace being created and it saying whose it is.
-	catRes, err := seat.WriteCatalog(ws, arganoBin())
-	if err != nil {
-		return err
-	}
-	if catRes.OK {
-		rep.Created("%s: the command catalog", seat.CatalogFile)
-	} else {
-		// Named, not silent, and the exit is non-zero at the end. A spawn that
-		// half-worked must not read as one that worked.
-		rep.Created("%s: GENERATION FAILED -- %s", seat.CatalogFile, catRes.Detail)
-		catalogFailed = catRes.Detail
-	}
+	rep.Created("%s: %s", scope.ScopeFile, scope.Join(scopeRefs))
 
 	if err := workspace.Sync(roots, ws, git, rep, workspace.SyncOptions{Source: sourceFor(true, rep)}); err != nil {
 		return err
@@ -307,33 +254,7 @@ func runSpawn(o spawnOpts) error {
 		}
 	}
 
-	// The workspace is complete and usable, and one thing in it is not what it
-	// claims to be. Non-zero LAST rather than early, so the spawn is not
-	// abandoned over a probe -- but non-zero, because a seat reading a catalog
-	// that says "generation failed" should have been told at spawn time, not
-	// discovered it later.
-	if catalogFailed != "" {
-		return fmt.Errorf("the workspace is ready, but %s says it could not be generated: %s\n"+
-			"fix: install argano and regenerate it: argano catalog --json > %s",
-			seat.CatalogFile, catalogFailed, filepath.Join(ws, seat.CatalogFile))
-	}
 	return nil
-}
-
-// arganoBin is where the catalog generator lives.
-//
-// $ARGANO_BIN first so a test, or a machine that installs elsewhere, can point
-// at its own. facet does NOT refuse when argano is absent: the catalog is a
-// convenience for the seat, and a spawn is the thing being asked for.
-func arganoBin() string {
-	if v := os.Getenv("ARGANO_BIN"); v != "" {
-		return v
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, "go", "bin", "argano")
 }
 
 // resolveLaunch decides whether to start claude in this terminal. A named flag
@@ -364,10 +285,8 @@ func checkoutIssueBranch(dir, branch string) error {
 //
 // Two spellings are accepted, deliberately: a bare routing key, and
 // `key=url`. The second is what `facet new`/`facet edit` have always meant by
-// --clone (dir=giturl), and it is the only form the harness emits --
-// stele-home's lib/identity.sh passes `--clone <short-name>=git@github.com:…`,
-// one per repo the seat's scope names. Every routing key today IS the short
-// repo name, so the two grammars pick out the same repo.
+// --clone (dir=giturl). Every routing key today IS the short repo name, so
+// the two grammars pick out the same repo.
 //
 // THE URL IS CHECKED RATHER THAN IGNORED. It cannot be honoured as an override:
 // a selection resolves its directory, extra remotes and LFS flag out of
@@ -529,7 +448,7 @@ func applyOverrides(sel []routing.Selection, route *routing.Routing, homeKey str
 }
 
 func printPlan(ws, repo string, iss *ghx.Issue, sel []routing.Selection, hints []routing.Hint,
-	route *routing.Routing, branch, seatName string, scope []seat.Ref, seatIssue string,
+	route *routing.Routing, branch string, refs []scope.Ref,
 	frags []knowledge.Fragment, fragErrs []error) {
 
 	fmt.Printf("%s#%d  %s\n", repo, iss.Number, iss.Title)
@@ -543,16 +462,7 @@ func printPlan(ws, repo string, iss *ghx.Issue, sel []routing.Selection, hints [
 	} else {
 		fmt.Printf("branch:    none (--no-branch)\n")
 	}
-	fmt.Printf("seat:      %s\n", seatName)
-	fmt.Printf("scope:     %s\n", seat.Join(scope))
-	// Shown in the plan as well as reported at write time, so --dry-run
-	// confirms it before anything is created. A field that only appears when
-	// set reads as one nobody thought to print.
-	if seatIssue != "" {
-		fmt.Printf("seat issue: %s\n", seatIssue)
-	} else {
-		fmt.Printf("seat issue: (none)\n")
-	}
+	fmt.Printf("scope:     %s\n", scope.Join(refs))
 	if t, ok := route.Target(); ok {
 		fmt.Printf("board:     %s/%d, %s = %s\n", t.Owner, t.Number, t.Field, t.Option)
 	}

@@ -257,7 +257,7 @@ func TestSpawnRefusesAnUnresolvableCloneThroughRunSpawn(t *testing.T) {
 	// --dry-run: the refusal must come from the override, not from the
 	// workspace creation that would follow it.
 	err := runSpawn(spawnOpts{
-		Repo: "acme/gateway", Number: 1, Seat: "w-example-1", DryRun: true,
+		Repo: "acme/gateway", Number: 1, DryRun: true,
 		Clones: []string{"gateway=https://example.invalid/gateway.git", "nosuchrepo"},
 	})
 	if err == nil {
@@ -280,7 +280,7 @@ func TestSpawnAcceptsAKeyURLCloneThroughRunSpawn(t *testing.T) {
 	t.Cleanup(func() { gh = prevGH })
 
 	err := runSpawn(spawnOpts{
-		Repo: "acme/gateway", Number: 1, Seat: "w-example-1", DryRun: true,
+		Repo: "acme/gateway", Number: 1, DryRun: true,
 		Clones: []string{"gateway=https://example.invalid/gateway.git"},
 	})
 	if err != nil {

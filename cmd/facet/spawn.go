@@ -6,6 +6,7 @@ import (
 
 	"github.com/RiccardoCereghino/facet/internal/mux"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func newSpawnCmd() *cobra.Command {
@@ -14,9 +15,7 @@ func newSpawnCmd() *cobra.Command {
 		clones     []string
 		addClones  []string
 		rmClones   []string
-		seatName   string
 		scope      []string
-		seatIssue  string
 		slug       string
 		base       string
 		yes        bool
@@ -36,14 +35,8 @@ func newSpawnCmd() *cobra.Command {
 			"waits. On confirmation it creates an issue-linked branch, clones each repo\n" +
 			"from the local mirror, and writes a CLAUDE.md carrying the issue body and the\n" +
 			"durable hazards recorded for its areas.\n\n" +
-			"It also records who the workspace belongs to. --seat is required and names\n" +
-			"the seat; the name goes in .seat, and the issues the workspace covers go in\n" +
-			".scope, one per line. --seat-issue is optional and names the issue that\n" +
-			"describes the SEAT rather than the work -- its workload, order, orchestration\n" +
-			"notes and escalation channel -- written to .seat-issue. All three are written\n" +
-			"here rather than by whatever works in the workspace afterwards, because an\n" +
-			"identity a thing asserts about itself is not evidence of anything. None of\n" +
-			"them is versioned: they are session state.\n\n" +
+			"It records the issues the workspace covers in .scope, one per line: the\n" +
+			"spawned issue first, then any --scope. `facet scope` reads and amends it.\n\n" +
 			"Labels alone cannot decide the repo set: the same topic label is used in\n" +
 			"several repos, and a cross-repo dependency lives in the issue body. So the\n" +
 			"inference is always shown and never silently trusted.\n\n" +
@@ -58,8 +51,8 @@ func newSpawnCmd() *cobra.Command {
 			}
 			return runSpawn(spawnOpts{
 				Number: number, Repo: repo, Clones: clones, Add: addClones, Remove: rmClones,
-				Seat: seatName, Scope: scope, SeatIssue: seatIssue,
-				Slug: slug, Base: base, Yes: yes, NoBranch: noBranch, DryRun: dryRun,
+				Scope: scope,
+				Slug:  slug, Base: base, Yes: yes, NoBranch: noBranch, DryRun: dryRun,
 				Attach: attach, NoAttach: noAttach, OwnSession: ownSession, Mux: muxName,
 				Writeback: writeback, Agent: agent.resolve(cmd),
 			})
@@ -70,9 +63,8 @@ func newSpawnCmd() *cobra.Command {
 	f.StringSliceVar(&clones, "clone", nil, "replace the inferred repo set entirely: a routing key, or key=url; repeatable. An unrecognised value refuses")
 	f.StringSliceVar(&addClones, "add", nil, "add repos to the inferred set: a routing key, or key=url; repeatable. An unrecognised value refuses")
 	f.StringSliceVar(&rmClones, "rm", nil, "drop repos from the inferred set: a routing key, or key=url; repeatable. An unrecognised value refuses")
-	f.StringVar(&seatName, "seat", "", "name of the seat this workspace belongs to, written to .seat (required)")
 	f.StringSliceVar(&scope, "scope", nil, "another issue this workspace covers, as owner/repo#n; repeatable. The spawned issue is always included")
-	f.StringVar(&seatIssue, "seat-issue", "", "the issue that describes this SEAT — its workload, order, orchestration notes and escalation channel — as owner/repo#n, written to .seat-issue")
+	deprecateSeatFlags(f)
 	f.StringVar(&slug, "slug", "", "override the slug derived from the issue title")
 	f.StringVar(&base, "base", "main", "base branch for the issue branch")
 	f.BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
@@ -102,12 +94,9 @@ type spawnOpts struct {
 	Number              int
 	Repo                string
 	Clones, Add, Remove []string
-	// Seat names the seat the workspace belongs to; Scope lists further issues
-	// it covers beyond the one being spawned for. Both are recorded on disk by
-	// the spawner, never by whatever works in the workspace afterwards.
-	Seat                         string
+	// Scope lists further issues the workspace covers beyond the one being
+	// spawned for.
 	Scope                        []string
-	SeatIssue                    string
 	Slug, Base                   string
 	Yes, NoBranch, DryRun        bool
 	Attach, NoAttach, OwnSession bool
@@ -124,4 +113,13 @@ type spawnOpts struct {
 
 func issueBranchName(number int, slug string) string {
 	return fmt.Sprintf("feature/%d-%s", number, slug)
+}
+
+// deprecateSeatFlags keeps spawn's --seat and --seat-issue accepted, and
+// hidden, now that facet no longer records who a workspace belongs to.
+func deprecateSeatFlags(f *pflag.FlagSet) {
+	f.String("seat", "", "no effect: .seat is no longer written")
+	f.String("seat-issue", "", "no effect: .seat-issue is no longer written")
+	_ = f.MarkDeprecated("seat", ".seat is no longer written; the flag has no effect")
+	_ = f.MarkDeprecated("seat-issue", ".seat-issue is no longer written; the flag has no effect")
 }

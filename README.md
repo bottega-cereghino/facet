@@ -79,7 +79,7 @@ here and became mainstays — inferring an issue's repositories, and generating 
 `CLAUDE.md` that hands an agent everything it needs to start.
 
 ```sh
-facet spawn 67 --repo acme/platform --seat w-platform-67
+facet spawn 67 --repo acme/platform
 ```
 
 `spawn` reads the issue, works out which repositories it needs, **prints why each
@@ -88,46 +88,19 @@ one was chosen, and waits.** On confirmation it creates an issue-linked branch
 body and the durable hazards recorded for its `area/*` labels. Then it stops and
 tells you where to work — opening an editor or starting an agent is yours.
 
-### Who the workspace belongs to
+### The issues a workspace covers
 
-`--seat` is required, and names whoever the workspace is being created for. It
-goes in `.seat` at the workspace root, one line. The issues the workspace
-legitimately covers go in `.scope`, one `owner/repo#n` per line — the spawned
-issue always, plus any `--scope owner/repo#n` you pass, because one worker
-regularly carries a coherent group of issues rather than exactly one.
+The issues a workspace covers go in `.scope`, one `owner/repo#n` per line: the
+spawned issue always, plus any `--scope owner/repo#n` you pass, because one task
+regularly carries a small group of issues rather than exactly one. It is not
+versioned, and `facet sync` never touches it.
 
-`--seat-issue owner/repo#n` is optional and names the issue that describes the
-**seat** rather than the work — its workload and order, its per-issue tiers, the
-orchestration notes, and the channel it escalates on. It goes in `.seat-issue`,
-one line. A workspace without one is ordinary: every workspace created before the
-file existed has none, and so does one an operator drives directly.
-
-All three are written here rather than by whatever works in the workspace
-afterwards, and none is versioned — they are session state.
-
-Both are written **here**, by the thing creating the workspace, and never by
-whatever works in it afterwards. That is the entire point: an identity a thing
-asserts about itself is not evidence of anything, so attribution has to be
-derived from something the subject did not write. Be clear about the ceiling —
-this defeats accidents (a stale environment variable, a typo, a command pasted
-from another workspace) and it does not defeat deliberate tampering, because the
-agent runs as the same user and can rewrite the file. The step up is a per-seat
-credential, which composes with this rather than replacing it: the file becomes
-the claim, and the credential becomes the proof.
-
-Neither file is versioned — they are session state, not recipe — and **`facet
-sync` never touches either one**, on a workspace that already exists. They are
-facts about the moment of creation, and a workspace that confidently reports the
-wrong owner is worse than one that reports none.
-
-`facet scope list` prints both, found by walking **up** from the working
-directory so it works from inside a repository subdirectory. `facet scope add
-owner/repo#n` records an issue handed over after the workspace already existed;
-it is additive and safe to repeat.
+`facet scope list` prints it, found by walking **up** from the working
+directory so it works from inside a repository subdirectory. `facet scope add`,
+`remove` and `set` change it afterwards; `add` and `remove` are safe to repeat.
 
 ```sh
-facet spawn 67 --repo acme/platform --seat w-platform-67 \
-  --scope acme/platform#68 --scope acme/tools#12
+facet spawn 67 --repo acme/platform --scope acme/platform#68 --scope acme/tools#12
 ```
 
 With no pane to put it in, one agent launch is opt-in: a Remote Control session.
@@ -383,39 +356,6 @@ machine with no credential is the same class of fault as the outage.
 Both are also true of the failure path, and `preflight` works with no workspaces
 root and a broken config: the thing you reach for when the lab is wrong cannot
 require the lab to be right.
-
-## Timestamps
-
-`facet date` is the fleet's one canonical timestamp source (facet#71). Two
-real incidents came from hand-rolling one: a two-minute gap between an
-escalation and its answer was misread as two hours (a UTC timestamp compared
-against a local clock reading), and an L3 escalation watch was left dead for
-74 minutes by a watermark built from a local time and silently 74 minutes
-ahead of the real clock -- a check that can never fire reads exactly like one
-that found nothing.
-
-```
-$ facet date
-2026-07-30T15:00:00Z
-
-$ facet date --local
-2026-07-30T17:00:00+02:00
-
-$ facet date --check 2026-07-30T16:14:00Z
-facet: 2026-07-30T16:14:00Z is 1h14m0s in the future (now is 2026-07-30T15:00:00Z) -- refusing a timestamp this far ahead of now
-```
-
-The default is RFC 3339 in UTC -- the format GitHub's API returns and compares
-against, so the output can be piped straight into a `jq` comparison against
-`createdAt`/`mergedAt` with no conversion. `--local` renders the same instant
-with its local offset, for a human. **Every rendering carries an explicit UTC
-or offset marker**; there is no mode that produces a bare local time with no
-offset, because that bare shape is exactly what caused both incidents above.
-
-`--check <timestamp>` answers the second incident directly: it refuses (exit
-1) a timestamp unexpectedly still ahead of now, past a few seconds of ordinary
-clock skew, and reports by how much. A watch built with this before trusting
-its own watermark would have refused rather than gone dark.
 
 ## Mirrors make the clones cheap
 
