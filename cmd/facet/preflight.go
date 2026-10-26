@@ -7,6 +7,7 @@ import (
 
 	"github.com/RiccardoCereghino/facet/internal/ghx"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // newPreflightCmd checks the credential surface every command here shares.
@@ -27,7 +28,8 @@ func newPreflightCmd() *cobra.Command {
 			"credential as invalid WITHOUT a valid credential, so this check does not go\n" +
 			"blind during the fault it exists to catch. No token value is ever read,\n" +
 			"printed or stored, and this command never logs in, out, or refreshes.\n\n" +
-			"There is no override flag. A gate with an escape hatch is not a gate.",
+			"Nothing else requires this to pass: `facet spawn` runs the same checks and\n" +
+			"warns, and the workspace core does not consult the credential at all.",
 		Args:              cobra.NoArgs,
 		PersistentPreRunE: func(*cobra.Command, []string) error { return nil },
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -116,51 +118,40 @@ func preflight(req ghx.Requirements) (probs []ghx.Problem, notes []string, st *g
 	return probs, notes, st, nil
 }
 
-// requirePreflight is what commands that cannot work without a credential call
-// before doing anything else. It fails loudly and names the command, so the
-// refusal is legible at the point of use rather than three calls deeper.
+// warnPreflight runs the credential checks before a command that talks to
+// GitHub, and reports what it finds without refusing.
 //
-// This is a capability gate, not a spawn-specific one -- what it guards is
-// "about to talk to GitHub with the ambient credential", so every verb in
-// that position calls it the same way (facet#109): spawn, new, sync,
-// restore, add clone, add link.
-//
-// bypass is the escape hatch the Sculptor ruled for on facet#109 ("for which
-// I would add a bypass honestly"), amending this issue's own earlier plan to
-// leave `new` unguarded so facet#107 (spawn refusing on a sound-looking
-// token) stayed reachable. The bypass dissolves that sequencing hazard: it
-// has no ordering constraint, because it is available on every guarded verb
-// including spawn, so nothing needs a permanently-unguarded sibling to route
-// around the gate through. `facet new` used to BE that undocumented,
-// unlogged bypass; now the bypass is a real flag, and using it says so out
-// loud in the output rather than leaving no trace that a guarded operation
-// ran unguarded. The default stays refusing either way -- bypass is
-// something an operator types, never a fallback the tool takes on its own.
-func requirePreflight(w io.Writer, what string, bypass bool) error {
+// Only spawn calls it. The workspace core (new, add, sync, restore) never
+// does: it works on plain git repositories, and a credential problem there
+// surfaces from git at the clone that needs it. spawn still checks first so a
+// problem is named up front rather than mid-operation, but the verdict is the
+// operator's: a default `gh auth login` token is a reason to know, not a
+// reason to stop, and a credential that truly cannot reach GitHub fails at the
+// issue lookup, before anything is created.
+func warnPreflight(w io.Writer, what string) {
 	probs, notes, _, err := preflight(ghx.DefaultRequirements())
 	if err != nil {
-		return err
+		_, _ = fmt.Fprintf(w, "! %s: could not check the GitHub credential: %v\n\n", what, err)
+		return
 	}
-	// Printed whether or not the gate opens: a command that proceeds on a
+	// Printed whether or not anything is wrong: a command that proceeds on a
 	// partially-checked credential surface must say which part went unchecked.
 	writeNotes(w, notes)
 	if len(probs) == 0 {
-		return nil
+		return
 	}
 	for _, p := range probs {
-		_, _ = fmt.Fprintf(w, "✗ %s\n", p)
+		_, _ = fmt.Fprintf(w, "! %s\n", p)
 	}
-	if bypass {
-		_, _ = fmt.Fprintf(w, "\n! %s proceeding on an UNSOUND credential (%d %s) -- "+
-			"--unsound-credential was passed, so this is deliberate\n",
-			what, len(probs), plural(len(probs), "problem", "problems"))
-		return nil
-	}
-	_, _ = fmt.Fprintln(w)
-	return fmt.Errorf("%s refused: the GitHub credential is not sound (%d %s). "+
-		"Run `facet preflight` for the full report, or pass --unsound-credential to "+
-		"proceed anyway -- deliberately, and it will say so",
+	_, _ = fmt.Fprintf(w, "\n! %s is proceeding despite %d credential %s; run `facet preflight` for the full report\n\n",
 		what, len(probs), plural(len(probs), "problem", "problems"))
+}
+
+// deprecateUnsoundFlag keeps --unsound-credential accepted, and hidden, on the
+// verbs that used to refuse without it, so scripts that pass it keep working.
+func deprecateUnsoundFlag(f *pflag.FlagSet) {
+	f.Bool("unsound-credential", false, "no effect: the credential no longer gates this command")
+	_ = f.MarkDeprecated("unsound-credential", "the credential no longer gates this command; the flag has no effect")
 }
 
 func orDash(s string) string {

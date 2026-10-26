@@ -27,7 +27,6 @@ func newSpawnCmd() *cobra.Command {
 		ownSession bool
 		muxName    string
 		writeback  bool
-		unsound    bool
 		agent      agentFlags
 	)
 	cmd := &cobra.Command{
@@ -62,7 +61,7 @@ func newSpawnCmd() *cobra.Command {
 				Seat: seatName, Scope: scope, SeatIssue: seatIssue,
 				Slug: slug, Base: base, Yes: yes, NoBranch: noBranch, DryRun: dryRun,
 				Attach: attach, NoAttach: noAttach, OwnSession: ownSession, Mux: muxName,
-				Writeback: writeback, UnsoundCredential: unsound, Agent: agent.resolve(cmd),
+				Writeback: writeback, Agent: agent.resolve(cmd),
 			})
 		},
 	}
@@ -86,8 +85,7 @@ func newSpawnCmd() *cobra.Command {
 	f.BoolVar(&writeback, "writeback", false,
 		"record the confirmed repo set in the issue body (default: off -- a wrong "+
 			"inference would otherwise write to someone else's issue, facet#69)")
-	f.BoolVar(&unsound, "unsound-credential", false,
-		"proceed even though the credential preflight found problems (prints what was skipped)")
+	deprecateUnsoundFlag(f)
 	agent.register(cmd)
 	return cmd
 }
@@ -119,9 +117,6 @@ type spawnOpts struct {
 	// someone else's issue silently, on by default. Leaving it off means the
 	// confirmed set is simply re-inferred on every spawn, which is cheap.
 	Writeback bool
-	// UnsoundCredential bypasses requirePreflight's refusal, deliberately and
-	// audibly (facet#109). Default is still refusing; this is never inferred.
-	UnsoundCredential bool
 	// Agent is what to run for the operator once the workspace is ready: in the
 	// pane when --attach opened one, in this terminal otherwise.
 	Agent agentChoice
