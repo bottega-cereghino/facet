@@ -8,6 +8,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`facet spawn --exec <command>`** runs a shell command in the home clone
+  once the workspace is ready, with `$FACET_WORKSPACE` set. It is how to open a
+  multiplexer or an editor now that facet does not open one itself.
+
 - **`facet reap` deletes long-lived workspaces too** (#135, #120). A workspace
   `facet new` made used to be refused as "not an issue workspace", and nothing
   else removed one. It now gets the same clone checks as an issue workspace,
@@ -21,7 +25,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   clone, so a squash-merged commit in a second repo of the same workspace could
   not be proven landed and held the reap as "unpushed".
 
+### Changed
+
+- **A bare `facet spawn` runs nothing.** It prints where to work and exits.
+  Routing's `spawn.rc` used to make a bare spawn launch claude in this
+  terminal; it now only decides whether `spawn --claude` gets Remote Control.
+  `--claude` is off by default, and `--remote` overrides routing.
+
 ### Removed
+
+- **`facet attach` and the tmux launcher.** facet no longer opens tmux
+  sessions or windows, reads the Remote Control URL back out of a pane, runs
+  `.tools/issue-layout.sh`, or falls back to Windows Terminal. `FACET_AGENT` is
+  no longer read; use `--exec`. `spawn --attach`, `--no-attach`, `--session`,
+  `--mux` and `--no-rc` are accepted, hidden and deprecated, with no effect;
+  `--rc` means `--claude --remote`. `reap` still refuses while a tmux session,
+  pane or process is live in the workspace.
 
 - **Seat identity.** `facet spawn` no longer writes `.seat` or `.seat-issue`,
   and no longer generates `.catalog.json` (which needed `argano`, and made

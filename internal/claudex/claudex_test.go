@@ -101,35 +101,3 @@ func TestShellQuote(t *testing.T) {
 		}
 	}
 }
-
-func TestFindSessionURL(t *testing.T) {
-	const url = "https://claude.ai/code/session_01ACfiHoTWSGhCKabYtHsW9r"
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"nothing there", "welcome to claude\n> ", ""},
-		{"in a banner", "  Remote Control: " + url + "\n", url},
-		{"trailing punctuation is not part of it", "see " + url + ".\n", url},
-		{
-			"an unrelated claude.ai link is not a session",
-			"docs: https://claude.ai/code/settings\n",
-			"",
-		},
-		{
-			// A pane that has been through an agent restart holds every
-			// session it ever ran; the live one is the most recent.
-			"after a restart, the last one wins",
-			"first https://claude.ai/code/session_aaa\nthen " + url + "\n",
-			url,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := FindSessionURL(tt.in); got != tt.want {
-				t.Errorf("FindSessionURL = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}

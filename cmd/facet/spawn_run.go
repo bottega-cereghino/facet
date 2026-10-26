@@ -1,7 +1,7 @@
 // spawn_run.go holds the body of `facet spawn`, split out of spawn.go so that
 // file holds only the cobra wiring -- the same thin newXCmd/runX shape the other
 // commands use. The logic stays in cmd/facet rather than moving to internal/:
-// it is orchestration glue over routing, render, workspace, mux and ghx, not a
+// it is orchestration glue over routing, render, workspace and ghx, not a
 // unit anything else would import.
 
 package main
@@ -15,12 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/RiccardoCereghino/facet/internal/claudex"
 	"github.com/RiccardoCereghino/facet/internal/config"
 	"github.com/RiccardoCereghino/facet/internal/ghx"
 	"github.com/RiccardoCereghino/facet/internal/knowledge"
 	"github.com/RiccardoCereghino/facet/internal/manifest"
-	"github.com/RiccardoCereghino/facet/internal/mux"
 	"github.com/RiccardoCereghino/facet/internal/render"
 	"github.com/RiccardoCereghino/facet/internal/routing"
 	"github.com/RiccardoCereghino/facet/internal/scope"
@@ -204,70 +202,17 @@ func runSpawn(o spawnOpts) error {
 		}
 	}
 
+	workDir := filepath.Join(ws, homeDir)
 	fmt.Printf("\nWorkspace ready: %s\n", ws)
+	fmt.Printf("\nwork in:    %s\n", workDir)
 
-	// The multiplexer comes last and is never fatal: the clones, the branch
-	// and the CLAUDE.md all exist by now. By DEFAULT nothing is opened here
-	// and no shell is spawned -- facet sets the workspace up and prints where
-	// to work. Opening -- and the shell it runs -- is opt-in via --attach.
-	//
-	// When we do open a pane, the pane owns the agent: launching a second,
-	// blocking claude in this terminal underneath it would fight for stdin.
-	if o.Attach && !o.NoAttach && o.Mux != "none" {
-		l := muxFor(o.Mux)
-		if l == nil {
-			fmt.Printf("\nNo multiplexer available; work in %s\n", filepath.Join(ws, homeDir))
-			return nil
-		}
-		// spawn opens beside whatever you are doing; it must not move you. A
-		// freshly spawned workspace has no session of its own to switch to
-		// anyway.
-		_, asTab := mux.AutoOpen(l, o.OwnSession)
-		agent := o.Agent.agentOpts
-		agent.SessionNamePrefix = route.SpawnSessionPrefix()
-		return openSession(ws, wsName, homeDir, o.Number, openOpts{
-			Mux: o.Mux, AsTab: asTab, Focus: true, Agent: agent,
-		})
+	// Nothing runs by default. A launch the operator asked for runs last, once
+	// the clones, branch and CLAUDE.md all exist, and is never fatal, exactly
+	// like the board move and the scope write-back above.
+	if err := runLaunch(os.Stdout, o.Launch, ws, workDir, wsName, route); err != nil {
+		rep.Warn("%v (the workspace is ready; open it yourself in %s)", err, workDir)
 	}
-
-	fmt.Printf("\nwork in:    %s\n", filepath.Join(ws, homeDir))
-	if o.Mux != "none" {
-		fmt.Printf("open it:    facet attach --path %s\n", ws)
-	}
-
-	// With no pane to put it in, launching an agent means taking over THIS
-	// terminal, which no default may decide -- so unlike the pane, this stays
-	// off unless routing or a flag turns it on. It runs last, once the clones,
-	// branch and CLAUDE.md all exist, and is never fatal, exactly like the board
-	// move and the scope write-back above.
-	if resolveLaunch(o, route) {
-		workDir := filepath.Join(ws, homeDir)
-		opts := claudex.Options{
-			RemoteControl:     o.Agent.Remote,
-			SessionName:       wsName,
-			SessionNamePrefix: route.SpawnSessionPrefix(),
-		}
-		fmt.Printf("\nlaunching %s in %s\n", claudex.ShellCommand(opts), workDir)
-		if err := claudex.Launch(workDir, opts); err != nil {
-			rep.Warn("%s: %v (workspace is ready; open it yourself in %s)",
-				claudex.Exe, err, workDir)
-		}
-	}
-
 	return nil
-}
-
-// resolveLaunch decides whether to start claude in this terminal. A named flag
-// wins over the routing default; --claude=false and its --no-rc alias win over
-// everything.
-func resolveLaunch(o spawnOpts, route *routing.Routing) bool {
-	if !o.Agent.Claude {
-		return false
-	}
-	if o.Agent.Explicit {
-		return true
-	}
-	return route.SpawnRC()
 }
 
 // checkoutIssueBranch fetches the branch explicitly, because the mirror may have
