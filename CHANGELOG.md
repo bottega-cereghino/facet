@@ -19,6 +19,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Relicensed from MIT to the Apache License 2.0.**
 - **`tree` and `deps` moved out of `facet` into a separate, frozen binary,
   `facet-graph`** (`go install …/cmd/facet-graph@latest`). Same commands, same
   behaviour, run as `facet-graph tree …` and `facet-graph deps …`. It keeps
