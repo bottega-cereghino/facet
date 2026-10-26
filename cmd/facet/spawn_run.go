@@ -236,6 +236,22 @@ func runSpawn(o spawnOpts) error {
 	return nil
 }
 
+// staleNote is the plan's remark on a fragment overdue for review, or "". A
+// fragment with no review date is stale too, and says so rather than printing
+// an empty one.
+func staleNote(f knowledge.Fragment, now time.Time) string {
+	switch {
+	case !f.IsStale(now):
+		return ""
+	case f.Meta.LastReviewed == "":
+		return "  (STALE -- never reviewed: no last_reviewed date)"
+	case f.Meta.Reviewed().IsZero():
+		return "  (STALE -- last_reviewed " + f.Meta.LastReviewed + " is not a YYYY-MM-DD date)"
+	default:
+		return "  (STALE -- reviewed " + f.Meta.LastReviewed + ")"
+	}
+}
+
 // missingClones names the clones the workspace's manifest declares that are
 // not a repository on disk, sorted.
 func missingClones(ws string) ([]string, error) {
@@ -467,11 +483,7 @@ func printPlan(ws, repo string, iss *ghx.Issue, sel []routing.Selection, hints [
 		fmt.Printf("\nknowledge fragments to inline:\n")
 		now := time.Now()
 		for _, f := range frags {
-			stale := ""
-			if f.IsStale(now) {
-				stale = "  (STALE -- reviewed " + f.Meta.LastReviewed + ")"
-			}
-			fmt.Printf("  %-16s %s%s\n", f.Name, f.Meta.SourceWorkspace, stale)
+			fmt.Printf("  %-16s %s%s\n", f.Name, f.Meta.SourceWorkspace, staleNote(f, now))
 		}
 	}
 	for _, e := range fragErrs {

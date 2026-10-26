@@ -5,7 +5,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/RiccardoCereghino/facet/internal/knowledge"
 	"github.com/RiccardoCereghino/facet/internal/manifest"
 )
 
@@ -37,5 +39,22 @@ func TestMissingClonesNamesWhatSyncCouldNotClone(t *testing.T) {
 	}
 	if want := []string{"absent", "empty"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("missingClones = %v, want %v", got, want)
+	}
+}
+
+// A fragment with no review date is stale and says so, instead of printing
+// "reviewed " followed by nothing.
+func TestStaleNoteNamesWhyAFragmentIsStale(t *testing.T) {
+	now := time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC)
+	for reviewed, want := range map[string]string{
+		"2026-10-01": "",
+		"2026-01-01": "  (STALE -- reviewed 2026-01-01)",
+		"":           "  (STALE -- never reviewed: no last_reviewed date)",
+		"last week":  "  (STALE -- last_reviewed last week is not a YYYY-MM-DD date)",
+	} {
+		f := knowledge.Fragment{Meta: knowledge.Meta{LastReviewed: reviewed}}
+		if got := staleNote(f, now); got != want {
+			t.Errorf("staleNote(%q) = %q, want %q", reviewed, got, want)
+		}
 	}
 }
