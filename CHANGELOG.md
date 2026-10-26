@@ -28,6 +28,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing. `facet file` wires the edge, and `facet-graph deps check` reads the
   section the same way.
 
+- **`facet file` applies `complexity/N` from the body** (#165). The
+  `### Complexity` section stayed prose, so an issue filed with one carried no
+  complexity label. The section now adds the label (when the repository defines
+  it), a `--label` that disagrees is refused, and `file` prints the labels it
+  applied.
+
 - **The squash-merge landing proof asks about each clone's own repo**, read
   from its GitHub URL. It used to ask about the issue's home repo for every
   clone, so a squash-merged commit in a second repo of the same workspace could

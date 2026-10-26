@@ -230,6 +230,12 @@ facet knows that *some* labels are required, never which ones. Omit the block an
 nothing is enforced. `--repos` is recorded in the body, so the first spawn of that
 issue is exact.
 
+A `### Complexity` section in the body, starting with a number (`2`, `c2` or
+`complexity/2`), adds the `complexity/N` label, so the body and the labels agree
+and the conventions see it. A `--label complexity/M` that disagrees is refused.
+A repository that does not define the label gets the issue without it, and a
+warning. `file` prints the labels it applied after the URL.
+
 ### Tidying up
 
 `facet issues` lists the ephemeral workspaces. `facet reap <name>` deletes a
