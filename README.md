@@ -36,10 +36,10 @@ where one working tree is visible everywhere at once.
 
 ## Why
 
-Several agents, or several people, working several issues at once will fight over
-one working tree: one branch, one dirty index. Giving each task its own checkout
-fixes that, and costs disk. `facet` makes the checkouts nearly free, and makes the
-throwaway ones disposable without losing work.
+Working several issues at once — yourself, or with agents in parallel — means
+fighting over one working tree: one branch, one dirty index. Giving each task its
+own checkout fixes that, and costs disk. `facet` makes the checkouts nearly free,
+and makes the throwaway ones disposable without losing work.
 
 ## Install
 
@@ -47,8 +47,9 @@ throwaway ones disposable without losing work.
 go install github.com/RiccardoCereghino/facet/cmd/facet@latest
 ```
 
-Requires `git`. The issue features additionally use the [`gh`](https://cli.github.com)
-CLI. `facet` shells out to both, so it inherits your existing credentials, SSH agent
+macOS. Requires `git`. The issue features additionally use the
+[`gh`](https://cli.github.com) CLI; `reap` also asks `tmux` and `lsof`, when they
+are installed, what is still running in a workspace. `facet` shells out to both, so it inherits your existing credentials, SSH agent
 and `gh` accounts, and never handles a token itself.
 
 ## The core: workspaces
@@ -103,6 +104,8 @@ directory so it works from inside a repository subdirectory. `facet scope add`,
 facet spawn 67 --repo acme/platform --scope acme/platform#68 --scope acme/tools#12
 ```
 
+### After the spawn
+
 `spawn` sets the workspace up and stops: it prints where to work and runs
 nothing. Two options start something there, in this terminal, once the
 workspace is ready:
@@ -120,21 +123,24 @@ facet spawn 67 --repo acme/platform --exec 'tmux new-window -c "$PWD"'
 facet spawn 67 --repo acme/platform --exec 'code .'
 ```
 
-The launch runs last and is never fatal: if it fails, spawn warns and leaves
-the ready workspace for you to open yourself. `--claude` and `--exec` together
-are refused before anything is created.
+The launch runs last, and only on a complete workspace: if a clone failed,
+spawn says `Workspace INCOMPLETE`, names what is missing, launches nothing and
+exits non-zero. A launch that itself fails only warns, and leaves the ready
+workspace for you to open yourself. `--claude` and `--exec` together are refused
+before anything is created.
 
-Remote Control makes the session reachable over Anthropic's relay, independent
-of the tailnet. It needs `claude` signed in via claude.ai OAuth and the
+Remote Control makes the session reachable from another device over Anthropic's
+relay. It needs `claude` signed in via claude.ai OAuth and the
 workspace trusted once. The session is named after the workspace, attached as
 `--remote-control=<name>` (never as a positional argument, which a following
 prompt would make ambiguous). `spawn.sessionNamePrefix` in routing names the
 host.
 
-facet no longer opens tmux itself, and `facet attach` is gone. `--attach`,
-`--no-attach`, `--session`, `--mux`, `--rc` and `--no-rc` are still accepted,
-hidden and deprecated: `--rc` means `--claude --remote`, the others have no
-effect.
+facet does not open tmux itself. The old `--attach`, `--no-attach`,
+`--session`, `--mux`, `--rc` and `--no-rc` are still accepted, hidden and
+deprecated: `--rc` means `--claude --remote`, the others do nothing.
+
+### Which repositories, and why
 
 ```
 acme/platform#67  Rehearse a database restore: nothing has ever been restored
@@ -148,7 +154,10 @@ repos to clone, and why:
 **Labels cannot decide which repositories an issue needs.** A label describes a
 topic, and the same topic label gets used in several repos. The decisive evidence
 is in the issue body: `owner/repo#n` cross-references, `Blocked by` lines, and —
-for issues filed through a form — an explicit "Repos in scope" field. The issue
+for issues filed through a form — an explicit "Repos in scope" field (or
+"Repos involved"), listing routing keys, aliases, `owner/repo` or repo URLs. When
+that field is filled in it wins over labels; an `owner/repo` routing does not know
+is named in the plan rather than silently dropped. The issue
 above is labelled `area/backups` with no Terraform label, and still cannot be
 closed without a change in another repository. So the inference is always shown,
 never silently trusted, and correctable with `--clone` / `--add` / `--rm`.
@@ -196,8 +205,8 @@ Rewriting someone's issue body is unforgiving, so the rewrite is timid: the
 neighbouring sections come back byte for byte, an existing heading keeps the level
 its author chose, an empty set writes nothing, and a body that already says the
 right thing is left alone — spawning twice does not churn the issue's history. The
-body is re-read immediately before the write, because several agents work the same
-issues and the copy fetched at the top of `spawn` is minutes old by then.
+body is re-read immediately before the write, because the copy fetched at the top
+of `spawn` may be minutes old by then, and someone may have edited it since.
 `--no-writeback` opts out.
 
 ### Filing an issue that the board can see
@@ -258,6 +267,10 @@ Reading and writing sub-issue hierarchies and blocked-by dependencies (`tree`,
 repository. It builds and is tested, but it is frozen: not actively maintained,
 and nothing in `facet` depends on it. See [docs/facet-graph.md](docs/facet-graph.md).
 
+```sh
+go install github.com/RiccardoCereghino/facet/cmd/facet-graph@latest
+```
+
 ## Comments, by kind
 
 ```sh
@@ -302,16 +315,6 @@ git's **host-level** protocol is `ssh` (`gh auth login --with-token` flips it to
 https silently, and `gh config get git_protocol` reports the *global* default, so
 it is the wrong thing to read); and that `~/.ssh/id_ed25519` exists and is not
 group- or world-readable, since that key authenticates every push.
-
-**The permission half of the key check is Unix-only, and says so on Windows.**
-Go's `os.FileMode` does not represent NTFS ACLs, so a mode test there would pass
-or fail for reasons unrelated to who can actually read the key. Rather than ship
-a meaningless test — or drop the check to get a green tick — Windows prints a
-`!` line stating the check **did not run**, tells you to verify it with
-`icacls`, and the pass line itself reads *"passed — but 1 check did NOT run on
-this platform"*. **A green preflight must never be readable as "your key
-permissions were verified" when they were not.** The existence half is
-platform-neutral and runs everywhere.
 
 `facet spawn` runs the same checks first, before routing and before the issue
 lookup, and **warns** about each problem rather than refusing. It leaves out the
@@ -378,14 +381,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 
 - **An existing clone is never touched** by `sync` — no pull, no reset, no clean.
   It may hold the only copy of unpushed work.
-- **`--prune` deletes only links**, never a clone. On Windows a link is a junction,
-  which reports as `ModeIrregular` rather than `ModeSymlink` — as does every other
-  reparse point. `facet` reads the reparse tag, so it cannot mistake a plain
-  directory for a link and delete it.
+- **`--prune` deletes only links**, never a clone: each entry is confirmed to be
+  a symlink before it is removed, so a plain directory is never mistaken for one.
 - **`reap` counts commits reachable from any local branch and from no remote.**
   Unlike `@{u}..HEAD`, that also catches a branch which was never pushed at all —
-  the branch most easily lost. It also steps out of the working directory before
-  deleting, because Windows will not remove a directory a process is sitting in.
+  the branch most easily lost.
 - **`reap` never touches the mirror.** Deleting a hardlinked object drops that
   name; the mirror keeps its own.
 - **`reap` also refuses while a tmux pane or process is in the workspace**, in
@@ -405,10 +405,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 
 ## Status
 
-Early, but held together by a real test suite. It grew on one person's machine and
-is used daily on Windows; the OS-specific parts sit behind build tags, and CI runs
-the tests on Linux, macOS and Windows on every change. Treat a first run on a new
-platform as worth watching, and please open an issue if something looks off.
+A personal tool, used daily on one Mac by its author, and held together by a real
+test suite: CI runs it on macOS and Linux on every change. macOS is the platform
+it is built for. Windows code paths (junctions, ACLs) remain behind build tags but
+are no longer tested or supported.
 
 ## Licence
 
