@@ -15,7 +15,7 @@ type Requirements struct {
 	Scopes []string
 	// GitProtocol is the host-level protocol git must be configured to use.
 	GitProtocol string
-	// Account is the login the credential must belong to.
+	// Account is the login the credential must belong to. Empty skips the check.
 	Account string
 	// ForbiddenTokenTypes are credential prefixes that must not be in use, even
 	// when they are currently valid.
@@ -44,7 +44,7 @@ func DefaultRequirements() Requirements {
 	return Requirements{
 		Scopes:              []string{"repo", "read:org", "workflow"},
 		GitProtocol:         "ssh",
-		Account:             "RiccardoCereghino",
+		Account:             os.Getenv("FACET_GH_ACCOUNT"),
 		ForbiddenTokenTypes: []string{"gho_"},
 		SSHKey:              DefaultSSHKey(),
 	}

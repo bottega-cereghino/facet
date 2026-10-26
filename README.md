@@ -459,7 +459,8 @@ source      /Users/cerre/.config/gh/hosts.yml
 ✓ credential preflight passed
 ```
 
-It checks that gh is logged in and the account is active and the expected one;
+It checks that gh is logged in and the account is active (and, with
+`FACET_GH_ACCOUNT` set, the expected one);
 that the token is **not** a `gho_` OAuth-App token — GitHub issues one per (app,
 user) pair, so any other `gh auth login` anywhere silently invalidates it, which
 is what happened; that `repo`, `read:org` and `workflow` are all granted; that
@@ -479,8 +480,13 @@ permissions were verified" when they were not.** The existence half is
 platform-neutral and runs everywhere.
 
 `facet spawn` runs the same checks first, before routing and before the issue
-lookup, so a bad credential produces a refusal rather than a half-created
-workspace. **There is no skip flag** — a gate with an escape hatch is not a gate.
+lookup, and **warns** about each problem rather than refusing: a default `gho_`
+token is worth knowing about, not a reason to stop. A credential that cannot
+reach GitHub at all fails at the issue lookup, before anything is created. The
+workspace core (`new`, `add`, `sync`, `restore`) never consults the credential.
+
+The account check is opt-in: set `FACET_GH_ACCOUNT` to the login the credential
+must belong to.
 
 Two properties are deliberate. It reads `gh auth status` and nothing else,
 because gh reports a credential as invalid *without* a valid credential: the

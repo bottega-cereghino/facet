@@ -13,6 +13,7 @@ import (
 func req() Requirements {
 	r := DefaultRequirements()
 	r.SSHKey = ""
+	r.Account = "RiccardoCereghino"
 	return r
 }
 
@@ -210,6 +211,19 @@ func TestCheckWrongAccount(t *testing.T) {
 	probs := checkFixture(t, out)
 	if len(probs) != 1 || probs[0].Check != "account" {
 		t.Fatalf("want exactly the account problem, got: %s", names(probs))
+	}
+}
+
+// The account check is opt-in: facet is not one person's tool, so with no
+// FACET_GH_ACCOUNT any logged-in account passes.
+func TestDefaultRequirementsAccountIsOptIn(t *testing.T) {
+	t.Setenv("FACET_GH_ACCOUNT", "")
+	if got := DefaultRequirements().Account; got != "" {
+		t.Errorf("with no FACET_GH_ACCOUNT the account must be unchecked, got %q", got)
+	}
+	t.Setenv("FACET_GH_ACCOUNT", "octocat")
+	if got := DefaultRequirements().Account; got != "octocat" {
+		t.Errorf("FACET_GH_ACCOUNT=octocat gave %q", got)
 	}
 }
 

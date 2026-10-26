@@ -6,6 +6,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The workspace core no longer consults the GitHub credential.** `new`,
+  `add clone`, `add link`, `sync` and `restore` used to refuse on any
+  credential `facet preflight` disliked, including the default `gho_` token
+  from `gh auth login`, even for a manifest naming only local repositories.
+  They now just run git; a credential problem surfaces from git at the clone
+  that needs it. `--unsound-credential` is still accepted on these verbs but is
+  hidden, deprecated and has no effect.
+- **`facet spawn` warns about credential problems instead of refusing.** It
+  still runs the checks first and prints each problem, then proceeds; a
+  credential that cannot reach GitHub fails at the issue lookup, before
+  anything is created.
+- **The preflight's account check is opt-in.** Set `FACET_GH_ACCOUNT` to the
+  login the credential must belong to; unset, any account passes. It used to
+  be hardcoded to one user.
+
 ### Added
 
 - **`facet tree orphans --repo owner/name [--json]` answers "which issues hang
