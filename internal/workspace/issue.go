@@ -64,11 +64,19 @@ type CloneState struct {
 	Unverifiable []string
 }
 
-// IssueState is the full picture of one ephemeral workspace.
+// IssueState is the full picture of one workspace: an ephemeral issue
+// workspace, or -- with Issue nil -- a long-lived one `facet new` made.
 type IssueState struct {
 	Dir   string
 	Name  string
 	Issue *manifest.Issue
+	// Enclosing is the top level of a repository the workspace directory sits
+	// inside (~/Workspaces is one), or "" when there is none.
+	Enclosing string
+	// Loose names files in a long-lived workspace, outside its clones and
+	// links, that exist nowhere else: not committed in Enclosing, or there is
+	// no Enclosing at all. Non-empty is a blocker.
+	Loose []string
 	Clone []CloneState
 	// PR is the pull request for the issue branch, or nil.
 	PR *ghx.PR
@@ -111,6 +119,7 @@ func (s *IssueState) Blockers() []string {
 			out = append(out, msg)
 		}
 	}
+	out = append(out, s.Loose...)
 	for _, c := range s.Clone {
 		if c.Stashed > 0 {
 			out = append(out, fmt.Sprintf("%s has %d stash entry(ies) -- no push would carry them", c.Dir, c.Stashed))
@@ -196,8 +205,8 @@ type timeoutRunner interface {
 // attach to a disclaimer instead of blocking them indefinitely.
 const fetchTimeout = 15 * time.Second
 
-// InspectIssue gathers the state of one issue workspace. Network and multiplexer
-// lookups are optional: pass nil to skip them.
+// InspectIssue gathers the state of one issue workspace, refusing any other.
+// Network and multiplexer lookups are optional: pass nil to skip them.
 func InspectIssue(ws string, git gitx.Runner, pr PRLookup, mux LiveChecker) (*IssueState, error) {
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -206,8 +215,23 @@ func InspectIssue(ws string, git gitx.Runner, pr PRLookup, mux LiveChecker) (*Is
 	if !m.IsIssueWorkspace() {
 		return nil, fmt.Errorf("%s is not an issue workspace", ws)
 	}
-	st := &IssueState{Dir: ws, Name: m.Name, Issue: m.Issue}
+	return inspect(ws, m, git, pr, mux), nil
+}
 
+// Inspect gathers the state of any workspace, issue or long-lived, for reap.
+// A long-lived workspace has no issue branch, so no pull request is looked up
+// for it; in exchange its loose files are checked, because unlike an issue
+// workspace it can hold files of its own beside its clones.
+func Inspect(ws string, git gitx.Runner, pr PRLookup, mux LiveChecker) (*IssueState, error) {
+	m, err := manifest.Read(ws)
+	if err != nil {
+		return nil, err
+	}
+	return inspect(ws, m, git, pr, mux), nil
+}
+
+func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux LiveChecker) *IssueState {
+	st := &IssueState{Dir: ws, Name: m.Name, Issue: m.Issue}
 	for _, dir := range sortedKeys(m.Clones) {
 		p := filepath.Join(ws, dir)
 		if !gitx.IsRepo(p) {
@@ -222,10 +246,24 @@ func InspectIssue(ws string, git gitx.Runner, pr PRLookup, mux LiveChecker) (*Is
 			}
 			continue
 		}
-		st.Clone = append(st.Clone, inspectClone(git, dir, p, m.Issue.Repo, pr))
+		// The squash-merge landing proof asks GitHub about the clone's own
+		// repo, read from its URL, falling back to the issue's repo. A clone
+		// with neither gets the ancestor check alone, which fails in the safe
+		// direction: a squash-merged commit there still counts as unpushed.
+		repo, clonePR := githubRepo(m.Clones[dir]), pr
+		if repo == "" && m.Issue != nil {
+			repo = m.Issue.Repo
+		}
+		if repo == "" {
+			clonePR = nil
+		}
+		st.Clone = append(st.Clone, inspectClone(git, dir, p, repo, clonePR))
 	}
 
-	if pr != nil && m.Issue.Branch != "" {
+	if m.Issue == nil {
+		st.Enclosing, st.Loose = looseFiles(git, ws, m)
+	}
+	if pr != nil && m.Issue != nil && m.Issue.Branch != "" {
 		// A lookup that errors is not "no PR": auth expiry, a network blip, or a
 		// rate limit must not silently drop the open-PR guard. Record that the
 		// state is unknown so Blockers refuses.
@@ -244,7 +282,110 @@ func InspectIssue(ws string, git gitx.Runner, pr PRLookup, mux LiveChecker) (*Is
 		}
 	}
 	st.SizeBytes = dirSize(ws)
-	return st, nil
+	return st
+}
+
+// ownFiles are facet's own files at a workspace root. Deleting the workspace
+// is deleting them, so they are never loose. The seat files are listed so a
+// workspace that still carries them from the bottega is not held by them.
+//
+// .DS_Store is here too: Finder writes it, it holds nothing of the user's, and
+// it would otherwise hold every long-lived workspace a Mac has opened.
+var ownFiles = map[string]bool{
+	manifest.FileName: true, ".scope": true,
+	".seat": true, ".seat-issue": true, ".catalog.json": true,
+	".DS_Store": true,
+}
+
+// maxLoose bounds how many loose paths are named one by one.
+const maxLoose = 10
+
+// looseFiles finds what a long-lived workspace holds outside its clones and
+// links that exists nowhere else, and the enclosing repository it checked
+// against. Each result is phrased as a blocker.
+//
+// Inside an enclosing repository, a path git reports in any way -- modified,
+// untracked or ignored -- has no committed copy. Outside one, every loose
+// entry is the only copy. A status that fails blocks: a state that could not
+// be read is never assumed clean.
+func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing string, loose []string) {
+	entries, err := os.ReadDir(ws)
+	if err != nil {
+		return "", []string{fmt.Sprintf("could not list %s: %v -- cannot confirm it is safe to delete", ws, err)}
+	}
+	var names []string
+	for _, e := range entries {
+		n := e.Name()
+		if _, ok := m.Clones[n]; ok {
+			continue
+		}
+		if _, ok := m.Links[n]; ok {
+			continue
+		}
+		if ownFiles[n] || e.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return enclosingRepo(git, ws), nil
+	}
+
+	enclosing = enclosingRepo(git, ws)
+	if enclosing == "" {
+		for _, n := range names {
+			loose = append(loose, fmt.Sprintf("%s is in no repository -- this workspace is its only copy", n))
+		}
+		return "", capLoose(loose)
+	}
+	args := []string{"status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=all", "--"}
+	args = append(args, names...)
+	out, err := git.Run(ws, nil, args...)
+	if err != nil {
+		return enclosing, []string{fmt.Sprintf("git status in %s failed: %v -- cannot confirm the files beside the clones are safe to delete", enclosing, err)}
+	}
+	for _, rec := range strings.Split(out, "\x00") {
+		if len(rec) < 4 {
+			continue
+		}
+		path := rec[3:]
+		loose = append(loose, fmt.Sprintf("%s is not committed in %s -- this workspace is its only copy", path, enclosing))
+	}
+	return enclosing, capLoose(loose)
+}
+
+// githubRepo returns owner/name for a GitHub clone URL, in the SSH, scp-like
+// or HTTPS form, and "" for anything else.
+func githubRepo(url string) string {
+	var rest string
+	for _, prefix := range []string{"git@github.com:", "ssh://git@github.com/", "https://github.com/"} {
+		if r, ok := strings.CutPrefix(url, prefix); ok {
+			rest = r
+			break
+		}
+	}
+	owner, name, ok := strings.Cut(strings.TrimSuffix(rest, ".git"), "/")
+	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+		return ""
+	}
+	return owner + "/" + name
+}
+
+// enclosingRepo returns the top level of the repository ws sits inside, or ""
+// when there is none.
+func enclosingRepo(git gitx.Runner, ws string) string {
+	out, err := git.Run(ws, nil, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+func capLoose(loose []string) []string {
+	if len(loose) <= maxLoose {
+		return loose
+	}
+	return append(loose[:maxLoose:maxLoose], fmt.Sprintf("... and %d more files not committed anywhere", len(loose)-maxLoose))
 }
 
 // inspectClone reads one clone's state. Every git probe that fails is recorded
