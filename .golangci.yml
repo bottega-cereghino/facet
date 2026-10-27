@@ -18,6 +18,11 @@ linters:
     - revive # doc comments on exported identifiers; unused params
 
   settings:
+    # Not enabled above, so it never fails `make lint`. `make health` runs it
+    # alone and prints what is over budget; the review reads that, nothing gates
+    # on it.
+    gocognit:
+      min-complexity: 15
     misspell:
       # `hardlinked` is a correct technical term here, and misspell reports it
       # as a misspelling of `hardline` in four files. Across every Go repository
