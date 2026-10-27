@@ -195,6 +195,11 @@ already drifted, with the workflow several linter releases behind and
    uniquely prove is that the code compiles and its tests pass where filesystem
    semantics differ.
 
+A final `ci` job needs every other job and fails if any of them failed or was
+cancelled, so one name says whether a run is green. It runs even when a job
+before it fails; a skipped job counts as passed there, which is why the ruleset
+still names `linux` and `macos` as well. A new job goes into its `needs`.
+
 The tiering is about feedback, **not** cost: this is a public repository, so
 GitHub-hosted runners are free on every OS. A formatting slip should fail in
 under a minute rather than after three platform runs finish, and three runners
