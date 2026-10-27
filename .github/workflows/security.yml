@@ -1,0 +1,88 @@
+name: Security
+
+# gitleaks (committed secrets) and zizmor (unsafe workflow patterns), copied
+# from the Orlo repo, which trimmed it from hisui. On a pull request gitleaks
+# reads only the pull request's commits; on main, weekly and on demand, the
+# full history.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # New rules ship without a change in this repo.
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request makes the older run pointless. On main the
+# push, the weekly scan and a manual run share a group and must not cancel
+# each other.
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Exact versions and the SHA-256 of each Linux x64 download, checked before
+# anything runs. Change a version and its checksum together; the checksums come
+# from the release pages (gitleaks_<v>_checksums.txt, the zizmor asset digest).
+env:
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+  ZIZMOR_VERSION: 1.30.1
+  ZIZMOR_SHA256: e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a
+
+jobs:
+  gitleaks:
+    name: Committed secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Every commit, so the scan reads the whole history.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf gitleaks.tar.gz gitleaks
+      - name: Scan the commits of the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --verbose --log-opts="${BASE_SHA}..${HEAD_SHA}" .
+      - name: Scan the full history
+        if: github.event_name != 'pull_request'
+        run: |
+          "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --verbose .
+
+  zizmor:
+    name: Workflow audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install zizmor
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo zizmor.tar.gz "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${ZIZMOR_SHA256}  zizmor.tar.gz" | sha256sum --check --strict
+          tar -xzf zizmor.tar.gz zizmor
+      # The token lets zizmor check the pinned actions against GitHub.
+      - name: Report every finding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/zizmor" --no-exit-codes .github/workflows
+      - name: Fail on a high finding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          "$RUNNER_TEMP/zizmor" --min-severity high .github/workflows
