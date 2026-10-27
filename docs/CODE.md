@@ -175,6 +175,12 @@ cannot drift. Run it before you push; that is the whole contract.
 | `make tidy` | `go mod tidy -diff` | go.mod matches the imports |
 | `make vuln` | `govulncheck`, pinned | known vulnerabilities in what we actually call |
 
+Two more targets print and never fail. `make test` adds `-cover`, so each
+package's coverage is in the output: a map of the gaps, not a target. `make
+health` prints the functions over cognitive complexity 15 (gocognit, run alone
+from `.golangci.yml`) and the Go files over 400 lines, test files left out.
+Those are budgets a review reads, and `make check` does not run it.
+
 Both tools are `go run`-pinned in the Makefile rather than declared as `go.mod`
 `tool` directives, which would drag each tool's whole dependency tree into this
 module's `go.sum` — a poor trade for a module with three direct dependencies.

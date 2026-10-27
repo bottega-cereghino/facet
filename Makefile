@@ -19,7 +19,7 @@ GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLA
 GOVULNCHECK_VERSION := v1.6.0
 GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
-.PHONY: check build fmt fmt-fix vet lint test tidy vuln clean
+.PHONY: check build fmt fmt-fix vet lint test tidy vuln health clean
 
 ## check: everything CI's first tier runs
 check: fmt vet lint test tidy vuln
@@ -57,8 +57,11 @@ lint:
 ## when neither is set, because a guard that passes having checked nothing is a
 ## hole rather than a pass. Locally it skips, which is why a green `make check`
 ## on your machine is not evidence that guard ran.
+##
+## -cover prints each package's statement coverage. It is a map of the gaps,
+## never a gate: no target number, nothing fails on it.
 test:
-	go test ./... -race -shuffle=on
+	go test ./... -race -shuffle=on -cover
 
 ## tidy: go.mod/go.sum must already match the imports -- checked without
 ## rewriting them, so CI reports the drift instead of silently fixing it.
@@ -76,6 +79,23 @@ tidy:
 ## trust its silence.
 vuln:
 	$(GOVULNCHECK) ./...
+
+## health: print what is over budget. Budgets the review reads, never gates,
+## so this target always exits 0 and `make check` does not run it.
+##
+##   * functions over cognitive complexity 15 (gocognit, set in .golangci.yml)
+##   * Go files over 400 lines
+##
+## Test files are left out of both: a table of cases is long on purpose.
+HEALTH_MAX_LINES := 400
+
+health:
+	@echo "== functions over cognitive complexity 15"
+	@$(GOLANGCI) run --enable-only gocognit --tests=false --issues-exit-code 0 \
+		--output.text.print-issued-lines=false --show-stats=false ./...
+	@echo "== Go files over $(HEALTH_MAX_LINES) lines"
+	@git ls-files '*.go' ':!:*_test.go' | xargs wc -l | grep -v ' total$$' | \
+		sort -rn | awk '$$1 > $(HEALTH_MAX_LINES) { print "  " $$1 " " $$2 }'
 
 clean:
 	rm -f facet
