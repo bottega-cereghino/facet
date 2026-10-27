@@ -9,6 +9,7 @@
 # developer machine quietly disagree about what passing means; a tool directive
 # would drag the whole dependency tree of each tool into this module's go.sum,
 # which for a module with three direct dependencies is a poor trade.
+# renovate: datasource=go depName=github.com/golangci/golangci-lint/v2
 GOLANGCI_VERSION := v2.12.2
 GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 
@@ -16,6 +17,7 @@ GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLA
 # repository used to run: a scanner that changes underneath you turns a green
 # history into an unreproducible one, and the version that ran is part of what
 # "no known vulnerabilities" meant on the day it said so.
+# renovate: datasource=go depName=golang.org/x/vuln
 GOVULNCHECK_VERSION := v1.6.0
 GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 

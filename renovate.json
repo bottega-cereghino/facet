@@ -1,0 +1,123 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Dependency updates for facet. AGENTS.md, section Dependency updates, explains the rules.",
+  "extends": [
+    "config:best-practices",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    ":semanticCommitScope(deps)"
+  ],
+  "timezone": "Europe/Rome",
+  "schedule": [
+    "* 0-5 * * 1"
+  ],
+  "minimumReleaseAge": "14 days",
+  "internalChecksFilter": "strict",
+  "vulnerabilityAlerts": {
+    "minimumReleaseAge": "14 days"
+  },
+  "dependencyDashboard": true,
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "automergeType": "pr",
+  "platformAutomerge": false,
+  "ignoreTests": false,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "A version pin with a `# renovate:` comment on the line above it: the Go tool pins in the Makefile and the security tools in security.yml.",
+      "managerFilePatterns": [
+        "/^Makefile$/",
+        "/^\\.github/workflows/security\\.yml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( extractVersion=(?<extractVersion>\\S+))?\\n\\s*[A-Z_]+(:| :=) (?<currentValue>\\S+)"
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "The go directive is the oldest Go the module accepts. Raise it by hand.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "golang"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "setup-go installs the newest patch of the go.mod series ('1.25' with check-latest). Move it with the go directive, by hand.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Patch and digest updates merge by themselves when every check is green.",
+      "matchUpdateTypes": [
+        "patch",
+        "digest"
+      ],
+      "automerge": true
+    },
+    {
+      "groupName": "go modules",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ]
+    },
+    {
+      "groupName": "actions",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ]
+    },
+    {
+      "groupName": "go tools",
+      "matchFileNames": [
+        "Makefile"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ]
+    },
+    {
+      "description": "The checksum next to each version must change with it, and Renovate cannot fetch it. The PR goes red at the checksum step until a person or a session updates it.",
+      "matchFileNames": [
+        ".github/workflows/security.yml"
+      ],
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "automerge": false,
+      "prBodyNotes": [
+        "Update the matching `*_SHA256` in `security.yml` in this PR. The checksums are on the release page (gitleaks: `gitleaks_<v>_checksums.txt`, Linux x64; zizmor: the `zizmor-x86_64-unknown-linux-gnu.tar.gz` asset digest)."
+      ]
+    },
+    {
+      "description": "A major update never merges by itself.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
+    }
+  ]
+}
