@@ -26,7 +26,7 @@ Code moves to `internal/` when a second caller needs it, not before.
 
 | Command | What |
 | --- | --- |
-| `make check` | every gate CI's Linux job runs: fmt, vet, lint, test, tidy, vuln. Run it before every push |
+| `make check` | fmt, vet, lint, test, tidy, vuln: every gate CI's Linux job runs except `make build`. Run it before every push |
 | `make test` | `go test ./... -race -shuffle=on -cover`; coverage is printed, never a target |
 | `make health` | functions over cognitive complexity 15 and Go files over 400 lines. A budget the review reads, never a gate |
 | `make fmt-fix` | `gofmt -s -w .` |
@@ -39,13 +39,17 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
 ## CI
 
 - `ci.yml`: `linux` runs each `make` target as its own step; `macos` runs
-  build and test after linux passes, and skips on draft PRs; `renovate`
-  validates `renovate.json`; `ci` needs all of them and is the one result.
-  A new job goes into `ci`'s `needs`.
+  build and test after linux passes, and skips on draft PRs and on PRs not
+  based on `main`; `renovate` validates `renovate.json`; `ci` needs all of
+  them and is the one result for this workflow. A new job goes into `ci`'s
+  `needs`.
 - `security.yml`: gitleaks on the PR's commits (full history on main and
-  weekly) and zizmor on the workflows.
+  weekly) and zizmor on the workflows. A separate workflow, so its two jobs
+  ("Committed secrets", "Workflow audit") are required by the ruleset by
+  name rather than through `ci`.
 - `pr-title.yml`: the PR title is a Conventional Commit.
-- The `main` ruleset requires `linux`, `macos`, `ci` and `pr-title`, a PR,
+- The `main` ruleset requires `linux`, `macos`, `ci`, `pr-title`,
+  "Committed secrets" and "Workflow audit", a PR,
   linear history and an up-to-date branch. Squash is the only merge method,
   and the squash commit takes the PR title.
 - Actions are pinned to a full SHA with the version in a comment. Checkout
@@ -77,14 +81,16 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
   (`~/Projects`), `FACET_MIRRORS`, `FACET_ROUTING` and `FACET_KNOWLEDGE`.
   Set them to a temp directory when you try a command.
 - **`sync` never touches an existing clone, and `reap` refuses while work
-  could be lost.** These guarantees are listed in the README with the tests
-  that hold them. A change that weakens one needs that test changed in the
-  same PR, with the reason.
+  could be lost.** These guarantees are listed in the README section
+  "Guarantees, and the tests that hold them". A change that weakens one is a
+  behaviour change: say so in the PR, with the reason, and change the tests
+  that hold it in the same PR.
 - **A refusal prints the fix**, not only the failure (`ghx.Problem` is the
   shape).
 - **Keep behaviour changes out of refactors.**
-- **Golden fixtures are byte-exact.** `.gitattributes` and `.editorconfig`
-  leave `testdata/` alone; do not reformat it.
+- **Golden fixtures are byte-exact.** `.editorconfig` leaves `testdata/`
+  alone and `.gitattributes` keeps git off the line endings of
+  `testdata/manifests/*.json`; do not reformat either.
 
 ## Pull requests
 
@@ -98,12 +104,13 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
 
 ## Dependency updates
 
-Renovate (`renovate.json`) on `config:best-practices`, weekly on Monday
-morning, and only releases at least 14 days old. It covers Go modules (then
-`go mod tidy`), action SHAs, the Makefile tool pins and the gitleaks and
-zizmor versions in `security.yml`, each found through a
-`# renovate: datasource=… depName=…` comment on the line above the pin.
-Patch and digest updates merge themselves on a green `ci`; minors and majors
+Renovate (`renovate.json`) on `config:best-practices`, weekly between
+00:00 and 06:00 on Monday (Europe/Rome), and only releases at least 14 days old. It covers Go modules (then
+`go mod tidy`), action SHAs, the Renovate validator image in `ci.yml`, the Makefile tool pins
+and the gitleaks and zizmor versions in `security.yml`; the last two are
+found through a `# renovate: datasource=… depName=…` comment on the line
+above the pin. Patch and digest updates merge themselves once every check is
+green; minors and majors
 wait for a person. A gitleaks or zizmor update stays red until its
 `*_SHA256` is updated in the same PR, because Renovate cannot fetch the
 checksum. The `go` directive in `go.mod` and setup-go's `go-version` move by
