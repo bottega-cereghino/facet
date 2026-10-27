@@ -141,6 +141,10 @@ jobs:
       # The checkout writes into the runner workspace, which the image user
       # cannot write.
       options: --user root
+    # The validator needs no secret, so the workflow-level word list is not
+    # handed to a third-party image.
+    env:
+      FACET_DENYLIST: ''
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
