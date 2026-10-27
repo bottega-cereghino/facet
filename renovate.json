@@ -11,7 +11,7 @@
   "schedule": [
     "* 0-5 * * 1"
   ],
-  "minimumReleaseAge": "14 days",
+  "minimumReleaseAge": "fourteen days",
   "internalChecksFilter": "strict",
   "vulnerabilityAlerts": {
     "minimumReleaseAge": "14 days"
@@ -119,5 +119,6 @@
       ],
       "automerge": false
     }
-  ]
+  ],
+  "plantedUnknownOption": true
 }
