@@ -2,3 +2,8 @@
 /facet.exe
 /dist/
 /.denylist
+
+# Local environment and personal agent notes.
+.env
+.env.*
+CLAUDE.local.md

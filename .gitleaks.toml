@@ -1,0 +1,11 @@
+# gitleaks settings: the default rules.
+#
+# A real secret found in a commit: rotate it first, then remove it from the
+# tree. History is never rewritten, so the old commit still holds the dead
+# value; add that finding's fingerprint to .gitleaksignore with a comment
+# saying what it was, when it was rotated, and the date to review the entry.
+# A false positive gets an allowlist entry here, with a description saying why
+# it is not a secret.
+
+[extend]
+useDefault = true
