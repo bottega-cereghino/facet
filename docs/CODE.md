@@ -153,7 +153,9 @@ are covered in CI all the same.
 - **Never weaken a gate to make it pass.** No `continue-on-error`, no
   `if: always()`, no `|| true`. If a gate is wrong, delete it and say why; if it
   is right, fix what it caught. A gate that cannot fail is worse than no gate,
-  because it reads as coverage.
+  because it reads as coverage. The one `if: always()` in `ci.yml` is on the final
+  `ci` job, which fails when any job it needs failed: there it makes a red
+  count, because a job skipped after a failure would read as passed.
 
 Platform-specific code uses the `_unix.go` / `_windows.go` build-tag split —
 see `internal/fslink` and `internal/gitx` — rather than `runtime.GOOS` branches
@@ -194,6 +196,11 @@ already drifted, with the workflow several linter releases behind and
    construction, so running it three times buys nothing. What these legs
    uniquely prove is that the code compiles and its tests pass where filesystem
    semantics differ.
+
+A final `ci` job needs every other job and fails if any of them failed or was
+cancelled, so one name says whether a run is green. It runs even when a job
+before it fails; a skipped job counts as passed there, which is why the ruleset
+still names `linux` and `macos` as well. A new job goes into its `needs`.
 
 The tiering is about feedback, **not** cost: this is a public repository, so
 GitHub-hosted runners are free on every OS. A formatting slip should fail in

@@ -108,7 +108,9 @@ jobs:
   #
   # Never add a tolerance construct (continue-on-error, if: always(), || true)
   # to any job here. The tiering is about when a check runs, never about whether
-  # its result is believed.
+  # its result is believed. The one `if: always()` is on `ci` below, and it makes
+  # a failure count rather than hiding one: without it `ci` would be skipped when
+  # linux fails, and a skipped job reads as passed.
   macos:
     name: macos
     needs: linux
@@ -126,6 +128,27 @@ jobs:
           check-latest: true
       - run: make build
       - run: make test
+
+  # The one result. It runs even when a job above fails or is skipped, so one
+  # name says whether a pull request is green. A skipped job passes here: macos
+  # skips on drafts on purpose, and the ruleset still requires macos by name.
+  # Add every new job to `needs`.
+  ci:
+    name: ci
+    if: always()
+    needs: [linux, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "A job failed or was cancelled: $NEEDS"
+          exit 1
+      - run: echo "Every job passed or was skipped."
+
   # The Windows tier is REMOVED, not disabled -- facet#72, 2026-07-29.
   #
   # Measured: facet is the fleet's most expensive CI ($6.93 in one month
