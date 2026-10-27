@@ -6,7 +6,7 @@ the privacy rules this public repository is written to — lives in
 exists; if you find one whose reason no longer holds, change the rule rather
 than working around it.
 
-Two things worth knowing before you open a pull request:
+Three things worth knowing before you open a pull request:
 
 - **Run `make check`.** It is every gate CI's first tier runs, target for
   target, so a green run locally means a green run there.
