@@ -9,3 +9,10 @@
 
 [extend]
 useDefault = true
+
+# facet's tests and issue templates use GitHub label names such as
+# "complexity/2". The generic-api-key rule reads the one after "area/api" as a
+# key. A label is not a secret.
+[[allowlists]]
+description = "GitHub complexity labels, e.g. complexity/2"
+regexes = ['''^complexity/[0-9]+$''']
