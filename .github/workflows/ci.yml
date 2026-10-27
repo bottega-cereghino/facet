@@ -108,7 +108,9 @@ jobs:
   #
   # Never add a tolerance construct (continue-on-error, if: always(), || true)
   # to any job here. The tiering is about when a check runs, never about whether
-  # its result is believed.
+  # its result is believed. The one `if: always()` is on `ci` below, and it makes
+  # a failure count rather than hiding one: without it `ci` would be skipped when
+  # linux fails, and a skipped job reads as passed.
   macos:
     name: macos
     needs: linux

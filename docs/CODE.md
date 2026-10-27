@@ -153,7 +153,9 @@ are covered in CI all the same.
 - **Never weaken a gate to make it pass.** No `continue-on-error`, no
   `if: always()`, no `|| true`. If a gate is wrong, delete it and say why; if it
   is right, fix what it caught. A gate that cannot fail is worse than no gate,
-  because it reads as coverage.
+  because it reads as coverage. The one `if: always()` in `ci.yml` is on the final
+  `ci` job, which fails when any job it needs failed: there it makes a red
+  count, because a job skipped after a failure would read as passed.
 
 Platform-specific code uses the `_unix.go` / `_windows.go` build-tag split —
 see `internal/fslink` and `internal/gitx` — rather than `runtime.GOOS` branches
