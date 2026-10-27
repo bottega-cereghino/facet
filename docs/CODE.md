@@ -203,6 +203,9 @@ already drifted, with the workflow several linter releases behind and
    uniquely prove is that the code compiles and its tests pass where filesystem
    semantics differ.
 
+A `renovate` job runs Renovate's validator on `renovate.json`, so a broken
+config fails here instead of silently stopping the updates.
+
 A final `ci` job needs every other job and fails if any of them failed or was
 cancelled, so one name says whether a run is green. It runs even when a job
 before it fails; a skipped job counts as passed there, which is why the ruleset

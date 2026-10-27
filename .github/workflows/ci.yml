@@ -129,6 +129,30 @@ jobs:
       - run: make build
       - run: make test
 
+  # renovate.json must pass Renovate's own validator. The image is the Renovate
+  # release that holds it, pinned by tag and digest; Renovate moves it like any
+  # other dependency. It comes from Docker Hub, not GHCR: the same image and
+  # digest, but GHCR gives no release dates, and without one the 14 day rule
+  # holds an update back forever.
+  renovate:
+    name: renovate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: renovate/renovate:44.155.1@sha256:f5796f26088c0f5debb07c16fa9e801145e4d3ba9717d9cc22ca8cd265e2a0eb
+      # The checkout writes into the runner workspace, which the image user
+      # cannot write.
+      options: --user root
+    # The validator needs no secret, so the workflow-level word list is not
+    # handed to a third-party image.
+    env:
+      FACET_DENYLIST: ''
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - run: renovate-config-validator --strict
+
   # The one result. It runs even when a job above fails or is skipped, so one
   # name says whether a pull request is green. A skipped job passes here: macos
   # skips on drafts on purpose, and the ruleset still requires macos by name.
@@ -136,7 +160,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [linux, macos]
+    needs: [linux, macos, renovate]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
