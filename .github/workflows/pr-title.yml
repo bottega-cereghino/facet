@@ -2,7 +2,7 @@ name: pr-title
 
 # A squash merge uses the pull request title as the commit message on main, so
 # the title must be a Conventional Commit, for example
-# "fix(spawn): fail when the home clone is missing". AGENTS.md lists the types.
+# "fix(spawn): fail when the home clone is missing". CONTRIBUTING.md lists the types.
 # Scopes are optional and not checked.
 
 on:
