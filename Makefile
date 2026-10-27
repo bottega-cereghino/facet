@@ -91,8 +91,12 @@ HEALTH_MAX_LINES := 400
 
 health:
 	@echo "== functions over cognitive complexity 15"
-	@$(GOLANGCI) run --enable-only gocognit --tests=false --issues-exit-code 0 \
-		--output.text.print-issued-lines=false --show-stats=false ./...
+	@out=$$($(GOLANGCI) run --enable-only gocognit --tests=false --issues-exit-code 0 \
+		--output.text.print-issued-lines=false --show-stats=false ./... 2>&1); \
+	echo "$$out"; \
+	if echo "$$out" | grep -q '(typecheck)'; then \
+		echo "WARNING: a package did not compile, so its functions are missing above. Run make lint."; \
+	fi
 	@echo "== Go files over $(HEALTH_MAX_LINES) lines"
 	@git ls-files '*.go' ':!:*_test.go' | xargs wc -l | grep -v ' total$$' | \
 		sort -rn | awk '$$1 > $(HEALTH_MAX_LINES) { print "  " $$1 " " $$2 }'
