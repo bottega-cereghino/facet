@@ -131,13 +131,15 @@ jobs:
 
   # renovate.json must pass Renovate's own validator. The image is the Renovate
   # release that holds it, pinned by tag and digest; Renovate moves it like any
-  # other dependency.
+  # other dependency. It comes from Docker Hub, not GHCR: the same image and
+  # digest, but GHCR gives no release dates, and without one the 14 day rule
+  # holds an update back forever.
   renovate:
     name: renovate
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
-      image: ghcr.io/renovatebot/renovate:44.155.1@sha256:f5796f26088c0f5debb07c16fa9e801145e4d3ba9717d9cc22ca8cd265e2a0eb
+      image: renovate/renovate:44.155.1@sha256:f5796f26088c0f5debb07c16fa9e801145e4d3ba9717d9cc22ca8cd265e2a0eb
       # The checkout writes into the runner workspace, which the image user
       # cannot write.
       options: --user root
