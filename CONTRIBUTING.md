@@ -13,3 +13,8 @@ Two things worth knowing before you open a pull request:
 - **This repository is public.** No private repository names and no issue
   references an outside reader cannot follow. Keep the reasoning, drop the
   coordinate — `docs/CODE.md` section 8 has the detail.
+- **The pull request title is a Conventional Commit**, because the squash
+  merge makes it the commit message on `main`: `type(scope): summary`, the
+  scope optional. Types: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`,
+  `build`, `ci`, `chore`, `revert`. `pr-title.yml` checks it. Older history
+  used `area: summary`; that is no longer accepted.
