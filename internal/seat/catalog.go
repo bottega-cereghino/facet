@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -97,7 +96,10 @@ func generateCatalog(bin string, timeout time.Duration) ([]byte, error) {
 	// returns, and the spawn hangs exactly as if there were no timeout. Found
 	// by writing the test an audit asked for -- the 60s deadline was measured
 	// not firing at all. Same mechanism as argano#6, one repo over.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	//
+	// Windows has no process groups in this sense; see catalog_windows.go for
+	// how the same guarantee is reached there.
+	configureProcessGroup(cmd)
 	// No stdin, stated rather than inherited. Go's default for a nil Stdin is
 	// /dev/null, so this line changes nothing today -- it exists so that a
 	// later refactor setting os.Stdin has to delete an explicit decision
@@ -124,10 +126,9 @@ func generateCatalog(bin string, timeout time.Duration) ([]byte, error) {
 		return buf.Bytes(), nil
 	case <-time.After(timeout):
 		if cmd.Process != nil {
-			// The GROUP, not the process. A negative pid is the group, and it
-			// is safe here only because Setpgid above gave the child one of
-			// its own -- without that it would name facet's own group.
-			if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			// The whole tree, not the direct child -- a grandchild left holding
+			// the output pipe is exactly the hang the deadline exists to stop.
+			if err := killProcessTree(cmd.Process); err != nil {
 				_ = cmd.Process.Kill()
 			}
 		}
