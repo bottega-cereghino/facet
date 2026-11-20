@@ -256,9 +256,8 @@ func RemoveScope(workspaceDir string, remove []Ref) (removed, remaining []Ref, e
 }
 
 // SetScope replaces a workspace's scope wholesale and reports what it
-// replaced, the way tree wire reports the parent an edge moved a child away
-// from -- so the previous state is not simply gone the moment the new one is
-// written.
+// replaced, so the previous state is not simply gone the moment the new one
+// is written.
 //
 // refs is deduplicated the same way AppendScope's input is; SetScope always
 // writes (even to the same value) so it is not idempotent in the sense

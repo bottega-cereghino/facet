@@ -1,7 +1,7 @@
 name: Security
 
 # gitleaks (committed secrets) and zizmor (unsafe workflow patterns), copied
-# from the Orlo repo, which trimmed it from hisui. On a pull request gitleaks
+# from another of the author's repositories. On a pull request gitleaks
 # reads only the pull request's commits; on main, weekly and on demand, the
 # full history.
 on:

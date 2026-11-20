@@ -11,6 +11,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`spawn --seat` and `--seat-issue`**, hidden and without effect since
   v0.2.0. Reap still treats `.seat`, `.seat-issue` and `.catalog.json` as
   facet's own files, so workspaces that carry them are not held by them.
+- **`facet-graph` (`tree`, `deps`) and the code only it used**: the issue
+  hierarchy checks, the `structure` validation in the routing file, and the
+  graph calls in the GitHub client. It was frozen, and nothing in `facet`
+  depended on it. A routing file that still has a `structure` key loads as
+  before; the key is ignored. v0.2.0 is the last release that has it.
 
 ## [0.2.0] - 2026-10-26
 
@@ -59,7 +64,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   kept as given.
 
 - **A repo-shorthand blocker is a reference** (#104). In a "Blocked by /
-  waiting on" section, `harness#121` was dropped silently: the guard that stops
+  waiting on" section, `tools#121` was dropped silently: the guard that stops
   `PR#3` from reading as a reference rejected it too. Now a prefix that matches
   a key in routing's `repos` resolves to that repo; any other prefix is still a
   word. Aliases are not consulted, and a key that maps to two repos resolves to
@@ -104,7 +109,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pane or process is live in the workspace.
 
 - **Seat identity.** `facet spawn` no longer writes `.seat` or `.seat-issue`,
-  and no longer generates `.catalog.json` (which needed `argano`, and made
+  and no longer generates `.catalog.json` (which needed a separate tool, and made
   spawn exit non-zero when it was missing). `--seat` and `--seat-issue` are
   still accepted, hidden and deprecated, with no effect. `.scope` stays:
   `facet scope list/add/remove/set` work on it alone, finding the workspace by
@@ -179,7 +184,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   **The required set is read from the routing file, never a list inside facet,
   and it is PER REPOSITORY.** A label declared on a repo-scoped shape —
-  `{"repo": "stele", "label": "type/seat"}` — is reachable in that repository
+  `{"repo": "api", "label": "type/release"}` — is reachable in that repository
   and nowhere else, so requiring it everywhere would report a gap the structure
   itself says can never be used, and `--create` would then define a label no
   wire there could ever apply. `Structure.Labels()` remains the *recognition*
@@ -212,8 +217,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The alternative a caller was left with is the reason this is facet's to fix
   rather than theirs to work around: **a classifier built on another tool's
   prose is one release note away from silently answering the wrong thing.**
-  `argano`'s console had to declare "exit 1 from `facet tree doctor` means
-  findings", which then reads a 404 as a finding. `gad hold --fleet --check`
+  One caller had to declare "exit 1 from `facet tree doctor` means
+  findings", which then reads a 404 as a finding. Another tool of the author's
   already answers this way — `1` while held, `2` when unreadable.
 
 - **`tree wire` creates a declared label the repository lacks, and FAILS when
@@ -294,8 +299,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from *I threw it away***. The only reason such a spawn produced anything at
   all is that the home repo is added unconditionally.
 
-  **Measured on the harness that drives every seating:** it passes one
-  `--clone <name>=<url>` per repository a seat's scope names, which is never a
+  **Measured on the script that drove every multi-repo spawn:** it passes one
+  `--clone <name>=<url>` per repository its scope names, which is never a
   bare routing key, **so every multi-repo workspace it ever created held the
   home repository alone.** The one thing that caught it was a downstream check
   comparing the scope against the clones — and only when the scope happened to
@@ -313,11 +318,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   created and before the workspace directory exists, so nothing is left behind.
 
   **They also resolve routing aliases now, as the inference always has.**
-  `--clone doctrine` was dropped while an issue body saying "doctrine" routed to
-  `stele` — the same table, read by one code path and not the other. Refusing it
+  `--clone backend` was dropped while an issue body saying "backend" routed to
+  `api` — the same table, read by one code path and not the other. Refusing it
   would have been a refusal routing itself can answer, so the two paths now
   resolve a spelling the same way. Two spellings of one repository
-  (`--clone stele --clone doctrine`) select it once.
+  (`--clone api --clone backend`) select it once.
 
 - **`facet tree doctor` no longer reports a read that never happened as a
   finding.** A node whose read did not answer was counted among the defects, so

@@ -120,43 +120,11 @@ type Client interface {
 	IssueID(repo string, number int) (int64, error)
 	// AddBlockedBy declares repo#number is blocked by the issue with database
 	// id blockingID, as a native GitHub issue-dependency edge.
-	AddLabel(repo string, number int, label string) error
-	// RemoveLabel strips a label a previous wire applied, e.g. the rung label
-	// of a level a node has moved away from.
-	RemoveLabel(repo string, number int, label string) error
 	AddBlockedBy(repo string, number int, blockingID int64) error
 	// RepoLabels lists the labels DEFINED in a repository, which is a different
-	// question from what labels an issue carries: AddLabel fails when the
-	// definition is absent, and only this can say whether it is.
+	// question from what labels an issue carries: filing with a label fails when
+	// the definition is absent, and only this can say whether it is.
 	RepoLabels(repo string) ([]RepoLabel, error)
-	// CreateLabel defines one. It refuses an existing label rather than
-	// overwriting its colour and description.
-	CreateLabel(repo string, label RepoLabel) error
-
-	// IssueParent reports an issue's parent under GitHub's sub-issues feature,
-	// and whether it has one. GraphQL-only and immediately consistent; see
-	// graph.go for why REST cannot answer this at all.
-	IssueParent(repo string, number int) (IssueRef, bool, error)
-	// OpenIssueParents lists every OPEN issue in repo with its parent, if it
-	// has one -- the complement of IssueChildren, and the only way to ask what
-	// belongs to no tree at all. A tree read downward can never answer that:
-	// an issue with no parent is, by definition, under no root to walk from.
-	OpenIssueParents(repo string) ([]Parentage, error)
-	// IssueChildren lists an issue's sub-issues, each already carrying its
-	// title/state/labels -- no second read is needed to render one. Eventually
-	// consistent -- never use it to confirm an edge just written.
-	IssueChildren(repo string, number int) ([]SubIssue, error)
-	// AddSubIssue makes the issue with database id childID a sub-issue of
-	// repo#number. Refuses (422) if the child already has a parent -- call
-	// RemoveSubIssue against the old parent first.
-	AddSubIssue(repo string, number int, childID int64) error
-	// RemoveSubIssue detaches the issue with database id childID from
-	// repo#number as its sub-issue parent.
-	RemoveSubIssue(repo string, number int, childID int64) error
-	// BlockedBy lists what must land before repo#number can proceed.
-	BlockedBy(repo string, number int) ([]IssueRef, error)
-	// Blocking lists what cannot start until repo#number lands.
-	Blocking(repo string, number int) ([]IssueRef, error)
 
 	// IssueComments lists an issue's comments, oldest first.
 	IssueComments(repo string, number int) ([]Comment, error)
@@ -164,11 +132,6 @@ type Client interface {
 	PostComment(repo string, number int, body string) (string, error)
 	// EditComment replaces one comment's body and returns its URL.
 	EditComment(repo string, commentID int64, body string) (string, error)
-
-	// ProjectStatuses maps "owner/repo#n" to the named single-select field's
-	// value for every item on the board. One call answers a whole tree, which
-	// is why it is a bulk read rather than a per-issue one.
-	ProjectStatuses(owner string, projectNumber int, field string) (map[string]string, error)
 }
 
 // CLI is the real client, backed by the gh binary.
@@ -312,22 +275,6 @@ func (CLI) IssueID(repo string, number int) (int64, error) {
 	return id, nil
 }
 
-// AddLabel applies a label to an issue. It is idempotent -- gh does not
-// complain about a label already present -- which is what lets the level label
-// be re-applied on every wire without a read first.
-func (CLI) AddLabel(repo string, number int, label string) error {
-	_, err := run("issue", "edit", strconv.Itoa(number), "--repo", repo, "--add-label", label)
-	return err
-}
-
-// RemoveLabel strips a label from an issue. Like AddLabel, gh does not
-// complain about a label that is already absent, so this needs no read first
-// either.
-func (CLI) RemoveLabel(repo string, number int, label string) error {
-	_, err := run("issue", "edit", strconv.Itoa(number), "--repo", repo, "--remove-label", label)
-	return err
-}
-
 // AddBlockedBy creates the native dependency edge. Like IssueID, there is no
 // `gh issue` subcommand for it.
 func (CLI) AddBlockedBy(repo string, number int, blockingID int64) error {
@@ -443,8 +390,8 @@ func (CLI) ViewPR(repo, branch string) (*PR, error) {
 //
 // `gh pr list --search <sha>` does NOT index pull requests by commit sha: it
 // can return nothing for a sha whose PR merged minutes earlier
-// (`~/.stele/harness/lib/reap.sh`, "AUDITIONING FOR: facet#66", records this
-// exact near-miss). The commit->pulls REST endpoint is the query that
+// (an earlier teardown script recorded this exact near-miss, facet#66). The
+// commit->pulls REST endpoint is the query that
 // actually answers it.
 func (CLI) MergedPRForSHA(repo, sha string) (*PRForCommit, error) {
 	out, err := run("api", fmt.Sprintf("repos/%s/commits/%s/pulls", repo, sha))

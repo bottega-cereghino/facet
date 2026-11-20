@@ -173,17 +173,15 @@ jobs:
           exit 1
       - run: echo "Every job passed or was skipped."
 
-  # The Windows tier is REMOVED, not disabled -- facet#72, 2026-07-29.
+  # The Windows tier is REMOVED, not disabled -- #72, 2026-07-29.
   #
-  # Measured: facet is the fleet's most expensive CI ($6.93 in one month
-  # across ~88 runs, three legs) against stele's $0.64 for 100 linux-only
-  # runs; 2,158 of 3,000 included minutes went in the first 72 hours on Pro.
-  # Windows bills at 2x on a private repo. The sculptor ruled the leg
-  # momentary until it is needed.
+  # Measured while the repository was private: $6.93 in one month across ~88
+  # runs and three legs, ten times a comparable linux-only repository, with
+  # Windows billed at 2x. The leg was dropped until it is needed.
   #
-  # This does NOT retreat from PR facet#52, which fixed the RunTimeout
+  # This does NOT retreat from PR #52, which fixed the RunTimeout
   # transport-helper leak that held Windows file locks and unfroze this repo
   # from patch-only. The fix stays; what stops is re-proving it on every
-  # push at 2x. facet#59 asks whether Windows should be required at all --
+  # push at 2x. #59 asks whether Windows should be required at all --
   # restore this tier when that is answered yes, or when a self-hosted
   # runner makes it free.

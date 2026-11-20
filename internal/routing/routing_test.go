@@ -368,15 +368,15 @@ func TestSpawnableFalseRepoStaysVisibleToRouting(t *testing.T) {
 	contents := `{
 		"version": 1,
 		"repos": {
-			"lab-workspaces": {"dir": "lab-workspaces", "url": "https://example.invalid/lab-workspaces.git", "spawnable": false},
+			"workspaces-root": {"dir": "workspaces-root", "url": "https://example.invalid/workspaces-root.git", "spawnable": false},
 			"home":           {"dir": "home",           "url": "https://example.invalid/home.git"}
 		},
 		"ownerRepoToKey": {
-			"acme/lab-workspaces": "lab-workspaces",
+			"acme/workspaces-root": "workspaces-root",
 			"acme/home": "home"
 		},
 		"aliases": {},
-		"areaMap": {"area/lab": ["lab-workspaces"]},
+		"areaMap": {"area/lab": ["workspaces-root"]},
 		"knowledgeByArea": {},
 		"pathHints": {}
 	}`
@@ -388,15 +388,15 @@ func TestSpawnableFalseRepoStaysVisibleToRouting(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	repo, ok := r.Repos["lab-workspaces"]
+	repo, ok := r.Repos["workspaces-root"]
 	if !ok {
 		t.Fatal("spawnable:false dropped the repo out of Repos entirely")
 	}
 	if repo.IsSpawnable() {
 		t.Error("IsSpawnable() = true for a repo marked spawnable:false")
 	}
-	if got := r.KeyForRepo("acme/lab-workspaces"); got != "lab-workspaces" {
-		t.Errorf(`KeyForRepo("acme/lab-workspaces") = %q, want "lab-workspaces": `+
+	if got := r.KeyForRepo("acme/workspaces-root"); got != "workspaces-root" {
+		t.Errorf(`KeyForRepo("acme/workspaces-root") = %q, want "workspaces-root": `+
 			"spawnable:false must not remove it from ownerRepoToKey resolution", got)
 	}
 
@@ -408,12 +408,12 @@ func TestSpawnableFalseRepoStaysVisibleToRouting(t *testing.T) {
 	sel, _ := r.Infer("acme/home", iss)
 	found := false
 	for _, s := range sel {
-		if s.Key == "lab-workspaces" {
+		if s.Key == "workspaces-root" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("Infer() did not select lab-workspaces even though area/lab names it; sel=%+v", sel)
+		t.Errorf("Infer() did not select workspaces-root even though area/lab names it; sel=%+v", sel)
 	}
 }
 
@@ -653,5 +653,26 @@ func TestSpawnRC(t *testing.T) {
 				t.Errorf("SpawnSessionPrefix() = %q, want %q", got, c.wantPref)
 			}
 		})
+	}
+}
+
+// A routing file written for the removed facet-graph carries a `structure`
+// block. Dropping the feature must not make that file unreadable: the key is
+// ignored, and everything else in the file still loads.
+func TestLoadIgnoresTheRemovedStructureKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routing.json")
+	body := `{
+  "repos": {"api": {"dir": "api", "url": "https://example.invalid/api.git"}},
+  "structure": {"levels": [{"name": "release", "label": "type/release"}]}
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Load(path)
+	if err != nil {
+		t.Fatalf("a routing file with a structure block no longer loads: %v", err)
+	}
+	if _, ok := r.Repos["api"]; !ok {
+		t.Errorf("repos were not read alongside the ignored structure block: %+v", r.Repos)
 	}
 }
