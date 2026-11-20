@@ -70,9 +70,10 @@ func newIssuesCmd() *cobra.Command {
 
 func newReapCmd() *cobra.Command {
 	var (
-		path  string
-		force bool
-		yes   bool
+		path     string
+		force    bool
+		yes      bool
+		reapable bool
 	)
 	cmd := &cobra.Command{
 		Use:   "reap",
@@ -85,9 +86,25 @@ func newReapCmd() *cobra.Command {
 			"one) hold it too, since the workspace is their only copy. Links are removed,\n" +
 			"never followed: their targets are untouched.\n\n" +
 			"The shared mirror is never touched: a clone's objects are hardlinks, so\n" +
-			"deleting the workspace drops those names and leaves the mirror's own intact.",
+			"deleting the workspace drops those names and leaves the mirror's own intact.\n\n" +
+			"--reapable deletes every workspace at the root that reap would delete now:\n" +
+			"it lists them with the disk each frees, asks once, and checks each again just\n" +
+			"before deleting it. It never forces; held workspaces are left alone.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if reapable {
+				if force {
+					return fmt.Errorf("--reapable never forces; to delete a held workspace, name it: facet reap <name> --force")
+				}
+				if path != "" || len(args) > 0 {
+					return fmt.Errorf("--reapable takes no workspace: it reaps every reapable one under %s; drop the name, or drop --reapable", roots.Workspaces)
+				}
+				dirs, err := workspace.Dirs(roots.Workspaces, true)
+				if err != nil {
+					return err
+				}
+				return reapReapable(os.Stdout, dirs, yes, confirm)
+			}
 			ws, err := reapTarget(path, args)
 			if err != nil {
 				return err
@@ -143,6 +160,7 @@ func newReapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&path, "path", "", "workspace (default: working directory)")
 	cmd.Flags().BoolVar(&force, "force", false, "delete even when work would be lost")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
+	cmd.Flags().BoolVar(&reapable, "reapable", false, "delete every workspace at the root that reap would delete now, after one confirmation")
 	return cmd
 }
 

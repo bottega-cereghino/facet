@@ -276,6 +276,12 @@ a `CLAUDE.md`. Any that are not committed in an enclosing repository (a
 versioned `~/Workspaces`, say) hold it as well, because the workspace is their
 only copy. Links are removed, never followed, so their targets are untouched.
 
+`facet reap --reapable` deletes every workspace at the root that `reap` would
+delete now. It lists them with the disk each frees and the total, asks once,
+and leaves every held workspace alone. It never forces, and it checks each
+workspace again just before deleting it, so work started while the prompt
+waited is not lost. `facet ls --size` shows the same list without deleting.
+
 ## The issue graph was removed
 
 `facet-graph` (`tree` and `deps`, for sub-issue hierarchies and blocked-by
@@ -398,6 +404,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` counts commits reachable from any local branch and from no remote.**
   Unlike `@{u}..HEAD`, that also catches a branch which was never pushed at all —
   the branch most easily lost.
+- **`reap --reapable` deletes only what `reap` alone would**, and checks each
+  workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
+  It refuses `--force`.
 - **`reap` never touches the mirror.** Deleting a hardlinked object drops that
   name; the mirror keeps its own.
 - **`reap` also refuses while a tmux pane or process is in the workspace**, in
