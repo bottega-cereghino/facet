@@ -41,13 +41,3 @@ func parseRESTIssue(body []byte) (*Issue, error) {
 	iss.State = strings.ToUpper(iss.State)
 	return &iss, nil
 }
-
-// concatArrays joins the several JSON arrays `gh api --paginate` prints back
-// to back into one. gh emits one array per page rather than a single document.
-func concatArrays(raw []byte) []byte {
-	parts := strings.Split(strings.TrimSpace(string(raw)), "][")
-	if len(parts) == 1 {
-		return raw
-	}
-	return []byte(strings.Join(parts, ","))
-}
