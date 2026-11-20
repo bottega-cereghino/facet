@@ -8,6 +8,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **`spawn --seat` and `--seat-issue`**, hidden and without effect since
+  v0.2.0. Reap still treats `.seat`, `.seat-issue` and `.catalog.json` as
+  facet's own files, so workspaces that carry them are not held by them.
 - **`facet-graph` (`tree`, `deps`) and the code only it used**: the issue
   hierarchy checks, the `structure` validation in the routing file, and the
   graph calls in the GitHub client. It was frozen, and nothing in `facet`
