@@ -14,7 +14,7 @@ import (
 // Projects v2 item, which is why deriving how far a tree has got requires a
 // board at all.
 //
-// It is a bulk read on purpose: answering "how many of this commission's
+// It is a bulk read on purpose: answering "how many of this milestone's
 // descendants are done" per-issue would be one call per node, and the whole
 // point is to answer it for a tree at once.
 //

@@ -30,8 +30,8 @@ func refBoundaryChar(r rune) bool {
 }
 
 // tokenBefore returns the run of repo-path characters immediately before i --
-// the prefix a bare `#n` is stuck to. "PR" in "PR#3", "harness" in
-// "harness#121", "" when the reference stands on its own.
+// the prefix a bare `#n` is stuck to. "PR" in "PR#3", "tools" in
+// "tools#121", "" when the reference stands on its own.
 func tokenBefore(s string, i int) string {
 	j := i
 	for j > 0 && refBoundaryChar(rune(s[j-1])) {
@@ -94,7 +94,7 @@ func (r *Routing) repoForShorthand(prefix string) (string, bool) {
 // heading and only owner/repo#n, never a bare #n.
 //
 // IT IS A METHOD BECAUSE A REPO SHORTHAND CANNOT BE RESOLVED WITHOUT THE
-// ROUTING TABLE (facet#104). `harness#121` is neither `owner/repo#n` nor a
+// ROUTING TABLE (facet#104). `tools#121` is neither `owner/repo#n` nor a
 // standalone `#n`: refBoundaryChar correctly refuses to read the `121` in
 // `PR#3` as a reference, and correctly-by-the-same-rule refused this one, where
 // the prefix genuinely names a repository. The rejection was SILENT, so every

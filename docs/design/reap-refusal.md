@@ -120,7 +120,7 @@ No bare form; a bare `--force` retained as "all conditions" would preserve the e
 under a longer name.**
 
 **This review does not implement it, deliberately.** It is a breaking interface change that
-reaches the fleet's teardown scripts and habits, and it is worth its own issue, its own
+reaches every script and habit built on it, and it is worth its own issue, its own
 migration note, and its own audit. Filing it is the action item this section produces.
 
 **One thing that is now true and was not:** with #66, #77, #78 and #80 landed, the false alarm

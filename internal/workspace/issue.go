@@ -287,7 +287,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 
 // ownFiles are facet's own files at a workspace root. Deleting the workspace
 // is deleting them, so they are never loose. The seat files are listed so a
-// workspace that still carries them from the bottega is not held by them.
+// workspace that still carries them from an older setup is not held by them.
 //
 // .DS_Store is here too: Finder writes it, it holds nothing of the user's, and
 // it would otherwise hold every long-lived workspace a Mac has opened.
@@ -468,11 +468,10 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 // (`git cherry`): that design could never recognize a multi-commit branch
 // squashed into a single commit, because no individual commit's patch matches
 // the combined diff -- an audited defect that made the fix work only for
-// one-commit branches, the minority of this fleet's own PRs.
+// one-commit branches, the minority of real PRs.
 //
-// Ported from the fleet's own harness workaround, which had already reached
-// this design under real, repeated failures:
-// `~/.stele/harness/lib/reap.sh` ("AUDITIONING FOR: facet#66").
+// Ported from an earlier teardown script, which had already reached this
+// design under real, repeated failures (facet#66).
 //
 // repo is the issue's home repo, needed for the merged-PR lookup; commitPR may
 // be nil, in which case only the ancestor check runs and a squash-merge is not
@@ -658,7 +657,7 @@ func remoteDefaultBranch(git gitx.Runner, dir string) string {
 	}
 	// refs/remotes/origin/HEAD is set by a normal clone, but is not
 	// guaranteed (a hand-built remote, an old fetch config). "main" is the
-	// fleet's actual default (the branch ruling, D29-family), not a bare
+	// default branch of every repository facet has been used on, not a bare
 	// guess, so fall back to it if it exists.
 	if _, err := git.Run(dir, nil, "rev-parse", "--verify", "refs/remotes/origin/main"); err == nil {
 		return "origin/main"
@@ -731,10 +730,10 @@ func isUnder(root, path string) bool {
 // REGULAR FILES ONLY, and that is the whole point of the condition. WalkDir
 // stats with Lstat, so a symlink arrives with IsDir() == false -- and os.Chmod
 // FOLLOWS symlinks, so `!d.IsDir()` applied the mode to the target, outside the
-// tree being deleted. A seat workspace links .claude/skills/<skill> into the
-// live harness, so every reap left that directory at 0666: no execute bit, so
-// it could not be traversed, so neither a seat nor git could read the live tree
-// afterwards (facet#87, stele-home#16).
+// tree being deleted. A workspace that links .claude/skills/<skill> into a
+// shared checkout had every reap leave that directory at 0666: no execute bit,
+// so it could not be traversed, and neither an agent nor git could read the
+// shared tree afterwards (facet#87).
 //
 // os.Lchmod does not exist in the standard library, and a symlink has no
 // read-only attribute of its own that would block the removal -- so skipping is

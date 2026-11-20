@@ -20,11 +20,11 @@ func withRouting(t *testing.T, extra string) {
 		"version": 1,
 		"repos": {
 			"lab": {"dir": "lab", "url": "https://example.invalid/lab.git"},
-			"doctrine": {"dir": "doctrine", "url": "https://example.invalid/doctrine.git"},
-			"harness": {"dir": "harness", "url": "https://example.invalid/harness.git"}
+			"docs": {"dir": "docs", "url": "https://example.invalid/docs.git"},
+			"tools": {"dir": "tools", "url": "https://example.invalid/tools.git"}
 		},
 		"ownerRepoToKey": {
-			"acme/lab": "lab", "acme/doctrine": "doctrine", "acme/harness": "harness"
+			"acme/lab": "lab", "acme/docs": "docs", "acme/tools": "tools"
 		},
 		"aliases": {}, "areaMap": {}, "knowledgeByArea": {}, "pathHints": {}` + extra + `
 	}`

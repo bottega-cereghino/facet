@@ -15,8 +15,8 @@ import "testing"
 // Both forms are kept below so that remains true on purpose rather than by
 // luck.
 const itemListSample = `{"items":[
-  {"id":"i1","status":"Done","repository":"https://github.com/acme/harness",
-   "content":{"type":"Issue","number":121,"repository":"acme/harness","title":"a"}},
+  {"id":"i1","status":"Done","repository":"https://github.com/acme/tools",
+   "content":{"type":"Issue","number":121,"repository":"acme/tools","title":"a"}},
   {"id":"i2","status":"In Progress","repository":"https://github.com/acme/lab",
    "content":{"type":"Issue","number":72,"repository":"acme/lab","title":"b"}},
   {"id":"i3","repository":"https://github.com/acme/lab",
@@ -33,8 +33,8 @@ func TestParseProjectStatuses(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"acme/harness#121": "Done",
-		"acme/lab#72":      "In Progress",
+		"acme/tools#121": "Done",
+		"acme/lab#72":    "In Progress",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %d entries %v, want %d", len(got), got, len(want))
@@ -46,7 +46,7 @@ func TestParseProjectStatuses(t *testing.T) {
 	}
 
 	// A draft carries no issue and a pull request is not a node in an issue
-	// tree; counting either would inflate a commission's progress with things
+	// tree; counting either would inflate a milestone's progress with things
 	// that are not its work.
 	if _, ok := got["acme/lab#5"]; ok {
 		t.Error("a pull request was counted as an issue")

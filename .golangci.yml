@@ -1,7 +1,6 @@
 version: "2"
 
-# Chosen rather than inherited, and converged with the other Go repositories in
-# this fleet onto one shared baseline.
+# Chosen rather than inherited.
 #
 # `default: standard` is golangci-lint's own recommended set — errcheck, govet,
 # ineffassign, staticcheck, unused. This file used to say `default: none` plus
@@ -26,7 +25,7 @@ linters:
     misspell:
       # `hardlinked` is a correct technical term here, and misspell reports it
       # as a misspelling of `hardline` in four files. Across every Go repository
-      # in this fleet misspell has never reported a real misspelling, so this
+      # its author keeps, misspell has never reported a real misspelling, so this
       # entry is the linter's entire cost — written down once rather than
       # rediscovered and argued about.
       #
