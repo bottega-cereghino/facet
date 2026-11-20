@@ -655,3 +655,24 @@ func TestSpawnRC(t *testing.T) {
 		})
 	}
 }
+
+// A routing file written for the removed facet-graph carries a `structure`
+// block. Dropping the feature must not make that file unreadable: the key is
+// ignored, and everything else in the file still loads.
+func TestLoadIgnoresTheRemovedStructureKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "routing.json")
+	body := `{
+  "repos": {"api": {"dir": "api", "url": "https://example.invalid/api.git"}},
+  "structure": {"levels": [{"name": "release", "label": "type/release"}]}
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Load(path)
+	if err != nil {
+		t.Fatalf("a routing file with a structure block no longer loads: %v", err)
+	}
+	if _, ok := r.Repos["api"]; !ok {
+		t.Errorf("repos were not read alongside the ignored structure block: %+v", r.Repos)
+	}
+}

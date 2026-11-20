@@ -13,7 +13,6 @@ reasons. Read the section of CODE.md you are about to touch.
 | Path | What |
 | --- | --- |
 | `cmd/facet/` | the CLI: cobra wiring (`newXCmd`) and command bodies (`runX`) |
-| `cmd/facet-graph/` | `tree` and `deps`, a separate binary, **frozen**: it builds and is tested, nothing is added |
 | `internal/<pkg>/` | one package per job; its package doc says which |
 | `internal/privacy/` | the organisation-name guard, a test and nothing else |
 | `testdata/` | fixtures; `testdata/manifests/*.json` are byte-exact golden files |

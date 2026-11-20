@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// restPerPage asks for a whole list in one response where possible. 100 is
+// GitHub's maximum; anything beyond it is a further page.
+const restPerPage = 100
+
 // RepoLabel is a label as a REPOSITORY defines it, rather than as an issue
 // carries it.
 //
@@ -58,26 +62,4 @@ func parseRepoLabels(out []byte) ([]RepoLabel, error) {
 		all = append(all, page...)
 	}
 	return all, nil
-}
-
-// CreateLabel defines a label in repo.
-//
-// It refuses rather than updates when the label already exists -- `gh label
-// create --force` would overwrite someone's colour and description, and this is
-// only ever called to close a gap that has already been established by reading.
-// An existing label is therefore evidence that the read was wrong, which is
-// worth an error rather than a silent edit.
-func (CLI) CreateLabel(repo string, l RepoLabel) error {
-	if _, _, err := splitRepo("CreateLabel", repo); err != nil {
-		return err
-	}
-	args := []string{"label", "create", l.Name, "--repo", repo}
-	if l.Color != "" {
-		args = append(args, "--color", l.Color)
-	}
-	if l.Description != "" {
-		args = append(args, "--description", l.Description)
-	}
-	_, err := run(args...)
-	return err
 }

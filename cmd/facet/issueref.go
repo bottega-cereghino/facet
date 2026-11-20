@@ -11,10 +11,6 @@ import (
 	"github.com/RiccardoCereghino/facet/internal/scope"
 )
 
-// The helpers below are shared with cmd/facet-graph, which keeps its own copy:
-// that binary is frozen, and the two should not be coupled through a package
-// that exists only to hold them.
-
 // loadRouting reads the routing file, treating its ABSENCE as an empty one.
 //
 // The issue commands read GitHub, not the lab: the routing file only ever
