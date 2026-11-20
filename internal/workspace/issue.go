@@ -91,6 +91,8 @@ type IssueState struct {
 	// is itself a blocker: deleting a directory out from under a running
 	// process is silent corruption, not a merely premature reap.
 	LiveRoots []string
+	// SizeBytes is how much disk deleting the workspace frees: objects
+	// hardlinked from the mirror stay behind, so they are not counted.
 	SizeBytes int64
 }
 
@@ -281,7 +283,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 			st.LiveRoots = roots
 		}
 	}
-	st.SizeBytes = dirSize(ws)
+	st.SizeBytes = freedBytes(ws)
 	return st
 }
 
@@ -754,18 +756,4 @@ func removeAllForce(root string) error {
 		return err
 	}
 	return os.RemoveAll(root)
-}
-
-func dirSize(root string) int64 {
-	var total int64
-	_ = filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if fi, err := d.Info(); err == nil {
-			total += fi.Size()
-		}
-		return nil
-	})
-	return total
 }

@@ -6,6 +6,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`facet ls --size`** shows, for each workspace at the root, how much disk
+  deleting it would free and whether `facet reap` would delete it now
+  (`reapable`, or `held (n)`), with a total. In one workspace it prints the
+  same as a footer. It runs reap's checks, a few workspaces at a time.
+
+### Changed
+
+- **The size `reap` and `issues` print is what deleting frees.** It used to
+  add up apparent file sizes, so a clone's objects hardlinked from the mirror
+  counted in full although they stay on disk. It now counts disk blocks, once
+  per file, and only files with no name outside the workspace.
+
 ### Removed
 
 - **`spawn --seat` and `--seat-issue`**, hidden and without effect since
