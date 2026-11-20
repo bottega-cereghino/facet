@@ -132,6 +132,9 @@ func SearchTerms(title string) string {
 	if i := strings.Index(s, ":"); i >= 0 {
 		s = s[i+1:]
 	}
+	// A colon left anywhere starts a qualifier ("backoff:exponential"), so
+	// every one splits words rather than staying in the query.
+	s = strings.ReplaceAll(s, ":", " ")
 	var out []string
 	for _, w := range strings.Fields(s) {
 		w = strings.Trim(w, "`*_,.()[]\"'")
@@ -144,7 +147,8 @@ func SearchTerms(title string) string {
 		}
 	}
 	if len(out) == 0 {
-		return strings.TrimSpace(s)
+		// Only short words: keep them all, on one line (found by FuzzSearchTerms).
+		return strings.Join(strings.Fields(s), " ")
 	}
 	return strings.Join(out, " ")
 }

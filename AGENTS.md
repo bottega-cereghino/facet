@@ -32,6 +32,7 @@ Code moves to `internal/` when a second caller needs it, not before.
 | `make fmt-fix` | `gofmt -s -w .` |
 | `make build` | `go build ./...` |
 | `go test ./internal/<pkg> -run <Name>` | one test |
+| `go test ./internal/routing -run '^$' -fuzz '^FuzzUpsertScope$' -fuzztime 60s` | fuzz one parser longer than `make test`, which runs only the seeds; commit what it finds under `testdata/fuzz` |
 
 golangci-lint and govulncheck are pinned in the Makefile and run with
 `go run`. Change a version there and nowhere else.

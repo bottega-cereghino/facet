@@ -129,8 +129,10 @@ func (r *Routing) ParseBlockedBy(body string) []BlockedByRef {
 				shorthand = repo
 			}
 		}
+		// Issue numbers start at 1: "#0" (or a run of zeros) names no issue,
+		// and the API call it would become fails (found by FuzzParseBlockedBy).
 		n, err := strconv.Atoi(section[m[4]:m[5]])
-		if err != nil {
+		if err != nil || n < 1 {
 			continue
 		}
 		ref := BlockedByRef{Number: n, OwnerRepo: shorthand}
