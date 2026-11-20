@@ -5,7 +5,8 @@ facet is maintained by one person. Only the latest release gets fixes.
 ## Reporting a vulnerability
 
 Please do not open a public issue. Use GitHub's private reporting instead:
-the **Security** tab of this repository, then **Report a vulnerability**.
+[report a vulnerability](https://github.com/bottega-cereghino/facet/security/advisories/new)
+(the **Security** tab of this repository, then **Report a vulnerability**).
 
 You should get an answer within a week. A confirmed issue is fixed in a new
 release, and the advisory is published once the fix is out.
