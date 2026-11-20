@@ -1,8 +1,10 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
-follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to this project are documented here. The project follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). From 0.3.0,
+release-please writes each entry from the Conventional Commit titles on `main`
+(AGENTS.md, section Releases); the entries before it were written by hand in the
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
 ## [Unreleased]
 
