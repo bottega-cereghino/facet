@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/routing"
+	"github.com/bottega-cereghino/facet/internal/routing"
 )
 
 // overrideRouting is the shape a calling script actually meets: keys that are the

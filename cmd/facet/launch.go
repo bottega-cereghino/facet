@@ -6,8 +6,8 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/RiccardoCereghino/facet/internal/claudex"
-	"github.com/RiccardoCereghino/facet/internal/routing"
+	"github.com/bottega-cereghino/facet/internal/claudex"
+	"github.com/bottega-cereghino/facet/internal/routing"
 	"github.com/spf13/pflag"
 )
 

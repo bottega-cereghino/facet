@@ -11,11 +11,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/fslink"
-	"github.com/RiccardoCereghino/facet/internal/gitx"
-	"github.com/RiccardoCereghino/facet/internal/lockfile"
-	"github.com/RiccardoCereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/fslink"
+	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/lockfile"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // syncLockName is the per-workspace lockfile that serialises Sync across

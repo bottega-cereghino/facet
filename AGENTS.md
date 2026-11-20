@@ -132,7 +132,9 @@ the org does not let Actions open pull requests, and a PR opened with
    `go install …/cmd/facet@vX.Y.Z` then works.
 
 The way back from a bad release is the previous tag:
-`go install github.com/RiccardoCereghino/facet/cmd/facet@<previous tag>`.
+`go install github.com/bottega-cereghino/facet/cmd/facet@<previous tag>`.
+Tags up to v0.3.0 declare the module's old name, so for those it is
+`go install github.com/RiccardoCereghino/facet/cmd/facet@<tag>`.
 
 ## Dependency updates
 

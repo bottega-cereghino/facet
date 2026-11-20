@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/RiccardoCereghino/facet/internal/routing"
+	"github.com/bottega-cereghino/facet/internal/routing"
 	"github.com/spf13/cobra"
 )
 

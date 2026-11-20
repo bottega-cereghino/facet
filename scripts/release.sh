@@ -66,6 +66,6 @@ if ! grep -q '[^[:space:]]' "$notes_file"; then
   echo "CHANGELOG.md on main has no entry for $version; the release keeps release-please's notes." >&2
   exit 1
 fi
-printf '\nInstall: `go install github.com/RiccardoCereghino/facet/cmd/facet@v%s`\n' "$version" >>"$notes_file"
+printf '\nInstall: `go install github.com/bottega-cereghino/facet/cmd/facet@v%s`\n' "$version" >>"$notes_file"
 gh release edit "v$version" --repo "$REPO_URL" --notes-file "$notes_file" >/dev/null
 echo "v$version: release notes set from CHANGELOG.md"

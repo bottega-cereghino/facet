@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 )
 
 // offlineGH fails the test if anything reaches the forge. The seat checks are

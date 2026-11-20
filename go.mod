@@ -1,4 +1,4 @@
-module github.com/RiccardoCereghino/facet
+module github.com/bottega-cereghino/facet
 
 go 1.25.0
 

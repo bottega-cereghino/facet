@@ -44,7 +44,7 @@ and makes the throwaway ones disposable without losing work.
 ## Install
 
 ```sh
-go install github.com/RiccardoCereghino/facet/cmd/facet@latest
+go install github.com/bottega-cereghino/facet/cmd/facet@latest
 ```
 
 macOS. Requires `git`. The issue features additionally use the

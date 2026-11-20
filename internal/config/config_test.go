@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // workspaceWithRepo builds a workspace holding one repository subdirectory. That

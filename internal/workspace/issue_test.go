@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
-	"github.com/RiccardoCereghino/facet/internal/gitx"
-	"github.com/RiccardoCereghino/facet/internal/gitx/gitxtest"
-	"github.com/RiccardoCereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/gitx/gitxtest"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 type fakePR struct{ pr *ghx.PR }

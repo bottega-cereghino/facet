@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/manifest"
-	"github.com/RiccardoCereghino/facet/internal/scope"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/scope"
 )
 
 // workspaceWithRepo builds a workspace holding one repository subdirectory, and

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/config"
 )
 
 // facet#83's invocation trap: `facet reap <name>` answered

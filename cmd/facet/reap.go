@@ -7,9 +7,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/mux"
-	"github.com/RiccardoCereghino/facet/internal/workspace"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/mux"
+	"github.com/bottega-cereghino/facet/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

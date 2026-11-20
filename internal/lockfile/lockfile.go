@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/RiccardoCereghino/facet/internal/wait"
+	"github.com/bottega-cereghino/facet/internal/wait"
 )
 
 const (

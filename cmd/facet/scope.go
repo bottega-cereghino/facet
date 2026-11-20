@@ -9,9 +9,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/scope"
-	"github.com/RiccardoCereghino/facet/internal/workspace"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/scope"
+	"github.com/bottega-cereghino/facet/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RiccardoCereghino/facet/internal/gitx"
-	"github.com/RiccardoCereghino/facet/internal/gitx/gitxtest"
+	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/gitx/gitxtest"
 )
 
 func TestPathFor(t *testing.T) {

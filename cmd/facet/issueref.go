@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
-	"github.com/RiccardoCereghino/facet/internal/routing"
-	"github.com/RiccardoCereghino/facet/internal/scope"
+	"github.com/bottega-cereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/routing"
+	"github.com/bottega-cereghino/facet/internal/scope"
 )
 
 // loadRouting reads the routing file, treating its ABSENCE as an empty one.

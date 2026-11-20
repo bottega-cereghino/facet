@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RiccardoCereghino/facet/internal/knowledge"
-	"github.com/RiccardoCereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/knowledge"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // A clone that failed leaves no repository behind, and Sync only warns about
