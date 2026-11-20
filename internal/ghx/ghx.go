@@ -390,8 +390,8 @@ func (CLI) ViewPR(repo, branch string) (*PR, error) {
 //
 // `gh pr list --search <sha>` does NOT index pull requests by commit sha: it
 // can return nothing for a sha whose PR merged minutes earlier
-// (`~/.stele/harness/lib/reap.sh`, "AUDITIONING FOR: facet#66", records this
-// exact near-miss). The commit->pulls REST endpoint is the query that
+// (an earlier teardown script recorded this exact near-miss, facet#66). The
+// commit->pulls REST endpoint is the query that
 // actually answers it.
 func (CLI) MergedPRForSHA(repo, sha string) (*PRForCommit, error) {
 	out, err := run("api", fmt.Sprintf("repos/%s/commits/%s/pulls", repo, sha))

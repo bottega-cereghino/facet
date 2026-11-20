@@ -502,9 +502,8 @@ func TestMultiCommitSquashMergedBranchReapsClean(t *testing.T) {
 	}
 }
 
-// Audit finding on facet!76, round 3: the harness's own workaround
-// (`~/.stele/harness/lib/reap.sh`) exists because every auditor workspace is a
-// DETACHED HEAD -- auditing checks out the audited sha, never a branch tip, so
+// Audit finding on facet!76, round 3: an earlier teardown script handled
+// this because every review workspace is a DETACHED HEAD -- auditing checks out the audited sha, never a branch tip, so
 // a squash-merged audit workspace is 100% of that traffic. The landing proof's
 // third check (every file this ref touched still reads as it does on def) is
 // what a detached HEAD needs, same as a checked-out branch.
@@ -905,7 +904,7 @@ func TestSquashLandedWorkspaceStillReapsAfterAnUnrelatedMerge(t *testing.T) {
 }
 
 // The guard nothing asserted, and the reason check (c) exists at all, quoted
-// from the harness workaround it was ported from: "a merged PR whose file then
+// from the teardown script it was ported from: "a merged PR whose file then
 // diverged would still be a loss, and (b) alone would have said it was safe."
 //
 // That property must survive facet#78 exactly. The narrowing is only allowed to
@@ -1396,12 +1395,12 @@ func TestReapFromInsideAClone(t *testing.T) {
 //
 // filepath.WalkDir stats with Lstat, so a symlink arrives with IsDir() == false
 // and lands in the same branch as a regular file; os.Chmod then FOLLOWS it, so
-// the mode is applied to the target. A seat workspace holds
-// .claude/skills/<skill> pointing into the live harness at $STELE_HOME, and
-// every reap therefore left that directory at 0666 -- a directory with no
-// execute bit, which cannot be traversed, so neither a seat nor git could read
-// or check out the live tree afterwards. Repaired by hand twice before it was
-// root-caused (facet#87, stele-home#16).
+// the mode is applied to the target. A workspace can hold
+// .claude/skills/<skill> pointing into a shared checkout, and every reap
+// therefore left that directory at 0666 -- a directory with no execute bit,
+// which cannot be traversed, so neither an agent nor git could read or check
+// out the shared tree afterwards. Repaired by hand twice before it was
+// root-caused (facet#87).
 //
 // The assertion is on the TARGET's mode, not on reap succeeding: reap succeeded
 // every single time this fired. The damage was always somewhere else.

@@ -7,20 +7,20 @@ import (
 	"github.com/RiccardoCereghino/facet/internal/routing"
 )
 
-// overrideRouting is the shape the harness actually meets: keys that are the
+// overrideRouting is the shape a calling script actually meets: keys that are the
 // repositories' short names, and ssh URLs built from those same names -- so a
 // bare key and `key=url` name the same repo, which is what makes accepting both
 // grammars honest rather than lenient.
 func overrideRouting() *routing.Routing {
 	return &routing.Routing{Repos: map[string]routing.Repo{
-		"facet":  {Dir: "facet", URL: "git@github.com:RiccardoCereghino/facet.git"},
-		"stele":  {Dir: "stele", URL: "git@github.com:RiccardoCereghino/stele.git"},
-		"gad":    {Dir: "gad", URL: "git@github.com:RiccardoCereghino/gad.git"},
-		"prism":  {Dir: "prism", URL: "git@github.com:RiccardoCereghino/prism.git"},
-		"argano": {Dir: "argano", URL: "git@github.com:RiccardoCereghino/argano.git"},
+		"facet": {Dir: "facet", URL: "git@github.com:RiccardoCereghino/facet.git"},
+		"api":   {Dir: "api", URL: "git@github.com:acme/api.git"},
+		"infra": {Dir: "infra", URL: "git@github.com:acme/infra.git"},
+		"web":   {Dir: "web", URL: "git@github.com:acme/web.git"},
+		"cli":   {Dir: "cli", URL: "git@github.com:acme/cli.git"},
 	}, Aliases: map[string]string{
-		"doctrine": "stele",
-		"plumbing": "gad",
+		"backend":  "api",
+		"plumbing": "infra",
 		// A dangling alias: routing files carry them, and the flag must say
 		// which hop is missing rather than blaming the operator's spelling.
 		"quarry": "cava",
@@ -37,10 +37,10 @@ func keysOf(sel []routing.Selection) []string {
 
 // TestApplyOverridesAcceptsBothGrammars pins what a recognised value does.
 //
-// The `key=url` rows are the ones facet#160 was filed about: stele-home's
+// The `key=url` rows are the ones facet#160 was filed about: api-home's
 // lib/identity.sh passes one `--clone <name>=git@github.com:owner/<name>.git`
 // per repo the seat's scope names, and every one of them was discarded, so a
-// two-repo seating produced a workspace holding the home repo alone.
+// two-repo spawn produced a workspace holding the home repo alone.
 func TestApplyOverridesAcceptsBothGrammars(t *testing.T) {
 	route := overrideRouting()
 	inferred := []routing.Selection{{Key: "facet", Reasons: []string{"home"}, Home: true}}
@@ -52,79 +52,79 @@ func TestApplyOverridesAcceptsBothGrammars(t *testing.T) {
 	}{
 		{
 			name: "--clone with bare keys",
-			o:    spawnOpts{Clones: []string{"stele", "gad"}},
-			want: []string{"facet", "stele", "gad"},
+			o:    spawnOpts{Clones: []string{"api", "infra"}},
+			want: []string{"facet", "api", "infra"},
 		},
 		{
-			name: "--clone with key=url, the form the harness passes",
+			name: "--clone with key=url, the form a calling script passes",
 			o: spawnOpts{Clones: []string{
-				"stele=git@github.com:RiccardoCereghino/stele.git",
-				"gad=git@github.com:RiccardoCereghino/gad.git",
+				"api=git@github.com:acme/api.git",
+				"infra=git@github.com:acme/infra.git",
 			}},
-			want: []string{"facet", "stele", "gad"},
+			want: []string{"facet", "api", "infra"},
 		},
 		{
-			name: "--clone naming the home repo too, as the harness does",
+			name: "--clone naming the home repo too, as a calling script does",
 			o: spawnOpts{Clones: []string{
 				"facet=git@github.com:RiccardoCereghino/facet.git",
-				"stele=git@github.com:RiccardoCereghino/stele.git",
+				"api=git@github.com:acme/api.git",
 			}},
-			want: []string{"facet", "stele"},
+			want: []string{"facet", "api"},
 		},
 		{
 			name: "--clone mixing the two spellings",
-			o:    spawnOpts{Clones: []string{"stele", "gad=git@github.com:RiccardoCereghino/gad.git"}},
-			want: []string{"facet", "stele", "gad"},
+			o:    spawnOpts{Clones: []string{"api", "infra=git@github.com:acme/infra.git"}},
+			want: []string{"facet", "api", "infra"},
 		},
 		{
 			name: "--add takes key=url as well",
-			o:    spawnOpts{Add: []string{"prism=git@github.com:RiccardoCereghino/prism.git"}},
-			want: []string{"facet", "prism"},
+			o:    spawnOpts{Add: []string{"web=git@github.com:acme/web.git"}},
+			want: []string{"facet", "web"},
 		},
 		{
 			name: "--add does not duplicate what is already selected",
-			o:    spawnOpts{Clones: []string{"stele"}, Add: []string{"stele"}},
-			want: []string{"facet", "stele"},
+			o:    spawnOpts{Clones: []string{"api"}, Add: []string{"api"}},
+			want: []string{"facet", "api"},
 		},
 		{
 			name: "--rm drops by key=url as well as by key",
 			o: spawnOpts{
-				Clones: []string{"stele", "gad"},
-				Remove: []string{"gad=git@github.com:RiccardoCereghino/gad.git"},
+				Clones: []string{"api", "infra"},
+				Remove: []string{"infra=git@github.com:acme/infra.git"},
 			},
-			want: []string{"facet", "stele"},
+			want: []string{"facet", "api"},
 		},
 		{
 			name: "--rm cannot remove the home repo: it carries the branch",
-			o:    spawnOpts{Clones: []string{"stele"}, Remove: []string{"facet"}},
-			want: []string{"facet", "stele"},
+			o:    spawnOpts{Clones: []string{"api"}, Remove: []string{"facet"}},
+			want: []string{"facet", "api"},
 		},
 		{
 			name: "--rm of a routed repo that is not in the set is a no-op, not a refusal",
-			o:    spawnOpts{Remove: []string{"argano"}},
+			o:    spawnOpts{Remove: []string{"cli"}},
 			want: []string{"facet"},
 		},
 		{
 			// route.Infer resolves aliases, so a flag that did not would refuse
 			// a spelling routing itself can resolve -- and today drops it.
 			name: "--clone takes an alias, as the inference does",
-			o:    spawnOpts{Clones: []string{"doctrine"}},
-			want: []string{"facet", "stele"},
+			o:    spawnOpts{Clones: []string{"backend"}},
+			want: []string{"facet", "api"},
 		},
 		{
 			name: "--clone takes alias=url, checked against the aliased repo's url",
-			o:    spawnOpts{Clones: []string{"doctrine=git@github.com:RiccardoCereghino/stele.git"}},
-			want: []string{"facet", "stele"},
+			o:    spawnOpts{Clones: []string{"backend=git@github.com:acme/api.git"}},
+			want: []string{"facet", "api"},
 		},
 		{
 			name: "--add and --rm take an alias too",
-			o:    spawnOpts{Clones: []string{"stele", "gad"}, Add: []string{"prism"}, Remove: []string{"plumbing"}},
-			want: []string{"facet", "stele", "prism"},
+			o:    spawnOpts{Clones: []string{"api", "infra"}, Add: []string{"web"}, Remove: []string{"plumbing"}},
+			want: []string{"facet", "api", "web"},
 		},
 		{
 			name: "an alias does not duplicate the key it resolves to",
-			o:    spawnOpts{Clones: []string{"stele", "doctrine"}},
-			want: []string{"facet", "stele"},
+			o:    spawnOpts{Clones: []string{"api", "backend"}},
+			want: []string{"facet", "api"},
 		},
 		{
 			name: "no overrides leaves the inference alone",
@@ -149,8 +149,8 @@ func TestApplyOverridesAcceptsBothGrammars(t *testing.T) {
 // that cannot name a repository must not be discarded in silence.
 //
 // "I applied your override" and "I threw your override away" produced identical
-// output -- exit 0, a workspace, no warning -- so every multi-repo seating the
-// harness ever performed produced a single-repo workspace and nothing said so.
+// output -- exit 0, a workspace, no warning -- so every multi-repo spawn a
+// calling script ever made produced a single-repo workspace and nothing said so.
 // The refusal is what makes those two outcomes distinguishable.
 func TestApplyOverridesRefusesWhatItCannotResolve(t *testing.T) {
 	route := overrideRouting()
@@ -164,7 +164,7 @@ func TestApplyOverridesRefusesWhatItCannotResolve(t *testing.T) {
 		{
 			name:  "--clone with a key routing has never heard of",
 			o:     spawnOpts{Clones: []string{"nosuchrepo"}},
-			wants: []string{"--clone", "nosuchrepo", "known keys", "gad"},
+			wants: []string{"--clone", "nosuchrepo", "known keys", "infra"},
 		},
 		{
 			name: "--clone key=url where the key is unknown",
@@ -175,25 +175,25 @@ func TestApplyOverridesRefusesWhatItCannotResolve(t *testing.T) {
 		},
 		{
 			name: "--clone key=url where the url disagrees with routing",
-			o:    spawnOpts{Clones: []string{"stele=git@github.com:SomeoneElse/stele.git"}},
+			o:    spawnOpts{Clones: []string{"api=git@github.com:SomeoneElse/api.git"}},
 			wants: []string{
-				"--clone", "stele",
-				"git@github.com:SomeoneElse/stele.git",
-				"git@github.com:RiccardoCereghino/stele.git",
+				"--clone", "api",
+				"git@github.com:SomeoneElse/api.git",
+				"git@github.com:acme/api.git",
 			},
 		},
 		{
 			name:  "--clone with an empty key",
-			o:     spawnOpts{Clones: []string{"=git@github.com:RiccardoCereghino/stele.git"}},
+			o:     spawnOpts{Clones: []string{"=git@github.com:acme/api.git"}},
 			wants: []string{"--clone", "names no repository"},
 		},
 		{
 			name: "--clone alias=url where the url disagrees with the ALIASED repo",
-			o:    spawnOpts{Clones: []string{"doctrine=git@github.com:RiccardoCereghino/gad.git"}},
+			o:    spawnOpts{Clones: []string{"backend=git@github.com:acme/infra.git"}},
 			wants: []string{
-				"--clone", "doctrine",
-				"git@github.com:RiccardoCereghino/gad.git",
-				"git@github.com:RiccardoCereghino/stele.git",
+				"--clone", "backend",
+				"git@github.com:acme/infra.git",
+				"git@github.com:acme/api.git",
 			},
 		},
 		{
@@ -213,8 +213,8 @@ func TestApplyOverridesRefusesWhatItCannotResolve(t *testing.T) {
 		},
 		{
 			name:  "a typo in one of several --clone values refuses the whole spawn",
-			o:     spawnOpts{Clones: []string{"stele", "gd", "argano"}},
-			wants: []string{"--clone", "gd", "known keys"},
+			o:     spawnOpts{Clones: []string{"api", "inf", "cli"}},
+			wants: []string{"--clone", "inf", "known keys"},
 		},
 	}
 	for _, tt := range tests {
@@ -269,8 +269,8 @@ func TestSpawnRefusesAnUnresolvableCloneThroughRunSpawn(t *testing.T) {
 }
 
 // TestSpawnAcceptsAKeyURLCloneThroughRunSpawn is the negative half: the exact
-// spelling the harness passes must go through untouched. A refusal wired too
-// broadly would pass the test above and break every seating.
+// spelling a calling script passes must go through untouched. A refusal wired too
+// broadly would pass the test above and break every multi-repo spawn.
 func TestSpawnAcceptsAKeyURLCloneThroughRunSpawn(t *testing.T) {
 	withSpawnableRouting(t)
 
@@ -284,7 +284,7 @@ func TestSpawnAcceptsAKeyURLCloneThroughRunSpawn(t *testing.T) {
 		Clones: []string{"gateway=https://example.invalid/gateway.git"},
 	})
 	if err != nil {
-		t.Fatalf("spawn refused the form the harness passes: %v", err)
+		t.Fatalf("spawn refused the form a calling script passes: %v", err)
 	}
 	if !reached {
 		t.Error("spawn never reached ViewIssue")
@@ -309,7 +309,7 @@ func TestOverrideKeyListsKeysInAStableOrder(t *testing.T) {
 			t.Fatalf("refusal text varies between runs:\n%s\n%s", first, err)
 		}
 	}
-	if !strings.Contains(first, "argano facet gad prism stele") {
+	if !strings.Contains(first, "api cli facet infra web") {
 		t.Errorf("known keys are not listed sorted: %q", first)
 	}
 }
