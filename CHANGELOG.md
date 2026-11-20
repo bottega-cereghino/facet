@@ -6,6 +6,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **`spawn --seat` and `--seat-issue`**, hidden and without effect since
+  v0.2.0. Reap still treats `.seat`, `.seat-issue` and `.catalog.json` as
+  facet's own files, so workspaces that carry them are not held by them.
+
 ## [0.2.0] - 2026-10-26
 
 ### Added

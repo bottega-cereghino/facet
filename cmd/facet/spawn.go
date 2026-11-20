@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 func newSpawnCmd() *cobra.Command {
@@ -63,7 +62,6 @@ func newSpawnCmd() *cobra.Command {
 	f.StringSliceVar(&addClones, "add", nil, "add repos to the inferred set: a routing key, or key=url; repeatable. An unrecognised value refuses")
 	f.StringSliceVar(&rmClones, "rm", nil, "drop repos from the inferred set: a routing key, or key=url; repeatable. An unrecognised value refuses")
 	f.StringSliceVar(&scope, "scope", nil, "another issue this workspace covers, as owner/repo#n; repeatable. The spawned issue is always included")
-	deprecateSeatFlags(f)
 	f.StringVar(&slug, "slug", "", "override the slug derived from the issue title")
 	f.StringVar(&base, "base", "main", "base branch for the issue branch")
 	f.BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
@@ -98,13 +96,4 @@ type spawnOpts struct {
 
 func issueBranchName(number int, slug string) string {
 	return fmt.Sprintf("feature/%d-%s", number, slug)
-}
-
-// deprecateSeatFlags keeps spawn's --seat and --seat-issue accepted, and
-// hidden, now that facet no longer records who a workspace belongs to.
-func deprecateSeatFlags(f *pflag.FlagSet) {
-	f.String("seat", "", "no effect: .seat is no longer written")
-	f.String("seat-issue", "", "no effect: .seat-issue is no longer written")
-	_ = f.MarkDeprecated("seat", ".seat is no longer written; the flag has no effect")
-	_ = f.MarkDeprecated("seat-issue", ".seat-issue is no longer written; the flag has no effect")
 }
