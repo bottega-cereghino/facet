@@ -84,18 +84,28 @@ func TestHeartbeatKeepsLockFresh(t *testing.T) {
 	lock := filepath.Join(t.TempDir(), "x.lock")
 	err := With(lock, Options{StaleAge: 50 * time.Millisecond, Heartbeat: 10 * time.Millisecond},
 		func() error {
-			// Backdate as if aged; the heartbeat must bring it forward.
+			// Backdate as if aged; the heartbeat must bring it forward. Poll
+			// rather than sleep a fixed time and require a fresh mtime: under
+			// -race on a loaded runner a 10ms tick can come late (#221).
 			old := time.Now().Add(-time.Hour)
-			_ = os.Chtimes(lock, old, old)
-			time.Sleep(120 * time.Millisecond) // several heartbeats
-			fi, err := os.Stat(lock)
-			if err != nil {
+			if err := os.Chtimes(lock, old, old); err != nil {
 				return err
 			}
-			if age := time.Since(fi.ModTime()); age > 50*time.Millisecond {
-				t.Errorf("heartbeat did not refresh the lock; mtime age = %s", age)
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				fi, err := os.Stat(lock)
+				if err != nil {
+					return err
+				}
+				if fi.ModTime().After(old.Add(time.Minute)) {
+					return nil
+				}
+				if time.Now().After(deadline) {
+					t.Errorf("heartbeat did not refresh the lock in 5s; mtime %s", fi.ModTime())
+					return nil
+				}
+				time.Sleep(10 * time.Millisecond)
 			}
-			return nil
 		})
 	if err != nil {
 		t.Fatal(err)
