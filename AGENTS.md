@@ -18,6 +18,7 @@ reasons. Read the section of CODE.md you are about to touch.
 | `testdata/` | fixtures; `testdata/manifests/*.json` are byte-exact golden files |
 | `docs/CODE.md` | the house style, numbered so a rule can be cited |
 | `docs/design/` | design notes for single behaviours (reap's refusal) |
+| `scripts/release.sh` | cuts a release with release-please (section Releases) |
 
 Code moves to `internal/` when a second caller needs it, not before.
 
@@ -103,7 +104,27 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
   `build`, `ci`, `chore`, `revert`.
 - `Closes #123` on a line of its own, one issue per line. The keywords are
   parsed greedily, even inside a sentence that denies the closure.
-- Docs change in the same PR as the code.
+- Docs change in the same PR as the code. The CHANGELOG is not hand-edited:
+  release-please writes it from the PR titles, so the title is the line a
+  user reads. `feat` lands under Added, `fix` under Fixed, `perf` under
+  Changed; a `!` or a `BREAKING CHANGE:` footer is listed first.
+
+## Releases
+
+release-please, run from a machine logged in with `gh`, not from a workflow:
+the org does not let Actions open pull requests, and a PR opened with
+`GITHUB_TOKEN` would never run its required checks (#219).
+
+1. `scripts/release.sh pr` opens or updates the release PR from the commits
+   on `main` since the last tag. Below 1.0 a breaking change bumps the minor.
+2. Merge it like any PR, once its checks are green. To reword the notes, edit
+   `CHANGELOG.md` on the release branch before merging; a new `pr` run
+   rewrites the branch.
+3. `scripts/release.sh tag` tags the merge commit `vX.Y.Z` and publishes the
+   GitHub release. `go install …/cmd/facet@vX.Y.Z` then works.
+
+The way back from a bad release is the previous tag:
+`go install github.com/RiccardoCereghino/facet/cmd/facet@<previous tag>`.
 
 ## Dependency updates
 

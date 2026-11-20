@@ -28,13 +28,14 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "A version pin with a `# renovate:` comment on the line above it: the Go tool pins in the Makefile and the security tools in security.yml.",
+      "description": "A version pin with a `# renovate:` comment on the line above it: the Go tool pins in the Makefile, the security tools in security.yml and release-please in scripts/release.sh.",
       "managerFilePatterns": [
         "/^Makefile$/",
-        "/^\\.github/workflows/security\\.yml$/"
+        "/^\\.github/workflows/security\\.yml$/",
+        "/^scripts/release\\.sh$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( extractVersion=(?<extractVersion>\\S+))?\\n\\s*[A-Z_]+(:| :=) (?<currentValue>\\S+)"
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( extractVersion=(?<extractVersion>\\S+))?\\n\\s*[A-Z_]+(: | := |=)(?<currentValue>\\S+)"
       ]
     }
   ],
