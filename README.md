@@ -72,6 +72,22 @@ Run `ls` from a directory with no manifest of its own that holds workspace
 subdirectories — the workspaces root itself — and it lists every workspace
 under it with a rolled-up health summary, instead of erroring.
 
+`facet ls --size` adds what deleting each workspace would free and whether
+`facet reap` would delete it now, with a total at the end:
+
+```
+WORKSPACE  ENTRIES  HEALTH  FREES  REAP
+notes      0        ok      8K     held (1)
+platform   1        ok      812M   reapable
+
+812M in all; 1 reapable now, freeing 812M. `facet reap <name>` says what holds the rest.
+```
+
+It runs reap's own checks, so it fetches every clone and asks GitHub about
+open pull requests, and it is slower than a plain `ls`. The size counts disk
+blocks, and leaves out objects a clone shares with the mirror: deleting the
+workspace does not free those.
+
 ## Working from GitHub issues
 
 The workspace core turned out to be the perfect base for a second habit: opening a
