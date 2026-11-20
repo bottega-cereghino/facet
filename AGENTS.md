@@ -125,8 +125,10 @@ the org does not let Actions open pull requests, and a PR opened with
 2. Merge it like any PR, once its checks are green. To reword the notes, edit
    `CHANGELOG.md` on the release branch before merging; a new `pr` run
    rewrites the branch.
-3. `scripts/release.sh tag` tags the merge commit `vX.Y.Z` and publishes the
-   GitHub release. `go install …/cmd/facet@vX.Y.Z` then works.
+3. `scripts/release.sh tag` tags the merge commit `vX.Y.Z`, publishes the
+   GitHub release, and copies the version's CHANGELOG entry into the release
+   notes (release-please would write them from the commit titles instead).
+   `go install …/cmd/facet@vX.Y.Z` then works.
 
 The way back from a bad release is the previous tag:
 `go install github.com/RiccardoCereghino/facet/cmd/facet@<previous tag>`.
