@@ -260,16 +260,12 @@ a `CLAUDE.md`. Any that are not committed in an enclosing repository (a
 versioned `~/Workspaces`, say) hold it as well, because the workspace is their
 only copy. Links are removed, never followed, so their targets are untouched.
 
-## The issue graph lives in `facet-graph`, frozen
+## The issue graph was removed
 
-Reading and writing sub-issue hierarchies and blocked-by dependencies (`tree`,
-`deps`) moved out of `facet` into a separate binary, `facet-graph`, in this
-repository. It builds and is tested, but it is frozen: not actively maintained,
-and nothing in `facet` depends on it. See [docs/facet-graph.md](docs/facet-graph.md).
-
-```sh
-go install github.com/RiccardoCereghino/facet/cmd/facet-graph@latest
-```
+`facet-graph` (`tree` and `deps`, for sub-issue hierarchies and blocked-by
+dependencies) was dropped after v0.2.0; `go install …/cmd/facet-graph@v0.2.0`
+still builds the last version. `facet file` still records `Blocked by` edges
+when it files an issue.
 
 ## Comments, by kind
 

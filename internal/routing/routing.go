@@ -107,10 +107,6 @@ type Routing struct {
 	Spawn *Spawn `json:"spawn,omitempty"`
 	// Conventions are the rules `facet file` enforces. Optional.
 	Conventions *Conventions `json:"conventions,omitempty"`
-	// Structure describes the levels an issue tree is expected to have.
-	// Optional, and its absence disables every structure check rather than
-	// softening it -- the hierarchy is an adopter's contract, not facet's.
-	Structure *Structure `json:"structure,omitempty"`
 	// CommentKinds maps a kind name ("plan") to a Go regexp matched against a
 	// comment body. Optional: facet knows that some comments have kinds, never
 	// which ones.
@@ -182,9 +178,6 @@ func (r *Routing) Validate() error {
 		}
 	}
 	if err := r.Conventions.validate(); err != nil {
-		return err
-	}
-	if err := r.Structure.validate(r.Repos); err != nil {
 		return err
 	}
 	for kind, pattern := range r.CommentKinds {

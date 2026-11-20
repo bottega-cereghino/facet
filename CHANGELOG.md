@@ -6,6 +6,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **`facet-graph` (`tree`, `deps`) and the code only it used**: the issue
+  hierarchy checks, the `structure` validation in the routing file, and the
+  graph calls in the GitHub client. It was frozen, and nothing in `facet`
+  depended on it. A routing file that still has a `structure` key loads as
+  before; the key is ignored. v0.2.0 is the last release that has it.
+
 ## [0.2.0] - 2026-10-26
 
 ### Added
