@@ -6,32 +6,54 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-## [Unreleased]
+## [0.3.0](https://github.com/bottega-cereghino/facet/compare/v0.2.0...v0.3.0) (2026-11-20)
+
+### ⚠ BREAKING CHANGES
+
+- `facet spawn` no longer accepts `--seat` or `--seat-issue` (#215).
+- The `facet-graph` binary is gone; `go install …/cmd/facet-graph@v0.2.0`
+  still builds the last one (#214).
 
 ### Added
 
 - **`facet ls --size`** shows, for each workspace at the root, how much disk
   deleting it would free and whether `facet reap` would delete it now
   (`reapable`, or `held (n)`), with a total. In one workspace it prints the
-  same as a footer. It runs reap's checks, a few workspaces at a time.
+  same as a footer. It runs reap's checks, a few workspaces at a time (#218).
 
 ### Changed
 
 - **The size `reap` and `issues` print is what deleting frees.** It used to
   add up apparent file sizes, so a clone's objects hardlinked from the mirror
   counted in full although they stay on disk. It now counts disk blocks, once
-  per file, and only files with no name outside the workspace.
+  per file, and only files with no name outside the workspace (#218).
+- **Releases come from release-please** (#220). This changelog is written from
+  the commit titles from here on.
+
+### Fixed
+
+- **Spawn's scope write-back is idempotent again, and reads back as written**
+  (#224). A bare `##` line hid the scope section, so spawn appended a new one
+  on every run; a `Repos in scope` heading quoted in a code block was
+  rewritten; and with both `Repos involved` and `Repos in scope` present,
+  spawn wrote one and read the other. The scope is now the first of the two
+  sections in the body, outside code blocks, for reading and writing alike.
+- **`#0` in a "Blocked by" section is ignored** rather than filed as a
+  dependency on issue 0 (#224).
+- **The duplicate search in `facet file` drops every colon** from the title,
+  not only the first, so GitHub does not read `word:word` as a qualifier
+  (#224).
 
 ### Removed
 
 - **`spawn --seat` and `--seat-issue`**, hidden and without effect since
   v0.2.0. Reap still treats `.seat`, `.seat-issue` and `.catalog.json` as
-  facet's own files, so workspaces that carry them are not held by them.
+  facet's own files, so workspaces that carry them are not held by them (#215).
 - **`facet-graph` (`tree`, `deps`) and the code only it used**: the issue
   hierarchy checks, the `structure` validation in the routing file, and the
   graph calls in the GitHub client. It was frozen, and nothing in `facet`
   depended on it. A routing file that still has a `structure` key loads as
-  before; the key is ignored. v0.2.0 is the last release that has it.
+  before; the key is ignored. v0.2.0 is the last release that has it (#214).
 
 ## [0.2.0] - 2026-10-26
 
@@ -700,7 +722,6 @@ Initial public release.
 - Portable by construction (OS-specific code sits behind build tags); CI runs the
   test suite on Linux, macOS, and Windows.
 
-[Unreleased]: https://github.com/bottega-cereghino/facet/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/bottega-cereghino/facet/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/RiccardoCereghino/facet/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/RiccardoCereghino/facet/releases/tag/v0.1.0
