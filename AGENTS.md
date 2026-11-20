@@ -50,11 +50,12 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
   name rather than through `ci`.
 - `pr-title.yml`: the PR title is a Conventional Commit.
 - `codeql.yml`: CodeQL on the Go code (`security-and-quality`), on PRs and
-  main. The job only uploads; the gate is code scanning's own "CodeQL"
-  check, which fails on a new alert of error severity or of high security
-  severity and above. It was seen red on a planted command injection (#223).
+  main. The job only uploads; code scanning's own "CodeQL" check on the PR
+  fails on a new alert of error severity or of high security severity and
+  above. It was seen red on a planted command injection (#223). It is not a
+  required check, so read it before merging.
 - The `main` ruleset requires `linux`, `macos`, `ci`, `pr-title`,
-  "Committed secrets", "Workflow audit" and CodeQL's results, a PR,
+  "Committed secrets" and "Workflow audit", a PR,
   linear history and an up-to-date branch. Squash is the only merge method,
   and the squash commit takes the PR title.
 - Jobs run on GitHub-hosted runners, an exception to the self-hosted-only
