@@ -264,17 +264,16 @@ var fencedCode = regexp.MustCompile("(?ms)^```.*?^```[ \t]*$")
 // written to the issue body for what should have been a one-repo spawn. A
 // snippet is an EXAMPLE; only prose outside it is a claim about this issue.
 func stripFences(body string) string {
+	// Byte by byte, not rune by rune: one space per rune made a block with
+	// non-ASCII text shorter, and shifted every offset after it.
 	return fencedCode.ReplaceAllStringFunc(body, func(block string) string {
-		var b strings.Builder
-		b.Grow(len(block))
-		for _, r := range block {
-			if r == '\n' {
-				b.WriteByte('\n')
-			} else {
-				b.WriteByte(' ')
+		b := []byte(block)
+		for i, c := range b {
+			if c != '\n' {
+				b[i] = ' '
 			}
 		}
-		return b.String()
+		return string(b)
 	})
 }
 
@@ -376,7 +375,10 @@ func blockedRefs(body string) map[string]bool {
 // sectionHeading splits a body into markdown sections. An issue form renders
 // each field under `### Label`, but hand-written issues use whatever level they
 // please -- the real ones use `## Blocked by`.
-var sectionHeading = regexp.MustCompile(`(?m)^#{2,6}\s+(.*?)\s*$`)
+// The gaps are [ \t], not \s: \s matches a newline, so a bare "##" line used to
+// take the next line as its heading text, and the section after it went unseen
+// (found by FuzzUpsertScope).
+var sectionHeading = regexp.MustCompile(`(?m)^#{2,6}[ \t]+(.*?)[ \t\r]*$`)
 
 // taskListItem matches a Markdown task-list line, capturing the mark and the label:
 // "- [x] gateway" or "* [ ] infra-core". A plain bullet ("- gateway") does not match.
@@ -436,14 +438,16 @@ func (r *Routing) UnknownScope(iss *ghx.Issue) []string {
 // readScopeField is scopeField, plus the owner/repo entries it could not
 // resolve. A bare word that is no key or alias is skipped silently: the field
 // is free text, and prose around the answer is not a claim about a repo.
+//
+// It finds the section with findScopeSection, the same search UpsertScope
+// writes through, so what spawn writes back is what the next spawn reads: the
+// first section under either heading, outside code blocks.
 func (r *Routing) readScopeField(body string) (keys, unknown []string) {
-	var section string
-	for _, name := range scopeHeadings {
-		if s := findSection(body, name); s != "" {
-			section = s
-			break
-		}
+	s, ok := findScopeSection(body)
+	if !ok {
+		return nil, nil
 	}
+	section := strings.TrimSpace(body[s.contentStart:s.end])
 	if section == "" {
 		return nil, nil
 	}
