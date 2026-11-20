@@ -70,8 +70,12 @@ type section struct {
 // case-insensitively), at whatever heading level. Content bounds are kept
 // apart from the heading: comparing the heading itself against the desired
 // content is how an "idempotent" rewrite ends up rewriting on every run.
+//
+// Headings inside a fenced code block are skipped: a quoted example is not the
+// author's answer, so it is neither read nor rewritten. The offsets still index
+// body, because stripFences keeps every byte where it was.
 func findScopeSection(body string) (section, bool) {
-	locs := sectionHeading.FindAllStringSubmatchIndex(body, -1)
+	locs := sectionHeading.FindAllStringSubmatchIndex(stripFences(body), -1)
 	for i, loc := range locs {
 		heading := strings.TrimSpace(body[loc[2]:loc[3]])
 		matched := false

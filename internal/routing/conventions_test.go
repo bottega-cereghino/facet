@@ -152,6 +152,8 @@ func TestSearchTerms(t *testing.T) {
 		"widgetapi prod: replace the baked test signingKey": "replace baked test signingKey",
 		// No colon: search the whole title.
 		"no colon at all here": "colon here",
+		// A colon after the prefix would be a search qualifier: it splits words.
+		"retry: backoff:exponential for the uploader": "backoff exponential uploader",
 	}
 	for title, want := range tests {
 		if got := SearchTerms(title); got != want {

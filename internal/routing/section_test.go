@@ -35,6 +35,20 @@ func TestUpsertScope(t *testing.T) {
 			changed: false,
 		},
 		{
+			name:    "a heading quoted in a code block is not the section",
+			body:    "```\n### Repos in scope\n\nlegacy\n```\n",
+			repos:   []string{"platform"},
+			want:    "```\n### Repos in scope\n\nlegacy\n```\n\n## Repos in scope\n\nplatform\n",
+			changed: true,
+		},
+		{
+			name:    "a bare ## line is not a heading, and does not swallow the next one",
+			body:    "x\n##\n\n## Repos in scope\n\nplatform\n",
+			repos:   []string{"platform"},
+			want:    "x\n##\n\n## Repos in scope\n\nplatform\n",
+			changed: false,
+		},
+		{
 			name:    "appends when the section is absent",
 			body:    "## Problem\n\nThe backup has never been restored.\n",
 			repos:   []string{"platform", "infra"},
