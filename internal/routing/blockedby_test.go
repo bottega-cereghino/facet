@@ -86,15 +86,15 @@ func TestParseBlockedBy(t *testing.T) {
 }
 
 // shorthandRouting is a table whose keys are what the shorthand cases below
-// name. "harness" is a key spelled differently from its repository, which is
+// name. "tools" is a key spelled differently from its repository, which is
 // the whole point: the shorthand is what a person writes, not what GitHub does.
 func shorthandRouting() *Routing {
 	return &Routing{
 		Repos: map[string]Repo{
-			"harness": {}, "infra-core": {}, "lab": {},
+			"tools": {}, "infra-core": {}, "lab": {},
 		},
 		OwnerRepoToKey: map[string]string{
-			"acme/stele-home": "harness",
+			"acme/devtools":   "tools",
 			"acme/infra-core": "infra-core",
 			"acme/lab":        "lab",
 		},
@@ -115,13 +115,13 @@ func TestParseBlockedByResolvesRepoShorthand(t *testing.T) {
 	}{
 		{
 			name: "a prefix naming a repo key resolves to that repo",
-			body: "### Blocked by / waiting on\n\nharness#121\n",
-			want: []BlockedByRef{{OwnerRepo: "acme/stele-home", Number: 121}},
+			body: "### Blocked by / waiting on\n\ntools#121\n",
+			want: []BlockedByRef{{OwnerRepo: "acme/devtools", Number: 121}},
 		},
 		{
 			name: "matched case-insensitively, as KeyForRepo already does",
-			body: "### Blocked by / waiting on\n\nHarness#121\n",
-			want: []BlockedByRef{{OwnerRepo: "acme/stele-home", Number: 121}},
+			body: "### Blocked by / waiting on\n\nTools#121\n",
+			want: []BlockedByRef{{OwnerRepo: "acme/devtools", Number: 121}},
 		},
 		{
 			name: "a key whose spelling matches its repo name",
@@ -130,15 +130,15 @@ func TestParseBlockedByResolvesRepoShorthand(t *testing.T) {
 		},
 		{
 			name: "shorthand and full form for one repo dedupe to one edge",
-			body: "### Blocked by / waiting on\n\nharness#121 and acme/stele-home#121\n",
-			want: []BlockedByRef{{OwnerRepo: "acme/stele-home", Number: 121}},
+			body: "### Blocked by / waiting on\n\ntools#121 and acme/devtools#121\n",
+			want: []BlockedByRef{{OwnerRepo: "acme/devtools", Number: 121}},
 		},
 		{
 			name: "shorthand beside a bare ref and a full ref",
-			body: "### Blocked by / waiting on\n\n#5, harness#121, acme/infra-core#41\n",
+			body: "### Blocked by / waiting on\n\n#5, tools#121, acme/infra-core#41\n",
 			want: []BlockedByRef{
 				{Number: 5},
-				{OwnerRepo: "acme/stele-home", Number: 121},
+				{OwnerRepo: "acme/devtools", Number: 121},
 				{OwnerRepo: "acme/infra-core", Number: 41},
 			},
 		},
@@ -178,13 +178,13 @@ func TestParseBlockedByResolvesRepoShorthand(t *testing.T) {
 // because only the second is visible as missing.
 func TestParseBlockedByRefusesAnAmbiguousKey(t *testing.T) {
 	r := &Routing{
-		Repos: map[string]Repo{"harness": {}},
+		Repos: map[string]Repo{"tools": {}},
 		OwnerRepoToKey: map[string]string{
-			"acme/stele-home": "harness",
-			"other/stele":     "harness",
+			"acme/devtools":  "tools",
+			"other/devtools": "tools",
 		},
 	}
-	if got := r.ParseBlockedBy("### Blocked by / waiting on\n\nharness#121\n"); got != nil {
+	if got := r.ParseBlockedBy("### Blocked by / waiting on\n\ntools#121\n"); got != nil {
 		t.Errorf("an ambiguous key resolved to %#v; want nothing", got)
 	}
 }
@@ -193,8 +193,8 @@ func TestParseBlockedByRefusesAnAmbiguousKey(t *testing.T) {
 // spelling to resolve to. Validate() permits that -- it only checks the
 // reverse -- so this is reachable from a real routing file.
 func TestParseBlockedByNeedsAGitHubSpelling(t *testing.T) {
-	r := &Routing{Repos: map[string]Repo{"harness": {}}}
-	if got := r.ParseBlockedBy("### Blocked by / waiting on\n\nharness#121\n"); got != nil {
+	r := &Routing{Repos: map[string]Repo{"tools": {}}}
+	if got := r.ParseBlockedBy("### Blocked by / waiting on\n\ntools#121\n"); got != nil {
 		t.Errorf("a key with no owner/name resolved to %#v; want nothing", got)
 	}
 }

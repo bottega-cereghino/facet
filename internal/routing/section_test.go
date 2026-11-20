@@ -79,9 +79,9 @@ func TestUpsertScope(t *testing.T) {
 			// section (the "appends when absent" case above) gets the
 			// canonical name.
 			name:    "an existing Repos involved heading keeps its own name on a content rewrite",
-			body:    "### Repos involved\n\ngad\n",
-			repos:   []string{"gad", "facet"},
-			want:    "### Repos involved\n\ngad, facet\n",
+			body:    "### Repos involved\n\nbilling\n",
+			repos:   []string{"billing", "facet"},
+			want:    "### Repos involved\n\nbilling, facet\n",
 			changed: true,
 		},
 	}

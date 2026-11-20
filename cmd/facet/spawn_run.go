@@ -299,7 +299,7 @@ func overrideKey(flag, value string, route *routing.Routing) (string, error) {
 			"fix: pass a routing key, or key=url: --%s %s", flag, value, flag, someKey(route))
 	}
 	// Aliases resolve here for the same reason they resolve in Infer
-	// (routing.go): routing says `doctrine` names `stele`, so a flag that
+	// (routing.go): routing says `backend` names `api`, so a flag that
 	// refused it would be refusing a value routing itself can resolve. Repos
 	// first, then aliases -- Infer's order, so one spelling cannot mean two
 	// repos depending on which code path read it.
@@ -366,10 +366,10 @@ func someKey(route *routing.Routing) string {
 // EVERY VALUE IS RESOLVED THROUGH overrideKey, AND AN UNRESOLVABLE ONE REFUSES.
 // All three flags used to skip what they could not recognise -- --clone by
 // entering its `if ok` branch only on a hit, --add and --rm by discarding a
-// miss -- so `facet spawn --clone stele=git@…` produced a workspace holding the
+// miss -- so `facet spawn --clone api=git@…` produced a workspace holding the
 // home repo alone, at exit 0, with nothing in the output distinguishing "I
 // applied your override" from "I threw it away" (facet#160). It ran that way
-// under every multi-repo seating the harness ever performed.
+// under every multi-repo spawn a calling script ever performed.
 //
 // This returns an error rather than warning, and it is called before the issue
 // branch is created and before the workspace directory exists, so a refusal
@@ -383,13 +383,13 @@ func applyOverrides(sel []routing.Selection, route *routing.Routing, homeKey str
 				return nil, err
 			}
 			// The home repo is accepted and skipped rather than refused: it is
-			// already in the set, it carries the branch, and the harness passes
+			// already in the set, it carries the branch, and a calling script passes
 			// it alongside the rest.
 			if k == homeKey {
 				continue
 			}
 			// Deduplicated because two spellings can now resolve to one repo:
-			// `--clone stele --clone doctrine` is one repository named twice,
+			// `--clone api --clone backend` is one repository named twice,
 			// and a set listing it twice would print it twice, count it twice
 			// in the confirmation, and clone it twice.
 			seen := false

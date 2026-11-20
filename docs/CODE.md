@@ -138,12 +138,13 @@ a seam is needed, not to look idiomatic.
 
 ## 6. Platform policy
 
-The primary platforms are the ones facet is actually run on. Secondary platforms
-are covered in CI all the same.
+facet is built for macOS, the platform it is run on. Linux runs every gate in
+CI, because it is fast and its filesystem semantics differ enough to catch
+assumptions. The Windows code paths (junctions, ACLs) remain behind build tags,
+but are no longer built or tested in CI and are not supported.
 
-- **A red secondary platform on the default branch puts the repo in
-  `patch-only`:** bugfixes and the platform fix, no new features, until it is
-  green again.
+- **A red `macos` on the default branch puts the repo in `patch-only`:**
+  bugfixes and the platform fix, no new features, until it is green again.
 - **"CI is green" means the default branch**, not a branch with a passing run. A
   green pull request does not lift a freeze; merging the fix does. This
   distinction is the entire content of the rule.
@@ -196,11 +197,10 @@ already drifted, with the workflow several linter releases behind and
    per `make` target, so a red run names the gate in the UI rather than
    collapsing to "make failed". This is where the privacy guard runs, inside
    `make test`.
-2. **macOS and Windows**, each a named job gated behind Linux passing, and
-   skipped on draft pull requests and on pull requests not targeting `main`.
-   Build and test only — every other gate is platform-independent by
-   construction, so running it three times buys nothing. What these legs
-   uniquely prove is that the code compiles and its tests pass where filesystem
+2. **macOS**, a named job gated behind Linux passing, and skipped on draft
+   pull requests and on pull requests not targeting `main`. Build and test
+   only — every other gate is platform-independent by construction, so running
+   it twice buys nothing. What this leg uniquely proves is that the code compiles and its tests pass where filesystem
    semantics differ.
 
 A `renovate` job runs Renovate's validator on `renovate.json`, so a broken
@@ -213,9 +213,8 @@ still names `linux` and `macos` as well. A new job goes into its `needs`.
 
 The tiering is about feedback, **not** cost: this is a public repository, so
 GitHub-hosted runners are free on every OS. A formatting slip should fail in
-under a minute rather than after three platform runs finish, and three runners
-should not be queued to answer one question. `windows` stays a distinctly named
-job so a secondary platform's red is still reported as its own result.
+under a minute rather than after both platform runs finish, and two runners
+should not be queued to answer one question.
 
 **Lint** is golangci-lint's `standard` set — `errcheck`, `govet`,
 `ineffassign`, `staticcheck`, `unused` — plus `bodyclose`, `errorlint`,
@@ -301,38 +300,27 @@ will still perform it.
 
 ---
 
-## 10. Where facet differs from the other repositories in this fleet, and why
+## 10. Decisions that look like oversights, and why
 
-facet shares one baseline with the other Go repositories here: the same linter
-set, the same output caps, the same pinned tool versions, `make check` as the
-single entry point, actions pinned to SHAs. **An undocumented difference is a
-defect; the ones below are decisions, and each is written here so the next
-reader does not "fix" it.**
+**An undocumented oddity is a defect; the ones below are decisions, and each is
+written here so the next reader does not "fix" it.**
 
-- **This repository is public, and it is the only one that is.** Section 8 is
-  the whole consequence: a denylist guard supplied out of band, reserved
-  placeholder names in examples, and the deliberate decision *not* to mechanise
-  the qualified-reference rule, because a regex for it would flag every
-  legitimate example and no real leak.
-- **Three platform legs rather than two, and the tiering is about latency, not
-  cost.** Runners are free on every OS for a public repository. Elsewhere in the
-  fleet macOS bills at 10x and is tiered for that reason; here it is tiered so a
-  formatting slip fails in under a minute instead of after three platform runs.
+- **This repository is public.** Section 8 is the whole consequence: a denylist
+  guard supplied out of band, reserved placeholder names in examples, and the
+  deliberate decision *not* to mechanise the qualified-reference rule, because a
+  regex for it would flag every legitimate example and no real leak.
+- **The CI tiering is about latency, not cost.** Runners are free on every OS
+  for a public repository; macOS is tiered behind Linux so a formatting slip
+  fails in under a minute instead of after both platform runs.
 - **`errcheck` runs with no exclusions whatsoever**, and this tree has none to
   report. Where an error has no caller left to inform, the discard is written
   `_ =` at the call site — around thirty of them, mostly `fmt.Fprint*` to a
-  writer the process cannot report the loss of. A sibling repository excludes
-  those three functions by name instead, and that is right for it: there they
-  are the program's entire output mechanism at 84 call sites, where here they
-  are a minority of a larger program.
+  writer the process cannot report the loss of. Excluding those functions by
+  name would be right for a program whose entire output goes through them; here
+  they are a minority of a larger program.
 - **`CONTRIBUTING.md` exists as a pointer to this file.** GitHub surfaces that
   filename to anyone opening an issue or a pull request, which matters only in a
   repository outsiders can see.
 - **Branch protection is a ruleset rather than classic protection**, requiring a
   pull request and linear history. Both reach the same no-bypass position by
   different routes.
-
-One difference that is **not** justified and is tracked rather than defended:
-`windows` runs but is not a required check, so a red on that platform blocks
-nothing — which makes the freeze rule in section 6 unenforceable in the one
-repository that carries a Windows leg at all.

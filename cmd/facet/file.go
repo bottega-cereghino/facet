@@ -200,7 +200,7 @@ func labelList(labels []string) string {
 // An edge that cannot be created -- a cross-owner ref, one the API rejects, or
 // one it cannot resolve -- is reported and skipped: the issue is already
 // filed, and a missing edge is not worth losing that over.
-// It takes the routing table because a repo shorthand -- `harness#121`, the
+// It takes the routing table because a repo shorthand -- `tools#121`, the
 // dominant form in these bodies -- can only be resolved against `repos`
 // (facet#104). Without it the reference is silently not a reference, and the
 // dependency exists only as prose.

@@ -41,11 +41,11 @@ func withSpawnableRouting(t *testing.T) {
 	contents := `{
 		"version": 1,
 		"repos": {
-			"lab-workspaces": {"dir": "lab-workspaces", "url": "https://example.invalid/lab-workspaces.git", "spawnable": false},
+			"workspaces-root": {"dir": "workspaces-root", "url": "https://example.invalid/workspaces-root.git", "spawnable": false},
 			"gateway":        {"dir": "gateway",        "url": "https://example.invalid/gateway.git"}
 		},
 		"ownerRepoToKey": {
-			"acme/lab-workspaces": "lab-workspaces",
+			"acme/workspaces-root": "workspaces-root",
 			"acme/gateway": "gateway"
 		},
 		"aliases": {},
@@ -71,7 +71,7 @@ func TestSpawnRefusesSpawnableFalse(t *testing.T) {
 	t.Cleanup(func() { gh = prevGH })
 
 	err := runSpawn(spawnOpts{
-		Repo: "acme/lab-workspaces", Number: 1,
+		Repo: "acme/workspaces-root", Number: 1,
 	})
 	if err == nil {
 		t.Fatal("spawn accepted a repo marked spawnable:false")
@@ -79,7 +79,7 @@ func TestSpawnRefusesSpawnableFalse(t *testing.T) {
 	if !strings.Contains(err.Error(), "spawnable:false") {
 		t.Errorf("error %q does not name the field", err)
 	}
-	if !strings.Contains(err.Error(), "lab-workspaces") {
+	if !strings.Contains(err.Error(), "workspaces-root") {
 		t.Errorf("error %q does not name the repo", err)
 	}
 	if !strings.Contains(err.Error(), "fix:") {
