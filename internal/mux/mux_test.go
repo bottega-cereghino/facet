@@ -28,7 +28,18 @@ func TestTmuxPanesUnderFindsPaneRootedInDir(t *testing.T) {
 		t.Fatalf("new-session: %v\n%s", err, out)
 	}
 
-	live := tmuxPanesUnder(dir, socket)
+	// new-session -d returns before tmux can always report the pane's current
+	// path (on Linux it reads the pty's foreground process, which the shell
+	// may not have become yet), so poll the way the lsof test does.
+	var live []string
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		live = tmuxPanesUnder(dir, socket)
+		if len(live) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if len(live) != 1 {
 		t.Fatalf("tmuxPanesUnder(%q) = %v; want exactly one pane", dir, live)
 	}
