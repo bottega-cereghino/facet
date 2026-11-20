@@ -51,6 +51,10 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
   "Committed secrets" and "Workflow audit", a PR,
   linear history and an up-to-date branch. Squash is the only merge method,
   and the squash commit takes the PR title.
+- Jobs run on GitHub-hosted runners, an exception to the self-hosted-only
+  rule the author's other repositories follow: hosted minutes are free for a
+  public repository, and a self-hosted runner here would run code from
+  strangers' pull requests on the author's machine. Keep it that way.
 - Actions are pinned to a full SHA with the version in a comment. Checkout
   sets `persist-credentials: false`. Every job has `timeout-minutes`.
 - Never add `continue-on-error`, `|| true` or `if: always()` to a gate. The
