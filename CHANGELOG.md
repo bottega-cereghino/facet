@@ -6,6 +6,29 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.3.0](https://github.com/bottega-cereghino/facet/compare/v0.2.0...v0.3.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **spawn:** spawn no longer accepts --seat or --seat-issue.
+* the facet-graph binary is gone.
+
+### Added
+
+* **ls:** show what deleting each workspace frees, and whether reap would ([#218](https://github.com/bottega-cereghino/facet/issues/218)) ([4c4c6b6](https://github.com/bottega-cereghino/facet/commit/4c4c6b6fd15fc3d18d31e4941ab7958ed2eb15a9)), refs [#216](https://github.com/bottega-cereghino/facet/issues/216)
+* **spawn:** remove the hidden --seat and --seat-issue flags ([#215](https://github.com/bottega-cereghino/facet/issues/215)) ([53f547e](https://github.com/bottega-cereghino/facet/commit/53f547e2222d6f7729160c79c70342ec6a384ef1))
+
+
+### Fixed
+
+* **routing:** fuzz the issue-body parsers, and fix what the fuzzers found ([#224](https://github.com/bottega-cereghino/facet/issues/224)) ([7e435ec](https://github.com/bottega-cereghino/facet/commit/7e435ecf31aa7c7c64e19e721f7b34b5414caad8)), refs [#204](https://github.com/bottega-cereghino/facet/issues/204)
+
+
+### Refactored
+
+* remove facet-graph (tree, deps) and the code only it uses ([#214](https://github.com/bottega-cereghino/facet/issues/214)) ([c6245d4](https://github.com/bottega-cereghino/facet/commit/c6245d49b75099d3bdfd445c4242ede87156cce1))
+
 ## [Unreleased]
 
 ### Added
