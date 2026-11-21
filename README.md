@@ -513,6 +513,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   just before deleting, and checks that no step of the path is a symlink, so a
   parent swapped for one cannot send it outside the clone
   (`TestPruneChecksAgainBeforeDeleting`, `TestPruneDoesNotFollowASwappedParent`).
+- **`reap` checks again after its prompt**, so work that started while it
+  waited holds the workspace, with `--force` too: force covers the holders it
+  showed, never new ones (`TestReapChecksAgainAfterThePrompt`,
+  `TestReapForceRefusesWhatStartedDuringThePrompt`).
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`, and with `--dry-run` it deletes nothing
