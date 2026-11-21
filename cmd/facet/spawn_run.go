@@ -191,7 +191,7 @@ func runSpawn(o spawnOpts) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(ws, "CLAUDE.md"), md, 0o666); err != nil {
+	if err := workspace.WriteIssueClaudeMD(ws, m, md); err != nil {
 		return err
 	}
 
