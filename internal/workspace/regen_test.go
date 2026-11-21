@@ -10,6 +10,7 @@ import (
 
 	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/bottega-cereghino/facet/internal/gitx/gitxtest"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // prunableWorkspace builds a long-lived workspace whose clone holds, beside its
@@ -139,5 +140,131 @@ func TestInspectPruneHoldsWhenIgnoredFilesCannotBeListed(t *testing.T) {
 	}
 	if len(st.Found) != 0 || len(st.Held) != 1 || !strings.Contains(st.Held[0], "index file corrupt") {
 		t.Fatalf("found %v, held %v; want nothing found and the failure holding it", foundRels(st), st.Held)
+	}
+}
+
+// `pip install -e git+...` checks a repository out inside the .venv, and it may
+// hold commits: a directory with a .git anywhere below it is kept.
+func TestInspectPruneKeepsADirectoryHoldingARepository(t *testing.T) {
+	ws, clone := prunableWorkspace(t)
+	src := filepath.Join(clone, "api", ".venv", "src", "mylib")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, src, "init", "-q")
+	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(foundRels(st), ","); got != "repo/node_modules" {
+		t.Fatalf("found %q; want the .venv holding a repository left out", got)
+	}
+	if len(st.Kept) != 1 || !strings.Contains(st.Kept[0], "mylib") {
+		t.Errorf("kept %v; want the .venv named with its repository", st.Kept)
+	}
+}
+
+// A wholly ignored name holding a file someone force-added is not wholly
+// ignored, so git lists its files one by one and prune leaves it.
+func TestInspectPruneLeavesAnIgnoredDirectoryHoldingATrackedFile(t *testing.T) {
+	ws, clone := prunableWorkspace(t)
+	mustGit(t, clone, "add", "-f", "node_modules/pkg/index.js")
+	mustGit(t, clone, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "vendored")
+	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range foundRels(st) {
+		if r == "repo/node_modules" {
+			t.Fatal("named a node_modules holding a tracked file")
+		}
+	}
+}
+
+func TestInspectPruneNeverNamesTerraform(t *testing.T) {
+	ws, clone := prunableWorkspace(t)
+	if err := os.MkdirAll(filepath.Join(clone, "infra"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(clone, "infra", ".gitignore"), ".terraform/\n")
+	writeMiB(t, filepath.Join(clone, "infra", ".terraform", "environment"))
+	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range foundRels(st) {
+		if strings.Contains(r, ".terraform") {
+			t.Fatalf("named %s; .terraform keeps the selected workspace", r)
+		}
+	}
+}
+
+// A worktree clone keeps its index and HEAD outside <clone>/.git. Its use must
+// still be seen, or a workspace used a minute ago reads as idle.
+func TestInspectPruneSeesTheUseOfAWorktreeClone(t *testing.T) {
+	ws, clone := prunableWorkspace(t)
+	wt := filepath.Join(ws, "wt")
+	mustGit(t, clone, "worktree", "add", "-q", "--detach", wt)
+	writeTestFile(t, filepath.Join(wt, ".gitignore"), "/node_modules/\n")
+	writeMiB(t, filepath.Join(wt, "node_modules", "x.js"))
+	m, err := manifest.Read(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Clones = map[string]string{"wt": m.Clones["repo"]}
+	if err := m.Write(ws); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-60 * 24 * time.Hour)
+	if err := os.Chtimes(filepath.Join(wt, "node_modules"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 14*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Held) == 0 {
+		t.Fatalf("a worktree clone used just now reads as idle (last used %v)", st.LastUsed)
+	}
+}
+
+// A probe that errors is not "nothing runs here".
+func TestInspectPruneHoldsWhenWhatRunsCannotBeListed(t *testing.T) {
+	ws, _ := prunableWorkspace(t)
+	st, err := InspectPrune(ws, gitx.Git{}, failingLiveRoots{}, time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Held) != 1 || !strings.Contains(st.Held[0], "could not list") {
+		t.Fatalf("held %v; want the failed probe to hold", st.Held)
+	}
+}
+
+type failingLiveRoots struct{}
+
+func (failingLiveRoots) Live(string) bool { return false }
+func (failingLiveRoots) LiveRoots(string) ([]string, error) {
+	return nil, errors.New("lsof crashed")
+}
+
+// The delete goes through an os.Root: a parent swapped for a symlink after the
+// listing cannot point it outside the clone.
+func TestPruneDoesNotFollowASwappedParent(t *testing.T) {
+	ws, clone := prunableWorkspace(t)
+	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	writeMiB(t, filepath.Join(outside, ".venv", "precious"))
+	if err := os.RemoveAll(filepath.Join(clone, "api")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(clone, "api")); err != nil {
+		t.Fatal(err)
+	}
+	_ = Prune(st)
+	if _, err := os.Stat(filepath.Join(outside, ".venv", "precious")); err != nil {
+		t.Fatalf("prune followed a symlinked parent out of the clone: %v", err)
 	}
 }

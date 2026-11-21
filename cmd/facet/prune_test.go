@@ -54,7 +54,7 @@ func TestPruneListsWithoutApplyAndDeletesOnlyWhatNothingHolds(t *testing.T) {
 	later := time.Now().Add(60 * 24 * time.Hour)
 
 	var out bytes.Buffer
-	if err := runPrune(&out, dirs, gitx.Git{}, live, later, 14*24*time.Hour, false); err != nil {
+	if err := runPrune(&out, dirs, gitx.Git{}, live, later, 14*24*time.Hour, false, yesAll); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(t, idleDeps) || !exists(t, busyDeps) {
@@ -67,7 +67,7 @@ func TestPruneListsWithoutApplyAndDeletesOnlyWhatNothingHolds(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := runPrune(&out, dirs, gitx.Git{}, live, later, 14*24*time.Hour, true); err != nil {
+	if err := runPrune(&out, dirs, gitx.Git{}, live, later, 14*24*time.Hour, true, yesAll); err != nil {
 		t.Fatal(err)
 	}
 	if exists(t, idleDeps) {
@@ -85,7 +85,7 @@ func TestPruneListsWithoutApplyAndDeletesOnlyWhatNothingHolds(t *testing.T) {
 func TestPruneHoldsAWorkspaceUsedToday(t *testing.T) {
 	ws, deps := pruneWorkspace(t, t.TempDir(), "today")
 	var out bytes.Buffer
-	if err := runPrune(&out, []string{ws}, gitx.Git{}, nil, time.Now(), 14*24*time.Hour, true); err != nil {
+	if err := runPrune(&out, []string{ws}, gitx.Git{}, nil, time.Now(), 14*24*time.Hour, true, yesAll); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(t, deps) {
@@ -95,3 +95,64 @@ func TestPruneHoldsAWorkspaceUsedToday(t *testing.T) {
 		t.Errorf("output does not say what holds it:\n%s", out.String())
 	}
 }
+
+func yesAll(string) bool { return true }
+
+// --apply asks once, and an answer of no deletes nothing.
+func TestPruneApplyAsksFirst(t *testing.T) {
+	ws, deps := pruneWorkspace(t, t.TempDir(), "idle")
+	later := time.Now().Add(60 * 24 * time.Hour)
+	var asked string
+	var out bytes.Buffer
+	if err := runPrune(&out, []string{ws}, gitx.Git{}, nil, later, 14*24*time.Hour, true, func(q string) bool { asked = q; return false }); err != nil {
+		t.Fatal(err)
+	}
+	if asked == "" || !exists(t, deps) {
+		t.Fatalf("asked %q, node_modules there: %v; want a question and nothing deleted", asked, exists(t, deps))
+	}
+}
+
+// Work can start while the prompt waits: each workspace is inspected again
+// just before deletion, and one held by then is left alone.
+func TestPruneChecksAgainBeforeDeleting(t *testing.T) {
+	ws, deps := pruneWorkspace(t, t.TempDir(), "idle")
+	later := time.Now().Add(60 * 24 * time.Hour)
+	live := &switchLive{}
+	var out bytes.Buffer
+	startWork := func(string) bool { live.name = "idle"; return true }
+	if err := runPrune(&out, []string{ws}, gitx.Git{}, live, later, 14*24*time.Hour, true, startWork); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, deps) {
+		t.Fatalf("deleted from a workspace a session started in while the prompt waited:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "held since the listing") {
+		t.Errorf("output does not say why it was left:\n%s", out.String())
+	}
+}
+
+// One workspace that cannot be read does not stop the rest.
+func TestPruneCarriesOnPastAnUnreadableWorkspace(t *testing.T) {
+	root := t.TempDir()
+	ws, deps := pruneWorkspace(t, root, "idle")
+	broken := filepath.Join(root, "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Path(broken), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(60 * 24 * time.Hour)
+	var out bytes.Buffer
+	if err := runPrune(&out, []string{broken, ws}, gitx.Git{}, nil, later, 14*24*time.Hour, true, yesAll); err != nil {
+		t.Fatal(err)
+	}
+	if exists(t, deps) || !strings.Contains(out.String(), "could not check broken") {
+		t.Fatalf("want broken named and idle pruned:\n%s", out.String())
+	}
+}
+
+// switchLive reports a session live once name is set.
+type switchLive struct{ name string }
+
+func (s *switchLive) Live(session string) bool { return s.name != "" && session == s.name }

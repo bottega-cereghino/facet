@@ -17,24 +17,28 @@ import (
 func newPruneCmd() *cobra.Command {
 	var (
 		apply    bool
+		yes      bool
 		idleDays int
 	)
 	cmd := &cobra.Command{
 		Use:   "prune [workspace]",
 		Short: "Free the dependency and cache directories of workspaces nobody is using",
 		Long: "Lists, and with --apply deletes, the directories in a workspace's clones that\n" +
-			"one command rebuilds: node_modules, .venv, .terraform and the tool caches\n" +
-			"(.mypy_cache, .pytest_cache, .ruff_cache, .next, .turbo, .parcel-cache).\n" +
-			"Only a directory git ignores and that holds no tracked file is named, so no\n" +
-			"commit or change can be among them; the workspace stays, and its manifest,\n" +
-			"clones and history are untouched.\n\n" +
+			"one command rebuilds: node_modules, .venv and the tool caches (.mypy_cache,\n" +
+			".pytest_cache, .ruff_cache, .next, .turbo, .parcel-cache). Only a directory\n" +
+			"git ignores and that holds no tracked file is named, so no commit or change\n" +
+			"can be among them; one holding a git repository of its own (an editable pip\n" +
+			"install, a fork cloned into node_modules) is kept. The workspace stays, and\n" +
+			"its manifest, clones and history are untouched. .terraform is never named:\n" +
+			"it keeps the selected terraform workspace.\n\n" +
 			"The size is what deleting frees. On a Mac, pnpm and uv clone packages from\n" +
 			"their store, so an installed node_modules often frees almost nothing; one\n" +
 			"that frees under 1 MiB is not named, since deleting it only costs a reinstall.\n\n" +
 			"A workspace is held while any clone was used within --idle-days (git's index,\n" +
 			"HEAD or reflog, or an install), or while a session, pane, process or launchd\n" +
 			"job runs from it, as reap asks. With no workspace named it looks at every one\n" +
-			"under the root.",
+			"under the root. --apply lists, asks once, and checks each workspace again\n" +
+			"just before deleting.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if idleDays < 0 {
@@ -57,10 +61,15 @@ func newPruneCmd() *cobra.Command {
 				}
 			}
 			idle := time.Duration(idleDays) * 24 * time.Hour
-			return runPrune(os.Stdout, dirs, git, muxLive(), time.Now(), idle, apply)
+			ask := confirm
+			if yes {
+				ask = func(string) bool { return true }
+			}
+			return runPrune(os.Stdout, dirs, git, muxLive(), time.Now(), idle, apply, ask)
 		},
 	}
-	cmd.Flags().BoolVar(&apply, "apply", false, "delete what is listed; without it prune only lists")
+	cmd.Flags().BoolVar(&apply, "apply", false, "delete what is listed, after one confirmation; without it prune only lists")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	cmd.Flags().IntVar(&idleDays, "idle-days", 14, "hold a workspace used within this many days; 0 holds none for age")
 	return cmd
 }
@@ -68,12 +77,13 @@ func newPruneCmd() *cobra.Command {
 // runPrune lists what each workspace would free and, with apply, deletes it
 // from the ones nothing holds. Each workspace is inspected again just before
 // its deletion, so a session started after the listing still holds it.
-func runPrune(w io.Writer, dirs []string, git gitx.Runner, live workspace.LiveChecker, now time.Time, idle time.Duration, apply bool) error {
+func runPrune(w io.Writer, dirs []string, git gitx.Runner, live workspace.LiveChecker, now time.Time, idle time.Duration, apply bool, ask func(string) bool) error {
 	var states []*workspace.PruneState
 	for _, d := range dirs {
 		st, err := workspace.InspectPrune(d, git, live, now, idle)
 		if err != nil {
-			return err
+			_, _ = fmt.Fprintf(w, "could not check %s, left alone: %v\n", filepath.Base(d), err)
+			continue
 		}
 		states = append(states, st)
 	}
@@ -84,6 +94,14 @@ func runPrune(w io.Writer, dirs []string, git gitx.Runner, live workspace.LiveCh
 	if !apply {
 		_, _ = fmt.Fprintf(w, "\n%s can be freed now, %s more is held. `facet prune --apply` deletes what is not held.\n",
 			humanBytes(free), humanBytes(held))
+		return nil
+	}
+	if free == 0 {
+		_, _ = fmt.Fprintln(w, "\nnothing to free now.")
+		return nil
+	}
+	if !ask(fmt.Sprintf("Delete what frees %s?", humanBytes(free))) {
+		_, _ = fmt.Fprintln(w, "aborted.")
 		return nil
 	}
 	var freed int64
@@ -139,6 +157,9 @@ func listPrune(w io.Writer, states []*workspace.PruneState) (free, held int64, e
 		_, _ = fmt.Fprintf(w, "\n%s:\n", filepath.Base(st.Dir))
 		for _, h := range st.Held {
 			_, _ = fmt.Fprintf(w, "  held: %s\n", h)
+		}
+		for _, k := range st.Kept {
+			_, _ = fmt.Fprintf(w, "  kept: %s\n", k)
 		}
 		for _, r := range st.Found {
 			_, _ = fmt.Fprintf(w, "  %s/%s  %s  (rebuild: %s)\n", r.Clone, r.Rel, humanBytes(r.Bytes), r.Rebuild)

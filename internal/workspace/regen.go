@@ -18,11 +18,12 @@ import (
 // a requirements file, terraform's lock file), so deleting one costs a
 // reinstall, never work. Build output (build/, dist/, out/) is left off on
 // purpose: the same names hold hand-made renders and release artefacts, and
-// nothing in the tree says which is which.
+// nothing in the tree says which is which. .terraform is left off too: it
+// keeps the selected `terraform workspace` and the backend settings given at
+// init, and after a fresh init a plan would quietly target "default".
 var regenNames = map[string]string{
 	"node_modules":  "the package manager's install",
 	".venv":         "uv sync, or a new venv and pip install",
-	".terraform":    "terraform init",
 	".mypy_cache":   "mypy, on its next run",
 	".pytest_cache": "pytest, on its next run",
 	".ruff_cache":   "ruff, on its next run",
@@ -50,7 +51,11 @@ type PruneState struct {
 	Dir      string
 	LastUsed time.Time // the newest git or install activity in any clone
 	Found    []Regen
-	Held     []string // why Prune leaves it alone; empty means it may prune
+	// Kept names the directories of a listed name left alone because they
+	// hold a git repository (`pip install -e git+...` checks one out inside a
+	// .venv, and a fork is sometimes cloned into node_modules to debug it).
+	Kept []string
+	Held []string // why Prune leaves it alone; empty means it may prune
 }
 
 // Frees is what deleting everything found would give back.
@@ -83,17 +88,25 @@ func InspectPrune(ws string, git gitx.Runner, live LiveChecker, now time.Time, i
 		if !gitx.IsRepo(p) {
 			continue
 		}
-		found, last, err := findRegen(git, dir, p)
+		found, kept, last, err := findRegen(git, dir, p)
 		if err != nil {
 			st.Held = append(st.Held, fmt.Sprintf("%s: cannot list its ignored files (%v) -- fix the clone, then run prune again", dir, err))
 			continue
 		}
 		st.Found = append(st.Found, found...)
-		if last.After(st.LastUsed) {
-			st.LastUsed = last
+		st.Kept = append(st.Kept, kept...)
+		used, err := lastGitUse(git, p)
+		if err != nil {
+			st.Held = append(st.Held, fmt.Sprintf("%s: cannot tell when it was last used (%v) -- prune holds what it cannot date", dir, err))
+			continue
+		}
+		for _, t := range []time.Time{last, used} {
+			if t.After(st.LastUsed) {
+				st.LastUsed = t
+			}
 		}
 	}
-	if idle > 0 && !st.LastUsed.IsZero() && now.Sub(st.LastUsed) < idle {
+	if idle > 0 && now.Sub(st.LastUsed) < idle {
 		st.Held = append(st.Held, fmt.Sprintf("used %s ago, within the idle window of %s -- wait, or pass --idle-days 0",
 			roundDays(now.Sub(st.LastUsed)), roundDays(idle)))
 	}
@@ -113,36 +126,55 @@ func liveHolders(ws string, live LiveChecker) []string {
 		out = append(out, "a multiplexer session is attached -- end it first")
 	}
 	if lr, ok := live.(LiveRootChecker); ok {
-		if roots, err := lr.LiveRoots(ws); err == nil {
-			for _, r := range roots {
-				out = append(out, fmt.Sprintf("%s -- stop it first", r))
-			}
+		roots, err := lr.LiveRoots(ws)
+		if err != nil {
+			out = append(out, fmt.Sprintf("could not list what runs from it (%v) -- prune holds what it cannot check", err))
+		}
+		for _, r := range roots {
+			out = append(out, fmt.Sprintf("%s -- stop it first", r))
 		}
 	}
 	if jc, ok := live.(JobChecker); ok {
-		if jobs, err := jc.JobsUnder(ws); err == nil {
-			for _, j := range jobs {
-				out = append(out, fmt.Sprintf("%s -- unload the job first", j))
-			}
+		jobs, err := jc.JobsUnder(ws)
+		if err != nil {
+			out = append(out, fmt.Sprintf("could not list its launchd jobs (%v) -- prune holds what it cannot check", err))
+		}
+		for _, j := range jobs {
+			out = append(out, fmt.Sprintf("%s -- unload the job first", j))
 		}
 	}
 	return out
 }
 
-// findRegen walks one clone for regenerable directories, and returns the
-// newest activity it saw: git's index, HEAD and reflog, and the found
-// directories themselves, which an install touches. FETCH_HEAD is left out:
-// `facet ls --size` fetches every clone, and looking is not using.
-func findRegen(git gitx.Runner, name, clone string) ([]Regen, time.Time, error) {
-	ignored, err := ignoredDirs(git, clone)
+// lastGitUse is the newest of the clone's index, HEAD and reflog, read from its
+// own git directory, which for a worktree is not <clone>/.git. FETCH_HEAD is
+// left out: `facet ls --size` fetches every clone, and looking is not using. A
+// clone none of them can be read for is an error: prune holds what it cannot
+// date.
+func lastGitUse(git gitx.Runner, clone string) (time.Time, error) {
+	out, err := git.Run(clone, nil, "rev-parse", "--path-format=absolute", "--git-dir")
 	if err != nil {
-		return nil, time.Time{}, err
+		return time.Time{}, err
 	}
+	gitDir := strings.TrimSpace(out)
 	var last time.Time
 	for _, f := range []string{"index", "HEAD", filepath.Join("logs", "HEAD")} {
-		last = newer(last, filepath.Join(clone, ".git", f))
+		last = newer(last, filepath.Join(gitDir, f))
 	}
-	var found []Regen
+	if last.IsZero() {
+		return last, fmt.Errorf("no index, HEAD or reflog in %s", gitDir)
+	}
+	return last, nil
+}
+
+// findRegen walks one clone for regenerable directories. It returns them, the
+// ones kept because they hold a repository, and the newest install it saw (an
+// install touches the directory it fills).
+func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []string, last time.Time, err error) {
+	ignored, err := ignoredDirs(git, clone)
+	if err != nil {
+		return nil, nil, time.Time{}, err
+	}
 	err = filepath.WalkDir(clone, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() || path == clone {
 			return nil
@@ -159,12 +191,36 @@ func findRegen(git gitx.Runner, name, clone string) ([]Regen, time.Time, error) 
 			return filepath.SkipDir
 		}
 		last = newer(last, path)
+		if repo, held := holdsRepository(path); held {
+			kept = append(kept, fmt.Sprintf("%s/%s holds a git repository at %s", name, filepath.ToSlash(rel), repo))
+			return filepath.SkipDir
+		}
 		if n := freedBytes(path); n >= minRegenBytes {
 			found = append(found, Regen{Clone: name, Rel: filepath.ToSlash(rel), Path: path, Rebuild: rebuild, Bytes: n})
 		}
 		return filepath.SkipDir
 	})
-	return found, last, err
+	return found, kept, last, err
+}
+
+// holdsRepository reports whether a .git, directory or file, sits anywhere under
+// dir, and where. A tree that cannot be walked in full counts as holding one.
+func holdsRepository(dir string) (string, bool) {
+	var repo string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Name() == ".git" {
+			repo = filepath.Dir(path)
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return dir + " (could not walk it: " + err.Error() + ")", true
+	}
+	return repo, repo != ""
 }
 
 // ignoredDirs lists the clone's wholly ignored directories. With --directory
@@ -236,13 +292,26 @@ func Prune(s *PruneState) error {
 	}
 	var errs []error
 	for _, r := range s.Found {
-		fi, err := os.Lstat(r.Path)
-		if err != nil || !fi.IsDir() {
-			continue
-		}
-		if err := os.RemoveAll(r.Path); err != nil {
+		if err := removeInClone(filepath.Join(s.Dir, r.Clone), r.Rel); err != nil {
 			errs = append(errs, fmt.Errorf("%s/%s: %w", r.Clone, r.Rel, err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// removeInClone deletes rel inside clone through an os.Root, which refuses to
+// follow a symlink out of the clone at any step: a parent swapped for a link
+// after the inspection cannot point the delete somewhere else. A path that is
+// no longer a directory is left alone, since it is not what was listed.
+func removeInClone(clone, rel string) error {
+	root, err := os.OpenRoot(clone)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	fi, err := root.Lstat(filepath.FromSlash(rel))
+	if err != nil || !fi.IsDir() {
+		return nil
+	}
+	return root.RemoveAll(filepath.FromSlash(rel))
 }
