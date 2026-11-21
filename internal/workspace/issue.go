@@ -438,6 +438,25 @@ func linkedWorktrees(porcelain string) []string {
 	return out
 }
 
+// nestedWorktrees keeps the worktrees whose directory exists strictly inside
+// dir. One whose directory is gone loses nothing when dir is deleted: its
+// entry and HEAD live in the checkout's git directory, which stays.
+func nestedWorktrees(worktrees []string, dir string) []string {
+	root := realPath(dir)
+	var out []string
+	for _, w := range worktrees {
+		resolved := realPath(w)
+		if resolved == root || !isUnder(root, resolved) {
+			continue
+		}
+		if fi, err := os.Stat(w); err != nil || !fi.IsDir() {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
 // githubRepo returns owner/name for a GitHub clone URL, in the SSH, scp-like
 // or HTTPS form, and "" for anything else.
 func githubRepo(url string) string {
@@ -499,14 +518,18 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		c.Dirty = strings.TrimSpace(out) != ""
 	}
 
-	// A worktree's siblings, the checkout's own included, belong to the
-	// checkout's repository, which removing this one leaves in place.
-	if own {
-		if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
-			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
-		} else {
-			c.Worktrees = linkedWorktrees(out)
-		}
+	// A clone with its own repository is held by every linked worktree: each
+	// one's HEAD and index live in the clone's git directory. A worktree's
+	// siblings, the checkout's own included, belong to the checkout's
+	// repository, which removing this one leaves in place; but a worktree that
+	// sits inside this one's directory (Claude Code's .claude/worktrees, made
+	// from inside the clone) is deleted with it, so it holds too.
+	if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
+	} else if own {
+		c.Worktrees = linkedWorktrees(out)
+	} else {
+		c.Worktrees = nestedWorktrees(linkedWorktrees(out), p)
 	}
 
 	// The branch name is informational only, so a failure here is not a safety

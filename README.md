@@ -504,6 +504,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` refuses while a clone has a linked worktree** (`git worktree add`):
   its files and detached commits are invisible to the checks above, and deleting
   the clone deletes its repository (`TestLinkedWorktreeBlocksReap`).
+  A clone or plain worktree that is itself a worktree is held by any worktree
+  inside its directory, such as Claude Code's `.claude/worktrees`, which goes
+  with it (`TestWorktreeCloneIsHeldByAWorktreeNestedInIt`,
+  `TestPlainWorktreeIsHeldByAWorktreeNestedInIt`).
 - **`reap` refuses while anything beside the clones exists nowhere else**, in an
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. Inside an enclosing repository
