@@ -322,7 +322,15 @@ with `--apply`, after one confirmation (`-y` skips it), and only from a
 workspace no clone of which was used within `--idle-days` (14 by default) and
 that nothing runs from. A directory that frees under 1 MiB, such as a
 `node_modules` pnpm cloned from its store, is not named: deleting it would only
-cost a reinstall. `.terraform` is never named: it keeps the selected
+cost a reinstall. A directory is named only when the clone tracks a file
+that rebuilds it in the same directory, the one its tool reads when it
+writes it: `package.json` for `node_modules`, `.next`, `.turbo` and
+`.parcel-cache`; `pyproject.toml`, `setup.py`, `setup.cfg`, `Pipfile` or a
+`requirements*.txt` for `.venv` and the Python caches, which also take their
+tool's own config (`mypy.ini`, `pytest.ini` or `conftest.py`, `ruff.toml`). A
+file further up does not count: the root's `pyproject.toml` does not install
+a `.venv` in `api/`. Without one the directory is kept, and the listing says
+so on a `kept:` line. `.terraform` is never named: it keeps the selected
 `terraform workspace`, and a fresh `init` would quietly plan against `default`.
 
 ## The issue graph was removed
@@ -510,7 +518,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   or worktree; an ignored `.secrets/` or an unignored `node_modules` stays
   (`TestPruneDeletesWhatWasFoundAndNothingElse`). One with a git repository
   anywhere inside it, such as an editable pip install in a `.venv`, stays too
-  (`TestInspectPruneKeepsADirectoryHoldingARepository`).
+  (`TestInspectPruneKeepsADirectoryHoldingARepository`), and so does one with
+  no file that rebuilds it tracked beside it, such as a hand-built `.venv` with
+  no `pyproject.toml`: an untracked one, or one further up, does not count
+  (`TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds`,
+  `TestPruneKeepsWhatNothingTrackedRebuildsAndSaysWhy`).
 - **`prune` holds what it cannot check**: a clone whose last use cannot be
   read (looked up in its own git directory, so a worktree clone is dated too),
   or a probe for what runs from it that fails. It checks each workspace again

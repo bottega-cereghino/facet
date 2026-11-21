@@ -28,9 +28,13 @@ func newPruneCmd() *cobra.Command {
 			".pytest_cache, .ruff_cache, .next, .turbo, .parcel-cache). Only a directory\n" +
 			"git ignores and that holds no tracked file is named, so no commit or change\n" +
 			"can be among them; one holding a git repository of its own (an editable pip\n" +
-			"install, a fork cloned into node_modules) is kept. The workspace stays, and\n" +
-			"its manifest, clones and history are untouched. .terraform is never named:\n" +
-			"it keeps the selected terraform workspace.\n\n" +
+			"install, a fork cloned into node_modules) is kept. So is one with no file\n" +
+			"that rebuilds it tracked in the same directory of the clone: package.json\n" +
+			"for node_modules, .next, .turbo and .parcel-cache; pyproject.toml, setup.py,\n" +
+			"setup.cfg, Pipfile or requirements*.txt for .venv and the Python caches,\n" +
+			"which also take their tool's own config. The listing says why each is kept.\n" +
+			"The workspace stays, and its manifest, clones and history are untouched.\n" +
+			".terraform is never named: it keeps the selected terraform workspace.\n\n" +
 			"The size is what deleting frees. On a Mac, pnpm and uv clone packages from\n" +
 			"their store, so an installed node_modules often frees almost nothing; one\n" +
 			"that frees under 1 MiB is not named, since deleting it only costs a reinstall.\n\n" +
@@ -129,8 +133,8 @@ func runPrune(w io.Writer, dirs []string, git gitx.Runner, live workspace.LiveCh
 	return errors.Join(errs...)
 }
 
-// listPrune prints a line per workspace, then what each would free and what
-// holds it, and returns the bytes free to delete now and the bytes held.
+// listPrune prints a line per workspace, then what each would free, what holds
+// it and what it keeps, and returns the bytes free to delete now and the bytes held.
 func listPrune(w io.Writer, states []*workspace.PruneState) (free, held int64, err error) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "WORKSPACE\tFREES\tSTATE")
@@ -151,7 +155,9 @@ func listPrune(w io.Writer, states []*workspace.PruneState) (free, held int64, e
 		return 0, 0, err
 	}
 	for _, st := range states {
-		if len(st.Found) == 0 {
+		// A workspace that only kept something still says what and why:
+		// "nothing to free" alone would hide a directory prune chose to leave.
+		if len(st.Found) == 0 && len(st.Kept) == 0 {
 			continue
 		}
 		_, _ = fmt.Fprintf(w, "\n%s:\n", filepath.Base(st.Dir))
