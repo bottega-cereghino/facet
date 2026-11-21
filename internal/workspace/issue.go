@@ -417,9 +417,9 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		if _, ok := m.Clones[n]; ok {
 			continue
 		}
-		if _, ok := m.Links[n]; ok {
-			continue
-		}
+		// A link name is skipped only as a symlink, below: a real directory at
+		// a name the manifest declares a link is no clone either, so nothing
+		// else would judge it.
 		if ownFiles[n] || (n == claudeMD && spawnsClaudeMD(ws, m)) || e.Type()&os.ModeSymlink != 0 {
 			continue
 		}

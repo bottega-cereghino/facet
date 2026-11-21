@@ -61,6 +61,9 @@ func AddClone(roots config.Roots, ws string, git gitx.Runner, rep Reporter,
 	if _, ok := m.Links[name]; ok {
 		return fmt.Errorf("%q is already a link in %s; remove it first", name, m.Name)
 	}
+	if fi, err := os.Lstat(filepath.Join(ws, name)); err == nil && !fi.IsDir() {
+		return fmt.Errorf("%s exists and is not a directory, so it cannot be a clone\nfix: move it out of the workspace, then add the clone", filepath.Join(ws, name))
+	}
 	m.Clones[name] = url
 	if len(remotes) > 0 {
 		m.Remotes[name] = remotes
@@ -87,6 +90,11 @@ func AddLink(roots config.Roots, ws string, git gitx.Runner, rep Reporter,
 	}
 	if _, ok := m.Clones[name]; ok {
 		return fmt.Errorf("%q is already a clone in %s; remove it first", name, m.Name)
+	}
+	// Checked before the manifest is written: declared a link, a directory
+	// left here (a checkout `facet rm` dropped) would be judged by nothing.
+	if fi, err := os.Lstat(filepath.Join(ws, name)); err == nil && fi.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("%s exists and is not a link; it may hold the only copy of work\nfix: move it out of the workspace, then add the link", filepath.Join(ws, name))
 	}
 	m.Links[name] = target
 	if origin != "" {
