@@ -148,4 +148,6 @@ green; minors and majors
 wait for a person. A gitleaks or zizmor update stays red until its
 `*_SHA256` is updated in the same PR, because Renovate cannot fetch the
 checksum. The `go` directive in `go.mod` and setup-go's `go-version` move by
-hand, together.
+hand, together. The `toolchain` line in `go.mod` is what every build uses,
+locally (Go downloads it) and for `go install`; keep it at the newest patch
+`make vuln` is clean with, since an older local Go fails that gate.
