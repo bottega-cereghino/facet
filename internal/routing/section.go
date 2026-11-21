@@ -1,6 +1,9 @@
 package routing
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // scopeHeading is the section `facet spawn` writes the confirmed repo set into.
 const scopeHeading = "Repos in scope"
@@ -57,11 +60,17 @@ func UpsertScope(body string, repos []string) (out string, changed bool) {
 	return body[:s.headStart] + head + "\n\n" + want + "\n\n" + rest, true
 }
 
+// anyHeading matches the start of a heading line of any level, `#` to
+// `######`, an empty one included. The scope section ends at the first of
+// them: an author's `# Notes` after it is theirs, not scope content, and a
+// rewrite must hand it back untouched.
+var anyHeading = regexp.MustCompile(`(?m)^#{1,6}(?:[ \t\r]|$)`)
+
 // section locates one markdown section of a body.
 type section struct {
 	headStart    int    // offset of the '#' that opens the heading
 	contentStart int    // offset just past the heading text
-	end          int    // offset of the next heading, or len(body)
+	end          int    // offset of the next heading of any level, or len(body)
 	level        int    // how many '#' the author used
 	name         string // the heading text exactly as the author wrote it
 }
@@ -75,8 +84,9 @@ type section struct {
 // author's answer, so it is neither read nor rewritten. The offsets still index
 // body, because stripFences keeps every byte where it was.
 func findScopeSection(body string) (section, bool) {
-	locs := sectionHeading.FindAllStringSubmatchIndex(stripFences(body), -1)
-	for i, loc := range locs {
+	stripped := stripFences(body)
+	locs := sectionHeading.FindAllStringSubmatchIndex(stripped, -1)
+	for _, loc := range locs {
 		heading := strings.TrimSpace(body[loc[2]:loc[3]])
 		matched := false
 		for _, name := range scopeHeadings {
@@ -89,8 +99,11 @@ func findScopeSection(body string) (section, bool) {
 			continue
 		}
 		s := section{headStart: loc[0], contentStart: loc[1], end: len(body), name: heading}
-		if i+1 < len(locs) {
-			s.end = locs[i+1][0]
+		for _, h := range anyHeading.FindAllStringIndex(stripped, -1) {
+			if h[0] >= s.contentStart {
+				s.end = h[0]
+				break
+			}
 		}
 		for _, c := range body[s.headStart:] {
 			if c != '#' {

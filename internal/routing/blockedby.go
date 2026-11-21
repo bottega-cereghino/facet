@@ -19,6 +19,44 @@ type BlockedByRef struct {
 // bare ref "#5".
 var blockedByRefPattern = regexp.MustCompile(`([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#(\d+)`)
 
+// issueURL matches a link to a GitHub issue, "https://github.com/o/r/issues/12",
+// with or without a "#issuecomment-…" after it. The URL names its repository,
+// so it is a cross-repo reference however the text around it reads.
+var issueURL = regexp.MustCompile(`https?://github\.com/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/issues/(\d+)\b`)
+
+// markdownLink matches "[text](target)". Its text is a label for the target,
+// and only the target says which repository an issue lives in: the label
+// "#12" in "[#12](https://github.com/acme/other/issues/12)" is acme/other#12,
+// not #12 in this issue's own repository.
+var markdownLink = regexp.MustCompile(`\[([^\[\]\n]*)\]\([^()\s]*\)`)
+
+// blankLinks returns section with every issue URL and every markdown link's
+// text replaced by spaces, so blockedByRefPattern reads neither, together with
+// the references the URLs name and where each one starts. Offsets are kept, so
+// the two kinds of reference can be put back in the order they were written.
+func blankLinks(section string) (string, []int, []BlockedByRef) {
+	b := []byte(section)
+	for _, m := range markdownLink.FindAllStringSubmatchIndex(section, -1) {
+		for i := m[2]; i < m[3]; i++ {
+			b[i] = ' '
+		}
+	}
+	var at []int
+	var refs []BlockedByRef
+	for _, m := range issueURL.FindAllStringSubmatchIndex(section, -1) {
+		for i := m[0]; i < m[1]; i++ {
+			b[i] = ' '
+		}
+		n, err := strconv.Atoi(section[m[4]:m[5]])
+		if err != nil || n < 1 {
+			continue
+		}
+		at = append(at, m[0])
+		refs = append(refs, BlockedByRef{OwnerRepo: section[m[2]:m[3]], Number: n})
+	}
+	return string(b), at, refs
+}
+
 // refBoundaryChar reports whether r could be part of a repo-path token
 // ("owner/name" or a plain word). A bare `#n` immediately preceded by one of
 // these is not a standalone reference -- it is the tail of a token this
@@ -105,6 +143,12 @@ func (r *Routing) repoForShorthand(prefix string) (string, bool) {
 // A NIL RECEIVER PARSES EXACTLY AS THIS DID BEFORE: owner/repo#n and a
 // standalone #n, with shorthand unresolved. A caller with no routing file loses
 // nothing it had, and gains nothing it cannot justify.
+//
+// A link to an issue names its repository, so
+// "https://github.com/o/r/issues/12" reads as o/r#12, and the text of a
+// markdown link is never read: "[#12](https://github.com/o/r/issues/12)" is
+// o/r#12, and a label whose target is not an issue reads as nothing rather than
+// as #12 in this issue's own repository.
 func (r *Routing) ParseBlockedBy(body string) []BlockedByRef {
 	section := findSection(body, "Blocked by / waiting on")
 	if section == "" {
@@ -113,7 +157,24 @@ func (r *Routing) ParseBlockedBy(body string) []BlockedByRef {
 
 	var out []BlockedByRef
 	seen := map[BlockedByRef]bool{}
+	add := func(ref BlockedByRef) {
+		// The same dependency named twice in one section (a bullet list that
+		// also mentions it in prose, say) must produce exactly one edge --
+		// not one POST per mention.
+		if seen[ref] {
+			return
+		}
+		seen[ref] = true
+		out = append(out, ref)
+	}
+	section, urlAt, urlRefs := blankLinks(section)
 	for _, m := range blockedByRefPattern.FindAllStringSubmatchIndex(section, -1) {
+		// A URL written before this ref is added first, so the refs come out
+		// in the order the author wrote them.
+		for len(urlAt) > 0 && urlAt[0] < m[0] {
+			add(urlRefs[0])
+			urlAt, urlRefs = urlAt[1:], urlRefs[1:]
+		}
 		ownerStart, ownerEnd := m[2], m[3]
 		shorthand := ""
 		if ownerStart == -1 {
@@ -139,14 +200,10 @@ func (r *Routing) ParseBlockedBy(body string) []BlockedByRef {
 		if ownerStart != -1 {
 			ref.OwnerRepo = section[ownerStart:ownerEnd]
 		}
-		// The same dependency named twice in one section (a bullet list that
-		// also mentions it in prose, say) must produce exactly one edge --
-		// not one POST per mention.
-		if seen[ref] {
-			continue
-		}
-		seen[ref] = true
-		out = append(out, ref)
+		add(ref)
+	}
+	for _, ref := range urlRefs {
+		add(ref)
 	}
 	return out
 }
