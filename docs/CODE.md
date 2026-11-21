@@ -90,7 +90,7 @@ should be able to start.
 
 ## 4. External tools and how they are faked
 
-facet drives `git`, `gh`, `tmux` (read only, for `reap`) and the agent CLI by shelling out. Each has one
+facet drives `git`, `gh`, `tmux` and `launchctl` (read only, for `reap`) and the agent CLI by shelling out. Each has one
 package that owns the boundary, and each of those has exactly one place that
 names the executable:
 
@@ -99,6 +99,7 @@ names the executable:
 | `git` | `internal/gitx` | `gitx.Runner`, a one-method interface |
 | `gh` | `internal/ghx` | `ghx.Client` |
 | `tmux` | `internal/mux` | `workspace.LiveChecker` |
+| `launchctl`, `plutil` | `internal/launchd` | `launchd.Runner`, reached through `workspace.JobChecker` |
 | the agent CLI | `internal/claudex` | — |
 
 **Fake the narrowest thing that works.** `gitx.Runner` has one method, so faking

@@ -10,6 +10,7 @@ import (
 	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/ghx"
 	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +18,8 @@ var (
 	roots config.Roots
 	git   gitx.Runner = gitx.Git{}
 	gh    ghx.Client  = ghx.CLI{}
+	// jobs is the launchd check reap makes; tests point it at their own folder.
+	jobs = launchd.Default()
 )
 
 // version is set by the linker for release builds (-X main.version=v1.2.3). Left

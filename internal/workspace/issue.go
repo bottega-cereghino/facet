@@ -91,6 +91,10 @@ type IssueState struct {
 	// is itself a blocker: deleting a directory out from under a running
 	// process is silent corruption, not a merely premature reap.
 	LiveRoots []string
+	// Jobs names the loaded background jobs (launchd on macOS) whose program or
+	// working directory is here. A job that is not running holds nothing open,
+	// so LiveRoots misses it, but deleting the directory breaks its next run.
+	Jobs []string
 	// SizeBytes is how much disk deleting the workspace frees: objects
 	// hardlinked from the mirror stay behind, so they are not counted.
 	SizeBytes int64
@@ -144,6 +148,9 @@ func (s *IssueState) Blockers() []string {
 	for _, r := range s.LiveRoots {
 		out = append(out, fmt.Sprintf("%s -- kill it before reaping", r))
 	}
+	for _, j := range s.Jobs {
+		out = append(out, fmt.Sprintf("%s -- unload the job, or move it out, before reaping", j))
+	}
 	return out
 }
 
@@ -176,6 +183,13 @@ type LiveChecker interface{ Live(session string) bool }
 // asked, the same way a missing PaneReader is skipped in package mux.
 type LiveRootChecker interface {
 	LiveRoots(dir string) ([]string, error)
+}
+
+// JobChecker reports the loaded background jobs that run from inside a
+// workspace, running or not. Implemented optionally by whatever LiveChecker is
+// passed, as LiveRootChecker is.
+type JobChecker interface {
+	JobsUnder(dir string) ([]string, error)
 }
 
 // PRLookup finds the pull request for a branch. Nil means do not look.
@@ -281,6 +295,11 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 	if lr, ok := mux.(LiveRootChecker); ok {
 		if roots, err := lr.LiveRoots(ws); err == nil {
 			st.LiveRoots = roots
+		}
+	}
+	if jc, ok := mux.(JobChecker); ok {
+		if jobs, err := jc.JobsUnder(ws); err == nil {
+			st.Jobs = jobs
 		}
 	}
 	st.SizeBytes = freedBytes(ws)

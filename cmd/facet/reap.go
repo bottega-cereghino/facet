@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/mux"
 	"github.com/bottega-cereghino/facet/internal/workspace"
 	"github.com/spf13/cobra"
@@ -80,7 +81,8 @@ func newReapCmd() *cobra.Command {
 		Short: "Delete a workspace once its work has landed",
 		Long: "Deletes an issue workspace or a long-lived one. Refuses while there are\n" +
 			"unpushed commits, uncommitted changes, stashes, an open pull request, a live\n" +
-			"multiplexer session, or a tmux pane or process still rooted in the workspace.\n\n" +
+			"multiplexer session, a tmux pane or process still rooted in the workspace, or\n" +
+			"a loaded launchd job whose program or working directory is in it.\n\n" +
 			"A long-lived workspace may also hold files of its own beside its clones. Any\n" +
 			"that are not committed in an enclosing repository (~/Workspaces is usually\n" +
 			"one) hold it too, since the workspace is their only copy. Links are removed,\n" +
@@ -206,11 +208,38 @@ func reapTarget(path string, args []string) (string, error) {
 }
 
 // muxLive returns a session checker, or nil when tmux is not installed.
+// muxLive is every liveness check reap makes beyond git: the multiplexer's
+// sessions and panes, processes through lsof, and loaded launchd jobs. The
+// jobs are checked even without a multiplexer.
 func muxLive() workspace.LiveChecker {
+	c := liveChecks{jobs: jobs}
 	if l := mux.Pick(); l != nil {
-		return l
+		c.mux = l
 	}
-	return nil
+	return c
+}
+
+// liveChecks joins the multiplexer's checks to the launchd one, so
+// workspace.Inspect finds both through its optional interfaces.
+type liveChecks struct {
+	mux  workspace.LiveChecker
+	jobs *launchd.Jobs
+}
+
+func (c liveChecks) Live(session string) bool { return c.mux != nil && c.mux.Live(session) }
+
+func (c liveChecks) LiveRoots(dir string) ([]string, error) {
+	if lr, ok := c.mux.(workspace.LiveRootChecker); ok {
+		return lr.LiveRoots(dir)
+	}
+	return nil, nil
+}
+
+func (c liveChecks) JobsUnder(dir string) ([]string, error) {
+	if c.jobs == nil {
+		return nil, nil
+	}
+	return c.jobs.Under(dir)
 }
 
 func humanBytes(n int64) string {
