@@ -1675,3 +1675,17 @@ func TestIssueWorkspaceHoldsAnEditedClaudeMD(t *testing.T) {
 		t.Errorf("a CLAUDE.md with no recorded hash does not hold: %v", st.Blockers())
 	}
 }
+
+// A probe for what runs from the workspace that fails (lsof or tmux crashing)
+// cannot rule out a process rooted there, so it holds, as it does in prune
+// (facet#292).
+func TestReapHoldsWhenTheLiveRootsProbeFails(t *testing.T) {
+	ws, _ := issueWorkspace(t)
+	st, err := InspectIssue(ws, gitx.Git{}, nil, failingLiveRoots{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBlocker(st, "lsof crashed") {
+		t.Fatalf("a failed LiveRoots probe does not hold: %v", st.Blockers())
+	}
+}
