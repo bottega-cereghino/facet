@@ -8,7 +8,7 @@ import (
 // healthy is real `gh auth status` output using a classic PAT. gh masks the
 // token itself.
 const healthy = `github.com
-  ✓ Logged in to github.com account RiccardoCereghino (/Users/cerre/.config/gh/hosts.yml)
+  ✓ Logged in to github.com account RiccardoCereghino (/Users/me/.config/gh/hosts.yml)
   - Active account: true
   - Git operations protocol: ssh
   - Token: ghp_************************************
@@ -28,7 +28,7 @@ const preIncident = `github.com
 // httpsFlip is what `gh auth login --with-token` leaves behind: the same
 // credential, with the host protocol silently switched to https.
 const httpsFlip = `github.com
-  ✓ Logged in to github.com account RiccardoCereghino (/Users/cerre/.config/gh/hosts.yml)
+  ✓ Logged in to github.com account RiccardoCereghino (/Users/me/.config/gh/hosts.yml)
   - Active account: true
   - Git operations protocol: https
   - Token: ghp_************************************
@@ -46,9 +46,9 @@ const loggedOut = "You are not logged into any GitHub hosts. To log in, run: gh 
 // confirm" into "no credential" survived to review. Note gh's own last two
 // lines: following them during a network blip destroys a working credential.
 const unconfirmed = `github.com
-  X Failed to log in to github.com account RiccardoCereghino (/Users/cerre/.config/gh/hosts.yml)
+  X Failed to log in to github.com account RiccardoCereghino (/Users/me/.config/gh/hosts.yml)
   - Active account: true
-  - The token in /Users/cerre/.config/gh/hosts.yml is invalid.
+  - The token in /Users/me/.config/gh/hosts.yml is invalid.
   - To re-authenticate, run: gh auth login -h github.com
   - To forget about this account, run: gh auth logout -h github.com -u RiccardoCereghino
 `
@@ -59,13 +59,13 @@ const unconfirmed = `github.com
 // since a naive whole-output accumulator would let the second, inactive
 // block's fields overwrite these.
 const twoAccountsActiveFirst = `github.com
-  ✓ Logged in to github.com account RiccardoCereghino (/Users/cerre/.config/gh/hosts.yml)
+  ✓ Logged in to github.com account RiccardoCereghino (/Users/me/.config/gh/hosts.yml)
   - Active account: true
   - Git operations protocol: ssh
   - Token: ghp_************************************
   - Token scopes: 'read:org', 'repo', 'workflow'
 
-  ✓ Logged in to github.com account someone-else (/Users/cerre/.config/gh/hosts2.yml)
+  ✓ Logged in to github.com account someone-else (/Users/me/.config/gh/hosts2.yml)
   - Active account: false
   - Git operations protocol: https
   - Token: gho_************************************
@@ -79,13 +79,13 @@ const twoAccountsActiveFirst = `github.com
 // twoAccountsActiveFirst above. This fixture exists to pin the opposite case:
 // the FIRST (inactive) block's fields must not leak into the result either.
 const twoAccountsActiveSecond = `github.com
-  ✓ Logged in to github.com account someone-else (/Users/cerre/.config/gh/hosts2.yml)
+  ✓ Logged in to github.com account someone-else (/Users/me/.config/gh/hosts2.yml)
   - Active account: false
   - Git operations protocol: https
   - Token: gho_************************************
   - Token scopes: 'gist'
 
-  ✓ Logged in to github.com account RiccardoCereghino (/Users/cerre/.config/gh/hosts.yml)
+  ✓ Logged in to github.com account RiccardoCereghino (/Users/me/.config/gh/hosts.yml)
   - Active account: true
   - Git operations protocol: ssh
   - Token: ghp_************************************
@@ -98,7 +98,7 @@ const twoAccountsActiveSecond = `github.com
 //
 // Where that lands is a safety property: see CredentialState.
 const futureShape = `github.com
-  ! Could not authenticate to github.com account RiccardoCereghino (/Users/cerre/.config/gh/hosts.yml)
+  ! Could not authenticate to github.com account RiccardoCereghino (/Users/me/.config/gh/hosts.yml)
 `
 
 func TestParseAuthStatusHealthy(t *testing.T) {
@@ -124,7 +124,7 @@ func TestParseAuthStatusHealthy(t *testing.T) {
 	if st.GitProtocol != "ssh" {
 		t.Errorf("GitProtocol = %q, want ssh", st.GitProtocol)
 	}
-	if st.ConfigSource != "/Users/cerre/.config/gh/hosts.yml" {
+	if st.ConfigSource != "/Users/me/.config/gh/hosts.yml" {
 		t.Errorf("ConfigSource = %q", st.ConfigSource)
 	}
 	if got := strings.Join(st.Scopes, ","); got != "read:org,repo,workflow" {
@@ -163,7 +163,7 @@ func TestParseAuthStatusUnconfirmed(t *testing.T) {
 	if st.Host != "github.com" {
 		t.Errorf("Host = %q, want github.com", st.Host)
 	}
-	if st.ConfigSource != "/Users/cerre/.config/gh/hosts.yml" {
+	if st.ConfigSource != "/Users/me/.config/gh/hosts.yml" {
 		t.Errorf("ConfigSource = %q", st.ConfigSource)
 	}
 	if !strings.Contains(st.VerifyFailure, "is invalid") {
@@ -277,7 +277,7 @@ func TestParseAuthStatusMultiAccount(t *testing.T) {
 			if st.GitProtocol != "ssh" {
 				t.Errorf("GitProtocol = %q, want ssh -- got the inactive block's protocol", st.GitProtocol)
 			}
-			if st.ConfigSource != "/Users/cerre/.config/gh/hosts.yml" {
+			if st.ConfigSource != "/Users/me/.config/gh/hosts.yml" {
 				t.Errorf("ConfigSource = %q, want the active account's source", st.ConfigSource)
 			}
 			if got := strings.Join(st.Scopes, ","); got != "read:org,repo,workflow" {
