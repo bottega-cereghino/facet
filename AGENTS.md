@@ -78,7 +78,7 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
 - **The privacy guard** (`internal/privacy`) scans the tree for a word list
   that is never committed: `.denylist` at the root (gitignored) or the
   `FACET_DENYLIST` environment variable, comma-separated (a repo secret in
-  CI). Locally it skips without one, so a green `make check` does not prove
+  CI, handed only to the two `make test` steps). Locally it skips without one, so a green `make check` does not prove
   it ran; in CI it fails without one. Never commit the list, and never
   weaken the guard to get green.
 - **Tests use the real filesystem and real git repositories**, and `mux`
