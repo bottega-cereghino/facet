@@ -6,6 +6,22 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.4.0](https://github.com/bottega-cereghino/facet/compare/v0.3.0...v0.4.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* install with go install github.com/bottega-cereghino/facet/cmd/facet; tags up to v0.3.0 keep the old name.
+
+### Added
+
+* **reap:** --reapable deletes every workspace reap would delete now, after one confirmation ([#227](https://github.com/bottega-cereghino/facet/issues/227)) ([7d0bac7](https://github.com/bottega-cereghino/facet/commit/7d0bac7f4dbc60796e803ffd78a6057fd502d5d2))
+
+
+### Build
+
+* rename the Go module to github.com/bottega-cereghino/facet ([#232](https://github.com/bottega-cereghino/facet/issues/232)) ([7e55d0b](https://github.com/bottega-cereghino/facet/commit/7e55d0b4a866dfb413079c7a87d1698590040c09))
+
 ## [0.3.0](https://github.com/bottega-cereghino/facet/compare/v0.2.0...v0.3.0) (2026-11-20)
 
 ### ⚠ BREAKING CHANGES
