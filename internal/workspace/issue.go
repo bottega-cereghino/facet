@@ -312,6 +312,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 			clonePR = nil
 		}
 		st.Clone = append(st.Clone, inspectClone(git, dir, p, repo, clonePR))
+		st.Clone = append(st.Clone, submoduleStates(git, dir, p)...)
 	}
 
 	st.Enclosing, st.Loose = looseFiles(git, ws, m)

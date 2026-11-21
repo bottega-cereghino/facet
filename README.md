@@ -495,6 +495,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` counts commits reachable from any local branch or HEAD and from no
   remote.** Unlike `@{u}..HEAD`, that also catches a branch which was never
   pushed at all — the branch most easily lost.
+- **`reap` judges each initialised submodule as a clone of its own**,
+  recursively: its commits, branches and stash live in the clone's git
+  directory and go with it, while the superproject sees only the commit it
+  records (`TestReapHoldsAnUnpushedSubmoduleCommit`).
 - **`reap` sees every untracked and modified file whatever git's config says.**
   Its status check names `--untracked-files=all` and `--ignore-submodules=none`,
   so `status.showUntrackedFiles=no` cannot hide a new file from it
