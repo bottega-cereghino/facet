@@ -50,13 +50,13 @@ type CloneState struct {
 	// and never block reap, but staying silent about them is what taught
 	// operators to reach for --force (facet#66).
 	SquashLanded int
-	// FetchStale is set when `git fetch --prune origin` failed, or did not
+	// StaleRemotes names the remotes `git fetch --prune` failed for, or did not
 	// finish within fetchTimeout, before Unpushed was computed. The count above
 	// is still computed and used against whatever refs are on disk -- refusing
 	// reap on every offline run would make it useless without a network -- but
 	// Blockers appends a disclaimer to the unpushed-commit line whenever this is
 	// set and there are unpushed commits to disclaim.
-	FetchStale bool
+	StaleRemotes []string
 	// DefaultBranchUnresolved is set when origin's default branch could not be
 	// determined -- no refs/remotes/origin/HEAD and no origin/main, which is a
 	// hand-built remote, an old fetch config, or a repo whose default is not
@@ -64,7 +64,7 @@ type CloneState struct {
 	// be proven to have landed on a branch that cannot be named, so proofLanded
 	// fails safe and every candidate is counted unpushed. Without this the
 	// operator is told about unpushed commits and never about the real cause
-	// (facet#80). Like FetchStale it is a disclaimer on that line and never a
+	// (facet#80). Like StaleRemotes it is a disclaimer on that line and never a
 	// blocker of its own: it is set only when the fail-safe actually decided
 	// something, so a clean workspace on such a remote still reaps.
 	DefaultBranchUnresolved bool
@@ -140,8 +140,8 @@ func (s *IssueState) Blockers() []string {
 	for _, c := range s.Clone {
 		if c.Unpushed > 0 {
 			msg := fmt.Sprintf("%s has %d unpushed commit(s) -- this workspace is their only copy", c.Dir, c.Unpushed)
-			if c.FetchStale {
-				msg += " (could not fetch origin first -- a branch merged and deleted upstream may be miscounted here)"
+			if len(c.StaleRemotes) > 0 {
+				msg += fmt.Sprintf(" (could not fetch %s first -- a branch merged and deleted upstream may be miscounted here)", strings.Join(c.StaleRemotes, ", "))
 			}
 			if c.DefaultBranchUnresolved {
 				msg += " (could not resolve origin's default branch -- work already landed there cannot be told from unpushed work here)"
@@ -201,10 +201,10 @@ func (s *IssueState) Notes() []string {
 		// With unpushed commits the disclaimer rides on that blocker; with none,
 		// "nothing unpushed" was still judged against the last fetch, and a
 		// branch deleted upstream since then would read as pushed.
-		if c.FetchStale && c.Unpushed == 0 {
+		if len(c.StaleRemotes) > 0 && c.Unpushed == 0 {
 			out = append(out, fmt.Sprintf(
-				"%s: could not fetch origin, so it was judged against the last fetch -- a branch deleted upstream since then reads as pushed; reap again online to be sure",
-				c.Dir))
+				"%s: could not fetch %s, so it was judged against the last fetch -- a branch deleted upstream since then reads as pushed; reap again online to be sure",
+				c.Dir, strings.Join(c.StaleRemotes, ", ")))
 		}
 	}
 	for _, c := range s.Clone {
@@ -588,19 +588,17 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 	}
 
 	// Refresh remote-tracking refs before judging unpushed-ness: a clone that
-	// hasn't talked to origin since a PR branch was merged and deleted upstream
-	// would otherwise judge those commits against a stale origin/* and count
-	// them as this workspace's only copy. Bounded to fetchTimeout wherever the
-	// Runner supports it: a fast failure (no network, unreachable origin) and a
-	// hung one (blackholed connection, captive portal) are both not fatal --
-	// the count below still runs against whatever refs are on disk -- but both
-	// are recorded so Blockers can disclose them.
-	if tr, ok := git.(timeoutRunner); ok {
-		if _, err := tr.RunTimeout(p, nil, fetchTimeout, "fetch", "--prune", "origin"); err != nil {
-			c.FetchStale = true
-		}
-	} else if _, err := git.Run(p, nil, "fetch", "--prune", "origin"); err != nil {
-		c.FetchStale = true
+	// hasn't talked to a remote since a PR branch was merged and deleted there
+	// would otherwise judge those commits against a stale ref and count them as
+	// pushed, or as this workspace's only copy. Every remote is fetched, since
+	// every remote's refs count as pushed below. A fetch that fails (no network,
+	// an unreachable remote) or hangs is not fatal -- the count below still runs
+	// against whatever refs are on disk -- but it is recorded so Blockers and
+	// Notes can disclose it.
+	if stale, err := fetchRemotes(git, p); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not list its remotes: %v", err))
+	} else {
+		c.StaleRemotes = stale
 	}
 
 	// Commits reachable from HEAD or any local branch but from no remote-tracking

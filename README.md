@@ -498,7 +498,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   a symlink before it is removed, so a plain directory is never mistaken for one.
 - **`reap` counts commits reachable from any local branch or HEAD and from no
   remote.** Unlike `@{u}..HEAD`, that also catches a branch which was never
-  pushed at all — the branch most easily lost.
+  pushed at all — the branch most easily lost. It fetches every remote with
+  `--prune` first, not only `origin`, so a branch deleted from a fork since it
+  was pushed there no longer reads as pushed; a remote it cannot fetch is named
+  (`TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed`,
+  `TestReapNamesTheRemoteItCouldNotFetch`).
 - **`reap` judges each initialised submodule as a clone of its own**,
   recursively: its commits, branches and stash live in the clone's git
   directory and go with it, while the superproject sees only the commit it
