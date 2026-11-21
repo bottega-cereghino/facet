@@ -12,11 +12,11 @@ import (
 // every time -- onto the REST endpoint carrying the same fields, which can be
 // asked conditionally and costs nothing when the issue has not changed.
 func (CLI) ViewIssue(repo string, number int) (*Issue, error) {
-	res, err := condGet(fmt.Sprintf("repos/%s/issues/%d", repo, number))
+	body, err := condGet(fmt.Sprintf("repos/%s/issues/%d", repo, number))
 	if err != nil {
 		return nil, err
 	}
-	iss, err := parseRESTIssue(res.Body)
+	iss, err := parseRESTIssue(body)
 	if err != nil {
 		return nil, fmt.Errorf("parse issue %s#%d: %w", repo, number, err)
 	}

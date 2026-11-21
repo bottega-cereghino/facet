@@ -49,8 +49,8 @@ func (CLI) RepoLabels(repo string) ([]RepoLabel, error) {
 //
 // --paginate CONCATENATES one JSON array per page rather than merging them, so
 // a repository with more than one page of labels comes back as `[...][...]`,
-// which json.Unmarshal will not accept. Same decoder loop, and the same
-// reasoning, as parseDependencyEdges.
+// which json.Unmarshal will not accept. So it is decoded as a stream of
+// arrays, the same loop as parseComments.
 func parseRepoLabels(out []byte) ([]RepoLabel, error) {
 	dec := json.NewDecoder(strings.NewReader(string(out)))
 	var all []RepoLabel
