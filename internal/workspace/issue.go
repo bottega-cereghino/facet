@@ -110,6 +110,9 @@ type IssueState struct {
 	// working directory is here. A job that is not running holds nothing open,
 	// so LiveRoots misses it, but deleting the directory breaks its next run.
 	Jobs []string
+	// JobsUnknown is why the loaded jobs could not be read, or nil. Set, a job
+	// that runs from here cannot be ruled out, so it holds the workspace.
+	JobsUnknown error
 	// SizeBytes is how much disk deleting the workspace frees: objects
 	// hardlinked from the mirror stay behind, so they are not counted.
 	SizeBytes int64
@@ -170,6 +173,9 @@ func (s *IssueState) Blockers() []string {
 	}
 	for _, j := range s.Jobs {
 		out = append(out, fmt.Sprintf("%s -- unload the job, or move it out, before reaping", j))
+	}
+	if s.JobsUnknown != nil {
+		out = append(out, fmt.Sprintf("could not read the loaded launchd jobs (%v) -- a job that runs from here cannot be ruled out; run `launchctl list` to see why, then reap again", s.JobsUnknown))
 	}
 	return out
 }
@@ -334,9 +340,7 @@ func (s *IssueState) checkRunning(dir string, mux LiveChecker) {
 		}
 	}
 	if jc, ok := mux.(JobChecker); ok {
-		if jobs, err := jc.JobsUnder(dir); err == nil {
-			s.Jobs = jobs
-		}
+		s.Jobs, s.JobsUnknown = jc.JobsUnder(dir)
 	}
 }
 

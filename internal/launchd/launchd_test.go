@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,10 +91,33 @@ func TestUnderHoldsALoadedJobThatRunsFromTheDirectory(t *testing.T) {
 func TestUnderWithoutTheToolsReportsNothing(t *testing.T) {
 	agents := t.TempDir()
 	plist(t, agents, "com.example.wd", "\t<key>WorkingDirectory</key>\n\t<string>/x</string>")
-	missing := func(string, ...string) ([]byte, error) { return nil, errors.New("executable file not found") }
+	missing := func(name string, _ ...string) ([]byte, error) {
+		return nil, &exec.Error{Name: name, Err: exec.ErrNotFound}
+	}
 	got, err := (&Jobs{Dirs: []string{agents}, Run: missing}).Under("/x")
 	if err != nil || len(got) != 0 {
 		t.Fatalf("Under = %v, %v; want nothing", got, err)
+	}
+}
+
+// A launchctl that is there but fails cannot say which jobs are loaded: that is
+// an error, never an empty list, or reap would delete what a loaded job runs
+// from (facet#273).
+func TestUnderReportsAListThatFails(t *testing.T) {
+	agents := t.TempDir()
+	plist(t, agents, "com.example.wd", "\t<key>WorkingDirectory</key>\n\t<string>/x</string>")
+	failing := func(name string, args ...string) ([]byte, error) {
+		if name == "launchctl" {
+			return nil, errors.New("exit status 5")
+		}
+		return os.ReadFile(args[len(args)-1])
+	}
+	j := &Jobs{Dirs: []string{agents}, Run: failing}
+	for range 2 {
+		got, err := j.Under("/x")
+		if err == nil || !strings.Contains(err.Error(), "launchctl list") || !strings.Contains(err.Error(), "exit status 5") {
+			t.Fatalf("Under = %v, %v; want an error naming launchctl list and why", got, err)
+		}
 	}
 }
 

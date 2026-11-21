@@ -137,7 +137,7 @@ func liveHolders(ws string, live LiveChecker) []string {
 	if jc, ok := live.(JobChecker); ok {
 		jobs, err := jc.JobsUnder(ws)
 		if err != nil {
-			out = append(out, fmt.Sprintf("could not list its launchd jobs (%v) -- prune holds what it cannot check", err))
+			out = append(out, fmt.Sprintf("could not read the loaded launchd jobs (%v) -- prune holds what it cannot check; run `launchctl list` to see why", err))
 		}
 		for _, j := range jobs {
 			out = append(out, fmt.Sprintf("%s -- unload the job first", j))
