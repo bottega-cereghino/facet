@@ -79,6 +79,11 @@ refuses to delete a workspace when a git probe fails or a PR lookup errors,
 because "I could not check" and "there is nothing to lose" must never produce the
 same outcome.
 
+The one exception is a probe layered on top of those checks for a tool that may
+be missing: tmux, lsof and launchctl. A missing tool there means "nothing
+found", or reap would refuse on every machine without tmux. The git and GitHub
+checks underneath still refuse when they cannot tell.
+
 ## 3. Package documentation
 
 **One file per package opens with a doc comment stating the package's job and the
@@ -280,8 +285,8 @@ reference. So keep the private names on the list; the shape needs no gate.
 make check
 ```
 
-That is exactly what CI's Linux tier runs, target for target, so a green run
-locally means a green run there. One caveat worth knowing: the privacy guard
+That is exactly what CI's Linux tier runs, target for target, with the same Go
+(the `toolchain` line in `go.mod`). One caveat worth knowing: the privacy guard
 inside `make test` **skips** locally when no word list is configured and
 **fails** in CI when none is set, so a green `make check` on your machine is not
 evidence that guard ran.

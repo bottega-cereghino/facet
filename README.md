@@ -207,11 +207,11 @@ missing the `project` scope, **warns and does not fail the spawn** — the clone
 the branch and the `CLAUDE.md` are the point, and a complete workspace is never
 stranded by GitHub Projects being briefly uncooperative.
 
-### The confirmed repo set is written back
+### The confirmed repo set can be written back
 
 `facet spawn` prints its inference and waits for you. That answer is worth keeping:
-on confirmation it records the confirmed repos in the issue's **Repos in scope**
-section, so the next spawn reads a decision (`scope-field`) instead of repeating a
+with `--writeback`, on confirmation it records the confirmed repos in the issue's
+**Repos in scope** section, so the next spawn reads a decision (`scope-field`) instead of repeating a
 guess — and an issue never filed through a form finally declares what it touches.
 
 ```
@@ -224,7 +224,7 @@ its author chose, an empty set writes nothing, and a body that already says the
 right thing is left alone — spawning twice does not churn the issue's history. The
 body is re-read immediately before the write, because the copy fetched at the top
 of `spawn` may be minutes old by then, and someone may have edited it since.
-`--no-writeback` opts out.
+Without `--writeback`, spawn writes nothing to the issue.
 
 ### Filing an issue that the board can see
 
@@ -325,7 +325,7 @@ account     RiccardoCereghino
 token type  ghp_ (value never read)
 scopes      read:org, repo, workflow
 protocol    ssh
-source      /Users/cerre/.config/gh/hosts.yml
+source      ~/.config/gh/hosts.yml
 
 ✓ credential preflight passed
 ```
