@@ -302,6 +302,14 @@ and leaves every held workspace alone. It never forces, and it checks each
 workspace again just before deleting it, so work started while the prompt
 waited is not lost. `facet ls --size` shows the same list without deleting.
 
+`facet prune` frees the disk a workspace keeps without deleting it: the
+directories in its clones that one command rebuilds (`node_modules`, `.venv`,
+`.terraform` and the tool caches). It lists what each workspace would free and
+deletes only with `--apply`, and only from a workspace no clone of which was
+used within `--idle-days` (14 by default) and that nothing runs from. A
+directory that frees under 1 MiB, such as a `node_modules` pnpm cloned from its
+store, is not named: deleting it would only cost a reinstall.
+
 ## The issue graph was removed
 
 `facet-graph` (`tree` and `deps`, for sub-issue hierarchies and blocked-by
@@ -478,6 +486,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `node_modules`, build output: holding on them would hold every workspace), and
   commits reachable only from a local tag (a clone carries every upstream tag,
   so a tag cannot tell your work from a release). Copy or push those first.
+- **`prune` deletes only directories git ignores**, named in a fixed list of
+  rebuildable ones, holding no tracked file and outside any nested repository
+  or worktree; an ignored `.secrets/` or an unignored `node_modules` stays
+  (`TestPruneDeletesWhatWasFoundAndNothingElse`).
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`.
