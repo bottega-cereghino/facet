@@ -506,7 +506,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `--prune` first, not only `origin`, so a branch deleted from a fork since it
   was pushed there no longer reads as pushed; a remote it cannot fetch is named
   (`TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed`,
-  `TestReapNamesTheRemoteItCouldNotFetch`).
+  `TestReapNamesTheRemoteItCouldNotFetch`). It fetches into
+  `refs/remotes/<name>/` only, whatever the remote's own refspec says, so a
+  remote added with `--mirror=fetch` cannot prune local branches away, not even
+  in a dry run (`TestReapsFetchNeverWritesOutsideRefsRemotes`).
 - **`reap --reapable` leaves alone a workspace it could not fetch for**, and
   names it: "nothing unpushed" was judged against refs on disk
   (`TestReapReapableHoldsAWorkspaceJudgedAgainstAFailedFetch`). It fetches
