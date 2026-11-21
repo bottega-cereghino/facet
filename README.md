@@ -519,7 +519,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   manifest; edited, or spawned before the hash was recorded, it holds: nothing
   rewrites it, so an agent's notes there are the only copy
   (`TestIssueWorkspaceHoldsAnEditedClaudeMD`).
-- **What `reap` does not protect:** files git ignores inside a clone (`.env`,
+- **`reap` refuses while a git repository sits in a directory a clone
+  ignores**, such as a fork cloned into `vendor/` to patch: its commits are
+  invisible to the checks above, and it goes with the clone
+  (`TestReapHoldsARepositoryInAnIgnoredDirectory`).
+- **What `reap` does not protect:** other files git ignores inside a clone (`.env`,
   `node_modules`, build output: holding on them would hold every workspace), and
   commits reachable only from a local tag (a clone carries every upstream tag,
   so a tag cannot tell your work from a release). Copy or push those first.

@@ -70,6 +70,10 @@ type CloneState struct {
 	DefaultBranchUnresolved bool
 	// Stashed counts `git stash` entries, which no push would ever carry.
 	Stashed int
+	// IgnoredRepos names the git repositories inside directories the clone
+	// ignores. Their commits are invisible to the checks here, and they go with
+	// the clone. Non-empty is a blocker.
+	IgnoredRepos []string
 	// Unverifiable holds the reasons this clone's state could not be confirmed --
 	// a git command that failed, or a directory that is not a readable repo. A
 	// non-empty slice is itself a blocker: a clone we could not inspect must not
@@ -149,6 +153,11 @@ func (s *IssueState) Blockers() []string {
 	for _, c := range s.Clone {
 		for _, w := range c.Worktrees {
 			out = append(out, fmt.Sprintf("%s has a linked worktree at %s -- reap cannot see its work; push it, then `git worktree remove` it", c.Dir, w))
+		}
+	}
+	for _, c := range s.Clone {
+		for _, r := range c.IgnoredRepos {
+			out = append(out, fmt.Sprintf("%s has a git repository at %s, in a directory it ignores -- reap cannot see its work; push it or move it out of the clone", c.Dir, r))
 		}
 	}
 	for _, c := range s.Clone {
@@ -563,6 +572,12 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		c.Worktrees = linkedWorktrees(out)
 	} else {
 		c.Worktrees = nestedWorktrees(linkedWorktrees(out), p)
+	}
+
+	if repos, err := ignoredRepos(git, p, c.Worktrees); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for repositories in its ignored directories: %v", err))
+	} else {
+		c.IgnoredRepos = repos
 	}
 
 	// The branch name is informational only, so a failure here is not a safety
