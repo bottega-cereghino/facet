@@ -1,10 +1,10 @@
 name: CodeQL
 
 # Static analysis of the Go code, on every pull request and on main. CodeQL is
-# free on a public repository. The job uploads its results; the gate is the
-# separate "CodeQL" check that code scanning adds to the pull request, which
-# the main ruleset requires (new alerts of error severity, or of high security
-# severity and above, fail it). See AGENTS.md, section CI.
+# free on a public repository. The job uploads its results; the verdict is the
+# separate "CodeQL" check that code scanning adds to the pull request (new
+# alerts of error severity, or of high security severity and above, fail it).
+# It is not a required check. See AGENTS.md, section CI.
 #
 # No schedule: the repository has no traffic between pull requests, and main
 # is analysed on every merge.
