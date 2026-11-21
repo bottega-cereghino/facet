@@ -186,7 +186,7 @@ func TestUnresolvableDefaultBranchIsTheFailSafesTrigger(t *testing.T) {
 // be named -- but an operator on such a remote was told only about unpushed
 // commits, with no way to learn the real cause.
 //
-// The disclaimer rides the unpushed line, exactly as FetchStale's does, rather
+// The disclaimer rides the unpushed line, exactly as StaleRemotes's does, rather
 // than becoming an Unverifiable entry: Unverifiable blocks even with zero
 // unpushed commits, which would make every clean workspace on a repo like this
 // unreapable. This surfaces only where the fail-safe actually cost something.
@@ -221,7 +221,7 @@ func TestUnresolvableDefaultBranchNamesTheCauseInTheRefusal(t *testing.T) {
 // The disclaimer must not appear where the fail-safe changed nothing. A clean
 // workspace on the same odd remote has no unpushed candidates, so the default
 // branch was never needed -- reporting it there would be noise on a reap that
-// succeeds, and the FetchStale precedent it copies is silent for the same reason.
+// succeeds, and the StaleRemotes precedent it copies is silent for the same reason.
 func TestUnresolvableDefaultBranchIsSilentOnACleanWorkspace(t *testing.T) {
 	ws, clone := issueWorkspaceNoDefaultBranch(t)
 	g := gitx.Git{}
