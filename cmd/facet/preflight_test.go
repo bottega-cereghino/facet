@@ -197,3 +197,26 @@ func TestNotesPrintBeforeTheVerdict(t *testing.T) {
 		t.Errorf("no notes must print nothing at all; got %q", buf.String())
 	}
 }
+
+// A fine-grained token passes, and the verdict says the scopes check did not
+// run for it rather than claiming the scopes were verified.
+func TestRunPreflightFineGrainedTokenPassesWithANote(t *testing.T) {
+	withFakes(t, "")
+	gh = &fakeGH{auth: &ghx.AuthStatus{
+		Host: "github.com", State: ghx.StateConfirmed,
+		Account: "RiccardoCereghino", Active: true,
+		TokenType: "github_pat_", GitProtocol: "ssh", ConfigSource: "keyring",
+	}}
+
+	var buf bytes.Buffer
+	if err := runPreflight(&buf); err != nil {
+		t.Fatalf("a fine-grained token failed the preflight: %v\n%s", err, buf.String())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "token scopes were NOT checked") {
+		t.Errorf("no note says the scopes check did not run:\n%s", out)
+	}
+	if !strings.Contains(out, "1 check did NOT run") {
+		t.Errorf("the verdict does not admit the skipped check:\n%s", out)
+	}
+}

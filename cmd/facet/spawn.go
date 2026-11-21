@@ -63,7 +63,7 @@ func newSpawnCmd() *cobra.Command {
 	f.StringSliceVar(&rmClones, "rm", nil, "drop repos from the inferred set: a routing key, or key=url; repeatable. An unrecognised value refuses")
 	f.StringSliceVar(&scope, "scope", nil, "another issue this workspace covers, as owner/repo#n; repeatable. The spawned issue is always included")
 	f.StringVar(&slug, "slug", "", "override the slug derived from the issue title")
-	f.StringVar(&base, "base", "main", "base branch for the issue branch")
+	f.StringVar(&base, "base", "", "base branch for the issue branch (default: the repository's default branch, which gh looks up)")
 	f.BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	f.BoolVar(&noBranch, "no-branch", false, "do not create or check out an issue branch")
 	f.BoolVar(&dryRun, "dry-run", false, "show the inference and exit, creating nothing")

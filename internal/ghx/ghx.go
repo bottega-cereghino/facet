@@ -93,8 +93,6 @@ type Client interface {
 	// DevelopBranch creates a branch on the forge linked to the issue, and
 	// returns its name. gh links exactly one repository to an issue.
 	DevelopBranch(repo string, number int, base, name string) (string, error)
-	// BranchesFor lists branches already linked to the issue.
-	BranchesFor(repo string, number int) ([]string, error)
 	// ViewPR finds the pull request for a head branch, if any.
 	ViewPR(repo, branch string) (*PR, error)
 	// MergedPRForSHA finds the merged pull request that had sha as a commit,
@@ -130,6 +128,9 @@ type Client interface {
 	IssueComments(repo string, number int) ([]Comment, error)
 	// PostComment adds a comment and returns its URL.
 	PostComment(repo string, number int, body string) (string, error)
+	// ViewComment fetches one comment by its own id, which is how an edit
+	// learns which issue the comment is on.
+	ViewComment(repo string, commentID int64) (*Comment, error)
 	// EditComment replaces one comment's body and returns its URL.
 	EditComment(repo string, commentID int64, body string) (string, error)
 }
@@ -193,22 +194,6 @@ func (CLI) DevelopBranch(repo string, number int, base, name string) (string, er
 		}
 	}
 	return name, nil
-}
-
-// BranchesFor lists branches linked to the issue.
-func (CLI) BranchesFor(repo string, number int) ([]string, error) {
-	out, err := run("issue", "develop", "--list", fmt.Sprint(number), "--repo", repo)
-	if err != nil {
-		return nil, err
-	}
-	var branches []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			// `gh issue develop --list` prints "<branch>\t<url>".
-			branches = append(branches, strings.TrimSpace(strings.SplitN(line, "\t", 2)[0]))
-		}
-	}
-	return branches, nil
 }
 
 // SetIssueBody replaces the issue's body, reading it from stdin so that neither
@@ -370,11 +355,16 @@ func resolveOption(t ProjectTarget) (fieldID, optionID string, err error) {
 }
 
 // ViewPR finds the PR whose head is branch. A missing PR is (nil, nil).
+//
+// Only gh's own "no pull requests found" means there is none. Every other
+// failure is an error, including GraphQL's "Could not resolve to a
+// Repository" for a repository that was renamed, transferred or cannot be
+// read: reap's open-PR guard reads (nil, nil) as "nothing open", so a lookup
+// that could not tell must never land there (CODE.md section 2).
 func (CLI) ViewPR(repo, branch string) (*PR, error) {
 	out, err := run("pr", "view", branch, "--repo", repo, "--json", "number,state,mergedAt,url")
 	if err != nil {
-		if strings.Contains(err.Error(), "no pull requests found") ||
-			strings.Contains(err.Error(), "Could not resolve") {
+		if strings.Contains(err.Error(), "no pull requests found") {
 			return nil, nil
 		}
 		return nil, err

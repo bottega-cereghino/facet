@@ -375,3 +375,62 @@ func TestMissingScopesHierarchyIsCaseInsensitive(t *testing.T) {
 		t.Errorf("case/whitespace must not defeat the hierarchy, got missing: %v", got)
 	}
 }
+
+// fineGrained is a fine-grained PAT. GitHub sends no X-OAuth-Scopes for one,
+// so gh lists no scopes: "none", or no line at all.
+func fineGrained(scopesLine string) string {
+	return "github.com\n" +
+		"  ✓ Logged in to github.com account RiccardoCereghino (keyring)\n" +
+		"  - Active account: true\n" +
+		"  - Git operations protocol: ssh\n" +
+		"  - Token: github_pat_**********\n" + scopesLine
+}
+
+// A fine-grained token is the type the token-type check recommends. Failing it
+// for lacking scopes it cannot have would make the preflight red for every
+// one; the scopes check does not apply, and says so in a note instead.
+func TestCheckFineGrainedTokenIsNotFailedForHavingNoScopes(t *testing.T) {
+	for name, line := range map[string]string{
+		"scopes none":     "  - Token scopes: none\n",
+		"no scopes line":  "",
+		"scopes empty ''": "  - Token scopes: \n",
+	} {
+		st, err := parseAuthStatus(fineGrained(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if probs := Check(st, req()); len(probs) != 0 {
+			t.Errorf("%s: a fine-grained token was failed: %s", name, names(probs))
+		}
+		if note := ScopesNotApplicable(st); !strings.Contains(note, "NOT checked") {
+			t.Errorf("%s: no note says the scopes check did not run: %q", name, note)
+		}
+	}
+}
+
+// The carve-out is for the fine-grained type only: a classic token with no
+// scopes is still scope-short, and has no note to hide behind.
+func TestCheckClassicTokenWithNoScopesStillFails(t *testing.T) {
+	out := strings.Replace(healthy, "  - Token scopes: 'read:org', 'repo', 'workflow'\n", "", 1)
+	st, err := parseAuthStatus(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(names(Check(st, req())), "token scopes") {
+		t.Error("a classic token with no scopes passed the scopes check")
+	}
+	if note := ScopesNotApplicable(st); note != "" {
+		t.Errorf("a classic token got a not-applicable note: %q", note)
+	}
+}
+
+// A fine-grained token that does report scopes is checked like any other.
+func TestCheckFineGrainedTokenReportingScopesIsChecked(t *testing.T) {
+	st, err := parseAuthStatus(fineGrained("  - Token scopes: 'repo'\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(names(Check(st, req())), "token scopes") {
+		t.Error("reported scopes on a fine-grained token were not checked")
+	}
+}
