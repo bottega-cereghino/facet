@@ -147,8 +147,7 @@ a seam is needed, not to look idiomatic.
 
 facet is built for macOS, the platform it is run on. Linux runs every gate in
 CI, because it is fast and its filesystem semantics differ enough to catch
-assumptions. The Windows code paths (junctions, ACLs) remain behind build tags,
-but are no longer built or tested in CI and are not supported.
+assumptions. Windows is not supported, and facet does not build there.
 
 - **A red `macos` on the default branch puts the repo in `patch-only`:**
   bugfixes and the platform fix, no new features, until it is green again.
@@ -165,8 +164,8 @@ but are no longer built or tested in CI and are not supported.
   `ci` job, which fails when any job it needs failed: there it makes a red
   count, because a job skipped after a failure would read as passed.
 
-Platform-specific code uses the `_unix.go` / `_windows.go` build-tag split —
-see `internal/fslink` and `internal/gitx` — rather than `runtime.GOOS` branches
+Platform-specific code uses a build-tag file split (`private_darwin.go` /
+`private_other.go` in `internal/workspace`) rather than `runtime.GOOS` branches
 inside a shared function, so the platform-specific path is visible in the file
 listing.
 

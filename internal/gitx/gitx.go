@@ -82,7 +82,6 @@ func run(ctx context.Context, dir string, env []string, args ...string) (string,
 	}
 	if _, ok := ctx.Deadline(); ok {
 		cmd.WaitDelay = waitDelay
-		configureCancel(cmd)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -144,14 +143,10 @@ type CloneOptions struct {
 
 // Clone clones src into dst, then checks out HEAD.
 //
-// Two details are load-bearing and were learned the hard way:
-//
-//   - core.longpaths, because some repos carry paths past Windows' 260-char
-//     MAX_PATH. It is set on the command *and* persisted into the clone.
-//   - --no-checkout followed by `reset --hard`, because git refuses to run an
-//     active hook during clone (GIT_CLONE_PROTECTION_ACTIVE) and git-lfs installs
-//     a post-checkout hook. Populating the tree afterwards sidesteps that without
-//     weakening any git safety flag.
+// It clones with --no-checkout and then runs `reset --hard`, because git
+// refuses to run an active hook during clone (GIT_CLONE_PROTECTION_ACTIVE) and
+// git-lfs installs a post-checkout hook. Populating the tree afterwards
+// sidesteps that without weakening any git safety flag.
 //
 // When SetOriginTo is set, origin is repointed *before* the checkout, so that an
 // LFS smudge pulls blobs from the forge rather than from a blob-less mirror.
@@ -164,10 +159,7 @@ func Clone(r Runner, src, dst string, opt CloneOptions) error {
 	if opt.SkipLFS {
 		env = append(env, "GIT_LFS_SKIP_SMUDGE=1")
 	}
-	if _, err := r.Run("", env,
-		"-c", "core.longpaths=true", "clone", "--no-checkout",
-		"-c", "core.longpaths=true", "--", src, dst,
-	); err != nil {
+	if _, err := r.Run("", env, "clone", "--no-checkout", "--", src, dst); err != nil {
 		return err
 	}
 	if opt.SetOriginTo != "" {

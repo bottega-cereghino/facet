@@ -3,7 +3,6 @@ package ghx
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,9 +15,6 @@ import (
 // of the last call.
 func fakeGh(t *testing.T, stdout, stderr string, exit int) func() []string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("the fake gh is a shell script; Windows is not supported")
-	}
 	dir := t.TempDir()
 	for name, contents := range map[string]string{"stdout": stdout, "stderr": stderr} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o600); err != nil {

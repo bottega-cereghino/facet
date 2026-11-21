@@ -77,34 +77,29 @@ jobs:
       - run: make tidy
       - run: make vuln
 
-  # Tier 2 -- the other platforms, deliberately gated behind Linux and
-  # deliberately narrower.
+  # Tier 2 -- macOS, the platform facet is built for, deliberately gated behind
+  # Linux and deliberately narrower.
   #
-  #   * `needs: linux` -- there is no point paying a second and third runner to
-  #     learn what the first one already knows. A gofmt slip or a lint finding
-  #     now fails in well under a minute instead of after three platform runs
-  #     finish in parallel. Note this is NOT a billing argument: facet is a
-  #     public repository, so GitHub-hosted runners are free on every OS. It is
-  #     about how fast a red tells you something, and about not queueing three
-  #     runners for one answer.
+  #   * `needs: linux` -- there is no point paying a second runner to learn
+  #     what the first one already knows. A gofmt slip or a lint finding fails
+  #     in well under a minute instead of after both platform runs finish in
+  #     parallel. Note this is NOT a billing argument: facet is a public
+  #     repository, so GitHub-hosted runners are free on every OS. It is about
+  #     how fast a red tells you something.
   #
   #   * skipped on draft pull requests, and on pull requests not targeting
   #     `main` -- work in progress still gets the full Linux leg, and marking a
   #     PR ready for review triggers these.
   #
   #   * build and test only -- gofmt, lint and govulncheck are
-  #     platform-independent by construction, so running them three times buys
-  #     nothing. What these legs uniquely prove is that the code compiles and
-  #     its tests pass where the filesystem semantics differ: this project
-  #     manipulates real files, and Windows locks a file while any process holds
-  #     it open where Unix does not.
+  #     platform-independent by construction, so running them twice buys
+  #     nothing. What this leg uniquely proves is that the code compiles and
+  #     its tests pass on APFS and the darwin-only code (internal/workspace's
+  #     private_darwin.go).
   #
-  # The cost is serialized feedback -- a Windows-only failure surfaces one job
-  # later than it used to. That is the right trade while such failures are rare.
-  #
-  # `windows` is named as its own job so a secondary platform's red is still
-  # reported as a distinct result. What that red means for what may be merged is
-  # the platform policy in docs/CODE.md.
+  # The cost is serialized feedback -- a macOS-only failure surfaces one job
+  # later. That is the right trade while such failures are rare. What a red
+  # macos means for what may be merged is the platform policy in docs/CODE.md.
   #
   # Never add a tolerance construct (continue-on-error, if: always(), || true)
   # to any job here. The tiering is about when a check runs, never about whether
@@ -170,16 +165,3 @@ jobs:
           echo "A job failed or was cancelled: $NEEDS"
           exit 1
       - run: echo "Every job passed or was skipped."
-
-  # The Windows tier is REMOVED, not disabled -- #72, 2026-07-29.
-  #
-  # Measured while the repository was private: $6.93 in one month across ~88
-  # runs and three legs, ten times a comparable linux-only repository, with
-  # Windows billed at 2x. The leg was dropped until it is needed.
-  #
-  # This does NOT retreat from PR #52, which fixed the RunTimeout
-  # transport-helper leak that held Windows file locks and unfroze this repo
-  # from patch-only. The fix stays; what stops is re-proving it on every
-  # push at 2x. #59 asks whether Windows should be required at all --
-  # restore this tier when that is answered yes, or when a self-hosted
-  # runner makes it free.

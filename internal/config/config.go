@@ -1,5 +1,5 @@
 // Package config resolves the two roots facet operates between: the workspaces
-// directory, and the projects directory that junction-backed workspaces point
+// directory, and the projects directory that symlink-backed workspaces point
 // into. Both are overridable by environment variable, which is what lets the
 // tests run hermetically against a temp dir.
 package config
@@ -16,7 +16,7 @@ import (
 type Roots struct {
 	// Workspaces holds one directory per workspace, each with a .workspace.json.
 	Workspaces string
-	// Projects holds the real repos that `links` junction into.
+	// Projects holds the real repos that `links` point into.
 	Projects string
 	// Mirrors holds bare mirrors that clones are hardlinked from.
 	Mirrors string

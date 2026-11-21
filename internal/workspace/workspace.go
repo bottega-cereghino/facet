@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
@@ -159,9 +158,8 @@ func syncLink(roots config.Roots, ws string, m *manifest.Manifest, name string, 
 		case opt.Bootstrap && origin != "":
 			rep.Working("%s : cloning %s -> %s", name, origin, projectName)
 			// Route through gitx.Clone so link bootstrap shares the hardened clone
-			// logic (core.longpaths, --no-checkout + reset, LFS handling) that
-			// syncClone uses, instead of a raw `git clone` that fails on Windows
-			// long-path or LFS-hooked repos a normal clone handles.
+			// logic (--no-checkout + reset, LFS handling) that syncClone uses,
+			// instead of a raw `git clone` that fails on LFS-hooked repos.
 			if err := gitx.Clone(git, origin, target, gitx.CloneOptions{}); err != nil {
 				rep.Warn("%s -> %s (clone failed: %v)", name, projectName, err)
 				return false, nil
@@ -210,7 +208,7 @@ func syncClone(roots config.Roots, ws string, m *manifest.Manifest, name string,
 			return err
 		}
 		if isLink {
-			rep.Warn("%s is a %s, but the manifest declares it a clone. Remove it, then re-run.", name, fslink.Kind)
+			rep.Warn("%s is a symlink, but the manifest declares it a clone. Remove it, then re-run.", name)
 			return nil
 		}
 		// Present. Never touch it: it may hold the only copy of unpushed work.
@@ -329,13 +327,10 @@ func Dirs(root string, includeIssue bool) ([]string, error) {
 	return out, nil
 }
 
-// samePath compares two filesystem paths, case-insensitively on Windows.
+// samePath compares two filesystem paths after cleaning them.
 func samePath(a, b string) bool {
 	a = strings.TrimRight(filepath.Clean(a), string(os.PathSeparator))
 	b = strings.TrimRight(filepath.Clean(b), string(os.PathSeparator))
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(a, b)
-	}
 	return a == b
 }
 

@@ -563,8 +563,7 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 
 A personal tool, used daily on one Mac by its author, and held together by a real
 test suite: CI runs it on macOS and Linux on every change. macOS is the platform
-it is built for. Windows code paths (junctions, ACLs) remain behind build tags but
-are no longer tested or supported.
+it is built for. Windows is not supported, and facet does not build there.
 
 ## Licence
 

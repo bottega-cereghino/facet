@@ -77,7 +77,7 @@ func AddClone(roots config.Roots, ws string, git gitx.Runner, rep Reporter,
 	return Sync(roots, ws, git, rep, syncOpt)
 }
 
-// AddLink records a junction into a shared project under ProjectsRoot, then syncs.
+// AddLink records a symlink into a shared project under ProjectsRoot, then syncs.
 func AddLink(roots config.Roots, ws string, git gitx.Runner, rep Reporter,
 	name, target, origin string, transient bool, syncOpt SyncOptions) error {
 

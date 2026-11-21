@@ -354,53 +354,10 @@ func mirrorFake(onClone func(dst string)) *gitxtest.Runner {
 	}
 }
 
-func sawClone(fg *gitxtest.Runner) []string {
-	return fg.Call(func(a []string) bool {
-		for _, x := range a {
-			if x == "clone" {
-				return true
-			}
-		}
-		return false
-	})
-}
-
 func sawFetch(fg *gitxtest.Runner) bool {
 	return fg.Call(func(a []string) bool {
 		return len(a) >= 2 && a[0] == "remote" && a[1] == "update"
 	}) != nil
-}
-
-// Regression: `remote update` inside a deep mirror fails with "Filename too
-// long" unless core.longpaths is persisted into the mirror's own config. The
-// command-level -c does not survive the clone.
-func TestMirrorClonePersistsLongPaths(t *testing.T) {
-	root := t.TempDir()
-	fg := mirrorFake(func(dst string) {
-		_ = os.MkdirAll(dst, 0o777)
-		_ = os.WriteFile(filepath.Join(dst, "HEAD"), []byte("ref: refs/heads/main\n"), 0o666)
-	})
-	s := &Store{Root: root, Git: fg}
-	if _, err := s.Update("https://example.com/o/r.git"); err != nil {
-		t.Fatal(err)
-	}
-	clone := sawClone(fg)
-	if clone == nil {
-		t.Fatal("no clone issued")
-	}
-	// The -c must appear AFTER `clone`, which is what persists it into the repo.
-	seenClone, persisted := false, false
-	for i, a := range clone {
-		if a == "clone" {
-			seenClone = true
-		}
-		if seenClone && a == "-c" && i+1 < len(clone) && clone[i+1] == "core.longpaths=true" {
-			persisted = true
-		}
-	}
-	if !persisted {
-		t.Errorf("core.longpaths is not persisted into the mirror: %v", clone)
-	}
 }
 
 // A clone that dies after writing HEAD but before finishing must not be adopted
