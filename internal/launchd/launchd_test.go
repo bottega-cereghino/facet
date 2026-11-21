@@ -102,3 +102,41 @@ func TestParsePlistNeedsALabel(t *testing.T) {
 		t.Fatal("a plist without a Label parsed")
 	}
 }
+
+// A job loaded from a plist outside the LaunchAgents folders is still found:
+// launchctl print names the file it came from. Apple's and apps' own jobs are
+// not asked about.
+func TestUnderFindsAJobLoadedFromAPlistElsewhere(t *testing.T) {
+	agents, elsewhereDir, root := t.TempDir(), t.TempDir(), t.TempDir()
+	ws := filepath.Join(root, "svc")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := plist(t, elsewhereDir, "com.example.away", "\t<key>Program</key>\n\t<string>"+filepath.Join(ws, "run.sh")+"</string>")
+	var asked []string
+	run := func(name string, args ...string) ([]byte, error) {
+		switch {
+		case name == "launchctl" && args[0] == "list":
+			return []byte("PID\tStatus\tLabel\n-\t0\tcom.example.away\n-\t0\tcom.apple.Finder\n-\t0\tapplication.com.example.App.123\n"), nil
+		case name == "launchctl" && args[0] == "print":
+			asked = append(asked, args[1])
+			if strings.HasSuffix(args[1], "/com.example.away") {
+				return []byte("gui/501/com.example.away = {\n\tactive count = 0\n\tpath = " + p + "\n\tstate = waiting\n}\n"), nil
+			}
+			return nil, errors.New("not found")
+		case name == "plutil":
+			return os.ReadFile(args[len(args)-1])
+		}
+		return nil, errors.New("unexpected tool " + name)
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: run}).Under(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "com.example.away") || !strings.Contains(got[0], p) {
+		t.Fatalf("Under = %v; want the job loaded from %s", got, p)
+	}
+	if len(asked) != 1 {
+		t.Errorf("asked launchctl print about %v; want only com.example.away", asked)
+	}
+}
