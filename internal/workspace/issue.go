@@ -734,13 +734,14 @@ func countLines(s string) int {
 	return strings.Count(s, "\n") + 1
 }
 
-// ListIssues inspects every issue workspace under the workspaces root.
-func ListIssues(roots config.Roots, git gitx.Runner, pr PRLookup, mux LiveChecker) ([]*IssueState, error) {
+// ListIssues inspects every issue workspace under the workspaces root. One that
+// cannot be inspected (a broken manifest) is not listed, but named in unchecked
+// with the reason, so a listing never reads as complete when it is not.
+func ListIssues(roots config.Roots, git gitx.Runner, pr PRLookup, mux LiveChecker) (out []*IssueState, unchecked []string, err error) {
 	entries, err := os.ReadDir(roots.Workspaces)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var out []*IssueState
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), config.IssuePrefix) {
 			continue
@@ -751,11 +752,12 @@ func ListIssues(roots config.Roots, git gitx.Runner, pr PRLookup, mux LiveChecke
 		}
 		st, err := InspectIssue(dir, git, pr, mux)
 		if err != nil {
+			unchecked = append(unchecked, fmt.Sprintf("%s: %v", e.Name(), err))
 			continue
 		}
 		out = append(out, st)
 	}
-	return out, nil
+	return out, unchecked, nil
 }
 
 // Reap deletes an issue workspace. It never touches the shared mirror: removing a

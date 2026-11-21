@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/ghx"
 	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/bottega-cereghino/facet/internal/gitx/gitxtest"
@@ -1572,5 +1573,28 @@ func TestIsUnder(t *testing.T) {
 		if got := isUnder(root, p); got != want {
 			t.Errorf("isUnder(%q, %q) = %v, want %v", root, p, got, want)
 		}
+	}
+}
+
+// A workspace facet issues cannot inspect is named, never silently dropped.
+func TestListIssuesNamesWhatItCouldNotCheck(t *testing.T) {
+	ws, _ := issueWorkspace(t)
+	root := filepath.Dir(ws)
+	broken := filepath.Join(root, "iss-repo-2-broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Path(broken), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	states, unchecked, err := ListIssues(config.Roots{Workspaces: root}, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].Dir != ws {
+		t.Errorf("states = %v, want the one good workspace", states)
+	}
+	if len(unchecked) != 1 || !strings.HasPrefix(unchecked[0], "iss-repo-2-broken: ") {
+		t.Errorf("unchecked = %q, want the broken workspace named", unchecked)
 	}
 }

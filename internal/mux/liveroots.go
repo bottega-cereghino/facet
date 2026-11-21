@@ -2,8 +2,10 @@ package mux
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -12,6 +14,11 @@ import (
 // one session named after the workspace; a pane moved elsewhere (tmux's
 // link-window does exactly this) would otherwise still hold a process open on
 // a directory reap is about to delete, unnoticed.
+//
+// facet itself is left out, with the lsof it runs and the shell that ran it:
+// `facet reap` run from inside the workspace, its documented form, would
+// otherwise always be held by its own shell, itself and its probe. Anything
+// else in that shell's session still counts.
 //
 // Both probes are a convenience layered on top of the git-based checks in
 // package workspace: a tool that is missing, or a server that is not running,
@@ -23,6 +30,10 @@ func (Tmux) LiveRoots(dir string) ([]string, error) {
 	live = append(live, lsofProcessesUnder(dir)...)
 	return live, nil
 }
+
+// ProcessesUnder is the lsof half of LiveRoots, for a machine with no
+// multiplexer: a process rooted in dir holds it whether or not tmux exists.
+func ProcessesUnder(dir string) []string { return lsofProcessesUnder(dir) }
 
 // tmuxPanesUnder lists, as human-readable descriptions naming the target and
 // pid, every pane across every session whose pane_current_path is dir or a
@@ -55,6 +66,9 @@ func tmuxPanesUnder(dir, socket string) []string {
 			continue
 		}
 		target, pid, path := f[0], f[1], f[2]
+		if pid == strconv.Itoa(os.Getppid()) {
+			continue // the shell facet was run from, in this pane
+		}
 		if underRoot(dir, path) {
 			live = append(live, "tmux pane "+target+" (pid "+pid+") at "+path)
 		}
@@ -81,14 +95,14 @@ func lsofProcessesUnder(dir string) []string {
 	if _, err := exec.LookPath("lsof"); err != nil {
 		return nil
 	}
-	raw, err := exec.Command("lsof", "-Fpcfn", "+D", canonicalPath(dir)).Output()
+	raw, err := exec.Command("lsof", "-FpRcfn", "+D", canonicalPath(dir)).Output()
 	if err != nil && len(raw) == 0 {
 		// lsof exits non-zero with nothing on stdout when nothing matches --
 		// that is "no processes", not a failure worth surfacing.
 		return nil
 	}
 	var live []string
-	for _, p := range parseLsof(string(raw)) {
+	for _, p := range withoutSelf(parseLsof(string(raw)), os.Getpid(), os.Getppid()) {
 		if p.cwd == "" && isSystemService(p.pid) {
 			continue
 		}
@@ -100,8 +114,31 @@ func lsofProcessesUnder(dir string) []string {
 // lsofProc is one process in lsof's output and what it holds under the
 // directory asked about.
 type lsofProc struct {
-	pid, cmd, cwd string
-	files         []string
+	pid, ppid, cmd, cwd string
+	files               []string
+}
+
+// withoutSelf drops facet's own process, the lsof it started and lsof's own
+// helper (found through their parent pids), and the shell that ran it
+// (parent). Any other child of facet still counts.
+func withoutSelf(procs []lsofProc, self, parent int) []lsofProc {
+	mine := map[string]bool{strconv.Itoa(self): true}
+	for grew := true; grew; {
+		grew = false
+		for _, p := range procs {
+			if !mine[p.pid] && mine[p.ppid] && p.cmd == "lsof" {
+				mine[p.pid], grew = true, true
+			}
+		}
+	}
+	out := make([]lsofProc, 0, len(procs))
+	for _, p := range procs {
+		if mine[p.pid] || p.pid == strconv.Itoa(parent) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // parseLsof reads lsof's -Fpcfn output into its processes, in the order lsof
@@ -120,6 +157,10 @@ func parseLsof(raw string) []lsofProc {
 		case 'c':
 			if len(procs) > 0 {
 				procs[len(procs)-1].cmd = line[1:]
+			}
+		case 'R':
+			if len(procs) > 0 {
+				procs[len(procs)-1].ppid = line[1:]
 			}
 		case 'f':
 			fd = line[1:]
