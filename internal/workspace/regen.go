@@ -299,19 +299,30 @@ func Prune(s *PruneState) error {
 	return errors.Join(errs...)
 }
 
-// removeInClone deletes rel inside clone through an os.Root, which refuses to
-// follow a symlink out of the clone at any step: a parent swapped for a link
-// after the inspection cannot point the delete somewhere else. A path that is
-// no longer a directory is left alone, since it is not what was listed.
+// removeInClone deletes rel inside clone, after checking that no step of the
+// path from the clone down is a symlink: a parent swapped for a link after the
+// inspection would otherwise point the delete outside the clone. The check and
+// the delete are not one step, so a swap in the instant between them is not
+// caught; os.Root would close that gap, but its Windows flaw (GO-2026-6604) is
+// fixed only in a Go newer than this module's. A path that is no longer a
+// directory is left alone, since it is not what was listed.
 func removeInClone(clone, rel string) error {
-	root, err := os.OpenRoot(clone)
-	if err != nil {
-		return err
+	p := clone
+	for _, seg := range strings.Split(rel, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("refusing the path %q", rel)
+		}
+		p = filepath.Join(p, seg)
+		fi, err := os.Lstat(p)
+		if err != nil {
+			return nil
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is now a symlink; left alone", p)
+		}
+		if !fi.IsDir() {
+			return nil
+		}
 	}
-	defer func() { _ = root.Close() }()
-	fi, err := root.Lstat(filepath.FromSlash(rel))
-	if err != nil || !fi.IsDir() {
-		return nil
-	}
-	return root.RemoveAll(filepath.FromSlash(rel))
+	return os.RemoveAll(p)
 }

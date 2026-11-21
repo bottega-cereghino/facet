@@ -509,8 +509,8 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`prune` holds what it cannot check**: a clone whose last use cannot be
   read (looked up in its own git directory, so a worktree clone is dated too),
   or a probe for what runs from it that fails. It checks each workspace again
-  just before deleting, and deletes through an `os.Root`, so a parent swapped
-  for a symlink cannot send it outside the clone
+  just before deleting, and checks that no step of the path is a symlink, so a
+  parent swapped for one cannot send it outside the clone
   (`TestPruneChecksAgainBeforeDeleting`, `TestPruneDoesNotFollowASwappedParent`).
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).

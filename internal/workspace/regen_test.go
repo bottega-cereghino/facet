@@ -247,7 +247,7 @@ func (failingLiveRoots) LiveRoots(string) ([]string, error) {
 	return nil, errors.New("lsof crashed")
 }
 
-// The delete goes through an os.Root: a parent swapped for a symlink after the
+// No step of the deleted path may be a symlink: a parent swapped for one after the
 // listing cannot point it outside the clone.
 func TestPruneDoesNotFollowASwappedParent(t *testing.T) {
 	ws, clone := prunableWorkspace(t)
