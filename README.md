@@ -314,6 +314,16 @@ every reapable worktree of the checkouts directly under `~/Projects`, named by
 its path; the worktree clones of a workspace go only with their workspace, and
 `reap` refuses one named on its own.
 
+`facet prune` frees the disk a workspace keeps without deleting it: the
+directories in its clones that one command rebuilds (`node_modules`, `.venv`
+and the tool caches). It lists what each workspace would free and deletes only
+with `--apply`, after one confirmation (`-y` skips it), and only from a
+workspace no clone of which was used within `--idle-days` (14 by default) and
+that nothing runs from. A directory that frees under 1 MiB, such as a
+`node_modules` pnpm cloned from its store, is not named: deleting it would only
+cost a reinstall. `.terraform` is never named: it keeps the selected
+`terraform workspace`, and a fresh `init` would quietly plan against `default`.
+
 ## The issue graph was removed
 
 `facet-graph` (`tree` and `deps`, for sub-issue hierarchies and blocked-by
@@ -490,6 +500,18 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `node_modules`, build output: holding on them would hold every workspace), and
   commits reachable only from a local tag (a clone carries every upstream tag,
   so a tag cannot tell your work from a release). Copy or push those first.
+- **`prune` deletes only directories git ignores**, named in a fixed list of
+  rebuildable ones, holding no tracked file and outside any nested repository
+  or worktree; an ignored `.secrets/` or an unignored `node_modules` stays
+  (`TestPruneDeletesWhatWasFoundAndNothingElse`). One with a git repository
+  anywhere inside it, such as an editable pip install in a `.venv`, stays too
+  (`TestInspectPruneKeepsADirectoryHoldingARepository`).
+- **`prune` holds what it cannot check**: a clone whose last use cannot be
+  read (looked up in its own git directory, so a worktree clone is dated too),
+  or a probe for what runs from it that fails. It checks each workspace again
+  just before deleting, and checks that no step of the path is a symlink, so a
+  parent swapped for one cannot send it outside the clone
+  (`TestPruneChecksAgainBeforeDeleting`, `TestPruneDoesNotFollowASwappedParent`).
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`.
