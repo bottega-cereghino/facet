@@ -22,6 +22,11 @@ type CloneState struct {
 	Branch string
 	// Dirty means uncommitted changes or untracked files.
 	Dirty bool
+	// Worktrees names the clone's linked worktrees (`git worktree add`). Their
+	// uncommitted files and detached commits are invisible to the checks here,
+	// which read only the main worktree, and deleting the clone deletes their
+	// repository. Non-empty is a blocker.
+	Worktrees []string
 	// Unpushed counts commits reachable from HEAD or any local branch that no
 	// remote has *and* whose content is not proven to have already landed on
 	// the remote's default branch (see proofLanded). This deliberately covers
@@ -73,9 +78,10 @@ type IssueState struct {
 	// Enclosing is the top level of a repository the workspace directory sits
 	// inside (~/Workspaces is one), or "" when there is none.
 	Enclosing string
-	// Loose names files in a long-lived workspace, outside its clones and
-	// links, that exist nowhere else: not committed in Enclosing, or there is
-	// no Enclosing at all. Non-empty is a blocker.
+	// Loose names files in the workspace, outside its clones and links, that
+	// exist nowhere else: not committed in Enclosing, or there is no Enclosing
+	// at all. A checkout `facet rm` dropped from the manifest, a hand clone or
+	// a note at the root are all loose. Non-empty is a blocker.
 	Loose []string
 	Clone []CloneState
 	// PR is the pull request for the issue branch, or nil.
@@ -126,6 +132,11 @@ func (s *IssueState) Blockers() []string {
 		}
 	}
 	out = append(out, s.Loose...)
+	for _, c := range s.Clone {
+		for _, w := range c.Worktrees {
+			out = append(out, fmt.Sprintf("%s has a linked worktree at %s -- reap cannot see its work; push it, then `git worktree remove` it", c.Dir, w))
+		}
+	}
 	for _, c := range s.Clone {
 		if c.Stashed > 0 {
 			out = append(out, fmt.Sprintf("%s has %d stash entry(ies) -- no push would carry them", c.Dir, c.Stashed))
@@ -276,9 +287,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 		st.Clone = append(st.Clone, inspectClone(git, dir, p, repo, clonePR))
 	}
 
-	if m.Issue == nil {
-		st.Enclosing, st.Loose = looseFiles(git, ws, m)
-	}
+	st.Enclosing, st.Loose = looseFiles(git, ws, m)
 	if pr != nil && m.Issue != nil && m.Issue.Branch != "" {
 		// A lookup that errors is not "no PR": auth expiry, a network blip, or a
 		// rate limit must not silently drop the open-PR guard. Record that the
@@ -290,7 +299,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 		}
 	}
 	if mux != nil {
-		st.SessionLive = mux.Live(m.Name)
+		st.SessionLive = mux.Live(filepath.Base(ws))
 	}
 	if lr, ok := mux.(LiveRootChecker); ok {
 		if roots, err := lr.LiveRoots(ws); err == nil {
@@ -316,13 +325,19 @@ var ownFiles = map[string]bool{
 	manifest.FileName: true, ".scope": true,
 	".seat": true, ".seat-issue": true, ".catalog.json": true,
 	".DS_Store": true,
+	// A sync that crashed leaves its lock behind; it holds nothing of the user's.
+	syncLockName: true,
 }
+
+// issueOwnFiles are written by `facet spawn` at an issue workspace's root and
+// rewritten by the next spawn, so they are facet's own there too.
+var issueOwnFiles = map[string]bool{"CLAUDE.md": true}
 
 // maxLoose bounds how many loose paths are named one by one.
 const maxLoose = 10
 
-// looseFiles finds what a long-lived workspace holds outside its clones and
-// links that exists nowhere else, and the enclosing repository it checked
+// looseFiles finds what a workspace holds outside its clones and links that
+// exists nowhere else, and the enclosing repository it checked
 // against. Each result is phrased as a blocker.
 //
 // Inside an enclosing repository, a path git reports in any way -- modified,
@@ -343,7 +358,7 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		if _, ok := m.Links[n]; ok {
 			continue
 		}
-		if ownFiles[n] || e.Type()&os.ModeSymlink != 0 {
+		if ownFiles[n] || (m.Issue != nil && issueOwnFiles[n]) || e.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		names = append(names, n)
@@ -373,6 +388,25 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		loose = append(loose, fmt.Sprintf("%s is not committed in %s -- this workspace is its only copy", path, enclosing))
 	}
 	return enclosing, capLoose(loose)
+}
+
+// linkedWorktrees reads `git worktree list --porcelain`: one "worktree <path>"
+// line per worktree, the main one first. It returns the others.
+func linkedWorktrees(porcelain string) []string {
+	var out []string
+	first := true
+	for _, line := range strings.Split(porcelain, "\n") {
+		path, ok := strings.CutPrefix(line, "worktree ")
+		if !ok {
+			continue
+		}
+		if first {
+			first = false
+			continue
+		}
+		out = append(out, path)
+	}
+	return out
 }
 
 // githubRepo returns owner/name for a GitHub clone URL, in the SSH, scp-like
@@ -421,6 +455,12 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git status failed: %v", err))
 	} else {
 		c.Dirty = strings.TrimSpace(out) != ""
+	}
+
+	if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
+	} else {
+		c.Worktrees = linkedWorktrees(out)
 	}
 
 	// The branch name is informational only, so a failure here is not a safety
@@ -745,29 +785,31 @@ func isUnder(root, path string) bool {
 	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
 }
 
-// removeAllForce deletes a tree, clearing the read-only attribute git sets on
-// objects and packs. Plain os.RemoveAll fails on a git repository on Windows.
+// removeAllForce deletes a tree that may hold directories without write
+// permission (a Go module cache, a tool that makes its output read-only), which
+// plain os.RemoveAll cannot empty.
 //
-// REGULAR FILES ONLY, and that is the whole point of the condition. WalkDir
-// stats with Lstat, so a symlink arrives with IsDir() == false -- and os.Chmod
-// FOLLOWS symlinks, so `!d.IsDir()` applied the mode to the target, outside the
-// tree being deleted. A workspace that links .claude/skills/<skill> into a
-// shared checkout had every reap leave that directory at 0666: no execute bit,
-// so it could not be traversed, and neither an agent nor git could read the
-// shared tree afterwards (facet#87).
+// DIRECTORIES ONLY. Deleting a file needs write permission on its directory,
+// never on the file, so a file's own mode is left alone -- and it must be: a
+// clone's objects are hardlinks to the mirror's, so a chmod on a pack here is a
+// chmod on the mirror's pack (it once made every mirror pack writable on each
+// reap). A directory is never hardlinked, so making one writable touches
+// nothing outside the tree.
 //
-// os.Lchmod does not exist in the standard library, and a symlink has no
-// read-only attribute of its own that would block the removal -- so skipping is
-// both the only correct handling and the one that costs nothing. Sockets, fifos
-// and devices are skipped for the same reason: the attribute this clears is one
-// git sets on regular object and pack files.
+// WalkDir stats with Lstat, so a symlink to a directory arrives with IsDir() ==
+// false and is skipped; os.Chmod follows symlinks and would otherwise change the
+// target, outside the tree (facet#87).
+//
+// Windows, where a read-only file cannot be deleted, is not supported.
 func removeAllForce(root string) error {
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // keep going; the remove below will report what matters
 		}
-		if d.Type().IsRegular() {
-			_ = os.Chmod(path, 0o666)
+		if d.IsDir() {
+			if info, err := d.Info(); err == nil && info.Mode().Perm()&0o700 != 0o700 {
+				_ = os.Chmod(path, info.Mode().Perm()|0o700)
+			}
 		}
 		return nil
 	})

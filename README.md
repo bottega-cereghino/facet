@@ -420,14 +420,28 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   It may hold the only copy of unpushed work.
 - **`--prune` deletes only links**, never a clone: each entry is confirmed to be
   a symlink before it is removed, so a plain directory is never mistaken for one.
-- **`reap` counts commits reachable from any local branch and from no remote.**
-  Unlike `@{u}..HEAD`, that also catches a branch which was never pushed at all —
-  the branch most easily lost.
+- **`reap` counts commits reachable from any local branch or HEAD and from no
+  remote.** Unlike `@{u}..HEAD`, that also catches a branch which was never
+  pushed at all — the branch most easily lost.
+- **`reap` refuses while a clone has a linked worktree** (`git worktree add`):
+  its files and detached commits are invisible to the checks above, and deleting
+  the clone deletes its repository (`TestLinkedWorktreeBlocksReap`).
+- **`reap` refuses while anything beside the clones exists nowhere else**, in an
+  issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
+  manifest, a hand clone, a note at the root. Inside an enclosing repository
+  (`~/Workspaces` usually is one), a file committed there does not hold
+  (`TestIssueWorkspaceHoldsFilesBesideItsClones`).
+- **What `reap` does not protect:** files git ignores inside a clone (`.env`,
+  `node_modules`, build output: holding on them would hold every workspace), and
+  commits reachable only from a local tag (a clone carries every upstream tag,
+  so a tag cannot tell your work from a release). Copy or push those first.
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`.
 - **`reap` never touches the mirror.** Deleting a hardlinked object drops that
-  name; the mirror keeps its own.
+  name; the mirror keeps its own, with its mode: reap changes no file's mode,
+  only a directory's, to empty a read-only one
+  (`TestReapLeavesTheMirrorAloneAndDeletesReadOnlyDirs`).
 - **`reap` also refuses while a tmux pane or process is in the workspace**, in
   any session — not only the one named after it, which a `link-window`ed pane
   would slip past. A process counts when its working directory, its executable

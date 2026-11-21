@@ -83,7 +83,7 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 		}
 		// As in reap: a live session holds file handles on the tree.
 		if l := mux.Pick(); l != nil {
-			_ = l.Kill(again.Name)
+			_ = l.Kill(filepath.Base(again.Dir))
 		}
 		if err := workspace.Reap(again); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(again.Dir), err))
