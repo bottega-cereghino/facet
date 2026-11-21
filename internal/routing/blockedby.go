@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,6 +19,65 @@ type BlockedByRef struct {
 // the `#` -- that is what stops "acme/gateway#5" from also being read as the
 // bare ref "#5".
 var blockedByRefPattern = regexp.MustCompile(`([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#(\d+)`)
+
+// anyURL finds a URL in prose. Every URL is blanked, so a fragment such as
+// "example.com/page#12" is never read as the ref "#12"; issueRef then decides
+// which of them name a GitHub issue. The host is checked on the parsed URL, not
+// by the pattern.
+var anyURL = regexp.MustCompile(`https?://[^\s<>()\[\]]+`)
+
+// repoPart is one segment of "owner/name".
+var repoPart = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// issueRef reads "https://github.com/o/r/issues/12", with or without a
+// "#issuecomment-…" after it, as o/r#12. The URL names its repository, so it
+// is a cross-repo reference however the text around it reads.
+func issueRef(raw string) (BlockedByRef, bool) {
+	u, err := url.Parse(strings.TrimRight(raw, ".,;:!?'\"*_"))
+	if err != nil || !strings.EqualFold(u.Host, "github.com") {
+		return BlockedByRef{}, false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 4 || parts[2] != "issues" || !repoPart.MatchString(parts[0]) || !repoPart.MatchString(parts[1]) {
+		return BlockedByRef{}, false
+	}
+	n, err := strconv.Atoi(parts[3])
+	if err != nil || n < 1 {
+		return BlockedByRef{}, false
+	}
+	return BlockedByRef{OwnerRepo: parts[0] + "/" + parts[1], Number: n}, true
+}
+
+// markdownLink matches "[text](target)". Its text is a label for the target,
+// and only the target says which repository an issue lives in: the label
+// "#12" in "[#12](https://github.com/acme/other/issues/12)" is acme/other#12,
+// not #12 in this issue's own repository.
+var markdownLink = regexp.MustCompile(`\[([^\[\]\n]*)\]\([^()\s]*\)`)
+
+// blankLinks returns section with every URL and every markdown link's
+// text replaced by spaces, so blockedByRefPattern reads neither, together with
+// the references the URLs name and where each one starts. Offsets are kept, so
+// the two kinds of reference can be put back in the order they were written.
+func blankLinks(section string) (string, []int, []BlockedByRef) {
+	b := []byte(section)
+	for _, m := range markdownLink.FindAllStringSubmatchIndex(section, -1) {
+		for i := m[2]; i < m[3]; i++ {
+			b[i] = ' '
+		}
+	}
+	var at []int
+	var refs []BlockedByRef
+	for _, m := range anyURL.FindAllStringIndex(section, -1) {
+		for i := m[0]; i < m[1]; i++ {
+			b[i] = ' '
+		}
+		if ref, ok := issueRef(section[m[0]:m[1]]); ok {
+			at = append(at, m[0])
+			refs = append(refs, ref)
+		}
+	}
+	return string(b), at, refs
+}
 
 // refBoundaryChar reports whether r could be part of a repo-path token
 // ("owner/name" or a plain word). A bare `#n` immediately preceded by one of
@@ -105,6 +165,12 @@ func (r *Routing) repoForShorthand(prefix string) (string, bool) {
 // A NIL RECEIVER PARSES EXACTLY AS THIS DID BEFORE: owner/repo#n and a
 // standalone #n, with shorthand unresolved. A caller with no routing file loses
 // nothing it had, and gains nothing it cannot justify.
+//
+// A link to an issue names its repository, so
+// "https://github.com/o/r/issues/12" reads as o/r#12, and the text of a
+// markdown link is never read: "[#12](https://github.com/o/r/issues/12)" is
+// o/r#12, and a label whose target is not an issue reads as nothing rather than
+// as #12 in this issue's own repository.
 func (r *Routing) ParseBlockedBy(body string) []BlockedByRef {
 	section := findSection(body, "Blocked by / waiting on")
 	if section == "" {
@@ -113,7 +179,24 @@ func (r *Routing) ParseBlockedBy(body string) []BlockedByRef {
 
 	var out []BlockedByRef
 	seen := map[BlockedByRef]bool{}
+	add := func(ref BlockedByRef) {
+		// The same dependency named twice in one section (a bullet list that
+		// also mentions it in prose, say) must produce exactly one edge --
+		// not one POST per mention.
+		if seen[ref] {
+			return
+		}
+		seen[ref] = true
+		out = append(out, ref)
+	}
+	section, urlAt, urlRefs := blankLinks(section)
 	for _, m := range blockedByRefPattern.FindAllStringSubmatchIndex(section, -1) {
+		// A URL written before this ref is added first, so the refs come out
+		// in the order the author wrote them.
+		for len(urlAt) > 0 && urlAt[0] < m[0] {
+			add(urlRefs[0])
+			urlAt, urlRefs = urlAt[1:], urlRefs[1:]
+		}
 		ownerStart, ownerEnd := m[2], m[3]
 		shorthand := ""
 		if ownerStart == -1 {
@@ -139,14 +222,10 @@ func (r *Routing) ParseBlockedBy(body string) []BlockedByRef {
 		if ownerStart != -1 {
 			ref.OwnerRepo = section[ownerStart:ownerEnd]
 		}
-		// The same dependency named twice in one section (a bullet list that
-		// also mentions it in prose, say) must produce exactly one edge --
-		// not one POST per mention.
-		if seen[ref] {
-			continue
-		}
-		seen[ref] = true
-		out = append(out, ref)
+		add(ref)
+	}
+	for _, ref := range urlRefs {
+		add(ref)
 	}
 	return out
 }

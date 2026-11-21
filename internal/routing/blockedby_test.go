@@ -198,3 +198,83 @@ func TestParseBlockedByNeedsAGitHubSpelling(t *testing.T) {
 		t.Errorf("a key with no owner/name resolved to %#v; want nothing", got)
 	}
 }
+
+// A heading quoted inside a code fence is an example, not the field: the
+// refs under it are no dependency of this issue.
+func TestParseBlockedBySkipsFencedHeadings(t *testing.T) {
+	body := "The form looks like this:\n\n```\n### Blocked by / waiting on\n\n#12\n```\n"
+	if got := (*Routing)(nil).ParseBlockedBy(body); got != nil {
+		t.Errorf("a fenced section was read: %#v", got)
+	}
+	body += "\n### Blocked by / waiting on\n\n#5\n"
+	want := []BlockedByRef{{Number: 5}}
+	if got := (*Routing)(nil).ParseBlockedBy(body); !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseBlockedBy = %#v, want %#v", got, want)
+	}
+}
+
+// A link's text is a label; its target names the issue. "[#12](…/acme/other/issues/12)"
+// is acme/other#12, never #12 in the issue's own repo.
+func TestParseBlockedByReadsIssueLinksAndURLs(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []BlockedByRef
+	}{
+		{
+			name: "a markdown link resolves to its target",
+			body: "### Blocked by / waiting on\n\n- [#12](https://github.com/acme/other/issues/12)\n",
+			want: []BlockedByRef{{OwnerRepo: "acme/other", Number: 12}},
+		},
+		{
+			name: "a plain issue URL",
+			body: "### Blocked by / waiting on\n\nhttps://github.com/o/r/issues/12\n",
+			want: []BlockedByRef{{OwnerRepo: "o/r", Number: 12}},
+		},
+		{
+			name: "an autolink and a URL to a comment",
+			body: "### Blocked by / waiting on\n\n<https://github.com/o/r/issues/7> and https://github.com/o/r/issues/8#issuecomment-1\n",
+			want: []BlockedByRef{{OwnerRepo: "o/r", Number: 7}, {OwnerRepo: "o/r", Number: 8}},
+		},
+		{
+			name: "links keep their place among other refs, and dedupe with them",
+			body: "### Blocked by / waiting on\n\n#5, [o/r#9](https://github.com/o/r/issues/9), o/r#9, https://github.com/owner/repo/issues/3\n",
+			want: []BlockedByRef{{Number: 5}, {OwnerRepo: "o/r", Number: 9}, {OwnerRepo: "owner/repo", Number: 3}},
+		},
+		{
+			// The target names no issue facet can wire, so the label is not
+			// guessed at: an edge to the wrong issue is worse than none.
+			name: "a link to something other than an issue reads as nothing",
+			body: "### Blocked by / waiting on\n\n[#12](https://github.com/acme/other/pull/12)\n",
+			want: nil,
+		},
+		{
+			name: "issue 0 in a URL names no issue",
+			body: "### Blocked by / waiting on\n\nhttps://github.com/o/r/issues/0\n",
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, r := range []*Routing{nil, shorthandRouting()} {
+				if got := r.ParseBlockedBy(tt.body); !reflect.DeepEqual(got, tt.want) {
+					t.Errorf("ParseBlockedBy(%q) = %#v, want %#v", tt.body, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// A URL is read as a reference only when its parsed host is github.com and its
+// path is an issue. Any other URL, a lookalike host among them, reads as
+// nothing, and its fragment is never a bare "#n".
+func TestParseBlockedByReadsOnlyGitHubIssueURLs(t *testing.T) {
+	body := "## Blocked by / waiting on\n\n" +
+		"https://github.com.evil.example/o/r/issues/3 and https://x.github.com/o/r/issues/4, " +
+		"https://example.com/page#12, https://github.com/o/r/pull/5, " +
+		"(https://github.com/o/r/issues/6).\n"
+	got := (*Routing)(nil).ParseBlockedBy(body)
+	if len(got) != 1 || got[0] != (BlockedByRef{OwnerRepo: "o/r", Number: 6}) {
+		t.Errorf("ParseBlockedBy = %+v, want only o/r#6", got)
+	}
+}

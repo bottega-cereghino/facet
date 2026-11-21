@@ -252,8 +252,9 @@ var crossRef = regexp.MustCompile(`\b([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(\d+)\b`)
 var blockedByLine = regexp.MustCompile(`(?im)^\s*(?:#{1,6}\s*)?(?:[-*]\s*)?(?:\*\*)?blocked[ -]by(?:\*\*)?\s*:?(.*)$`)
 
 // fencedCode matches a ``` ... ``` block, opening and closing fences each at
-// the start of their own line.
-var fencedCode = regexp.MustCompile("(?ms)^```.*?^```[ \t]*$")
+// the start of their own line. The closing fence may end in \r: GitHub's web
+// editor saves bodies with \r\n line endings, and `$` matches only before \n.
+var fencedCode = regexp.MustCompile("(?ms)^```.*?^```[ \t\r]*$")
 
 // stripFences blanks fenced code blocks rather than deleting them, so every
 // other regex here still sees the same byte offsets and line numbers.
@@ -492,9 +493,12 @@ func (r *Routing) readScopeField(body string) (keys, unknown []string) {
 	return keys, unknown
 }
 
-// findSection returns the body text under a `### <name>` heading.
+// findSection returns the body text under a `### <name>` heading. Headings
+// inside a fenced code block are skipped, as findScopeSection skips them: a
+// quoted example of the field is not the author's answer. The text returned is
+// the original body's, which the stripped copy's offsets still index.
 func findSection(body, name string) string {
-	locs := sectionHeading.FindAllStringSubmatchIndex(body, -1)
+	locs := sectionHeading.FindAllStringSubmatchIndex(stripFences(body), -1)
 	for i, loc := range locs {
 		heading := strings.TrimSpace(body[loc[2]:loc[3]])
 		if !strings.EqualFold(heading, name) {

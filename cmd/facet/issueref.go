@@ -42,9 +42,12 @@ func parseIssueRef(s string) (ghx.IssueRef, error) {
 	return ghx.IssueRef{Owner: owner, Repo: name, Number: r.Number}, nil
 }
 
+// truncate shortens s to n characters, the last one an ellipsis. It counts
+// runes, not bytes, so it never cuts a character in half.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }
