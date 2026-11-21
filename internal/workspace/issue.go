@@ -110,6 +110,9 @@ type IssueState struct {
 	// working directory is here. A job that is not running holds nothing open,
 	// so LiveRoots misses it, but deleting the directory breaks its next run.
 	Jobs []string
+	// JobsUnknown is why the loaded jobs could not be read, or nil. Set, a job
+	// that runs from here cannot be ruled out, so it holds the workspace.
+	JobsUnknown error
 	// SizeBytes is how much disk deleting the workspace frees: objects
 	// hardlinked from the mirror stay behind, so they are not counted.
 	SizeBytes int64
@@ -170,6 +173,9 @@ func (s *IssueState) Blockers() []string {
 	}
 	for _, j := range s.Jobs {
 		out = append(out, fmt.Sprintf("%s -- unload the job, or move it out, before reaping", j))
+	}
+	if s.JobsUnknown != nil {
+		out = append(out, fmt.Sprintf("could not read the loaded launchd jobs (%v) -- a job that runs from here cannot be ruled out; run `launchctl list` to see why, then reap again", s.JobsUnknown))
 	}
 	return out
 }
@@ -334,9 +340,7 @@ func (s *IssueState) checkRunning(dir string, mux LiveChecker) {
 		}
 	}
 	if jc, ok := mux.(JobChecker); ok {
-		if jobs, err := jc.JobsUnder(dir); err == nil {
-			s.Jobs = jobs
-		}
+		s.Jobs, s.JobsUnknown = jc.JobsUnder(dir)
 	}
 }
 
@@ -434,6 +438,25 @@ func linkedWorktrees(porcelain string) []string {
 	return out
 }
 
+// nestedWorktrees keeps the worktrees whose directory exists strictly inside
+// dir. One whose directory is gone loses nothing when dir is deleted: its
+// entry and HEAD live in the checkout's git directory, which stays.
+func nestedWorktrees(worktrees []string, dir string) []string {
+	root := realPath(dir)
+	var out []string
+	for _, w := range worktrees {
+		resolved := realPath(w)
+		if resolved == root || !isUnder(root, resolved) {
+			continue
+		}
+		if fi, err := os.Stat(w); err != nil || !fi.IsDir() {
+			continue
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
 // githubRepo returns owner/name for a GitHub clone URL, in the SSH, scp-like
 // or HTTPS form, and "" for anything else.
 func githubRepo(url string) string {
@@ -486,20 +509,27 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 	}
 	own := c.WorktreeOf == ""
 
-	if out, err := git.Run(p, nil, "status", "--porcelain"); err != nil {
+	// The flags are explicit so no config can hide a file from the check:
+	// status.showUntrackedFiles=no drops untracked files, and
+	// submodule.<name>.ignore or diff.ignoreSubmodules drop a dirty submodule.
+	if out, err := git.Run(p, nil, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git status failed: %v", err))
 	} else {
 		c.Dirty = strings.TrimSpace(out) != ""
 	}
 
-	// A worktree's siblings, the checkout's own included, belong to the
-	// checkout's repository, which removing this one leaves in place.
-	if own {
-		if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
-			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
-		} else {
-			c.Worktrees = linkedWorktrees(out)
-		}
+	// A clone with its own repository is held by every linked worktree: each
+	// one's HEAD and index live in the clone's git directory. A worktree's
+	// siblings, the checkout's own included, belong to the checkout's
+	// repository, which removing this one leaves in place; but a worktree that
+	// sits inside this one's directory (Claude Code's .claude/worktrees, made
+	// from inside the clone) is deleted with it, so it holds too.
+	if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
+	} else if own {
+		c.Worktrees = linkedWorktrees(out)
+	} else {
+		c.Worktrees = nestedWorktrees(linkedWorktrees(out), p)
 	}
 
 	// The branch name is informational only, so a failure here is not a safety

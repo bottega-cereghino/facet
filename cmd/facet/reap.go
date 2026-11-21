@@ -171,9 +171,26 @@ func newReapCmd() *cobra.Command {
 				}
 				fmt.Println("\n--force: deleting despite the above.")
 			}
-			if !yes && !confirm(fmt.Sprintf("Delete %s?", st.Dir)) {
-				fmt.Println("aborted.")
-				return nil
+			if !yes {
+				if !reapConfirm(fmt.Sprintf("Delete %s?", st.Dir)) {
+					fmt.Println("aborted.")
+					return nil
+				}
+				// Work can start while the prompt waits: a commit, a new file,
+				// an agent in a second pane. Check again, as --reapable does, and
+				// refuse on anything that was not on the list just shown.
+				again, err := inspectTarget(ws, muxLive())
+				if err != nil {
+					return err
+				}
+				if fresh := newBlockers(blockers, again.Blockers()); len(fresh) > 0 {
+					fmt.Printf("\nsince the prompt, held by %d more thing(s):\n", len(fresh))
+					for _, b := range fresh {
+						fmt.Printf("  - %s\n", b)
+					}
+					return fmt.Errorf("refusing to reap; resolve the above, then run reap again")
+				}
+				st = again
 			}
 			// Kill any lingering session first. A live session holds file
 			// handles on the working tree, which on some platforms would
@@ -209,6 +226,25 @@ func newReapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&reapable, "reapable", false, "delete every workspace at the root that reap would delete now, after one confirmation")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --reapable: print the list, delete nothing")
 	return cmd
+}
+
+// reapConfirm asks before reap deletes; a package var so a test can act while
+// the prompt waits.
+var reapConfirm = confirm
+
+// newBlockers returns the blockers in now that were not in shown.
+func newBlockers(shown, now []string) []string {
+	seen := map[string]bool{}
+	for _, b := range shown {
+		seen[b] = true
+	}
+	var out []string
+	for _, b := range now {
+		if !seen[b] {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // reapTarget resolves the workspace to reap from --path and an optional

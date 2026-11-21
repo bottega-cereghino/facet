@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,65 @@ func TestReapWithNoArgumentsUsesTheWorkingDirectory(t *testing.T) {
 	}
 	if got != wd {
 		t.Errorf("reapTarget = %q, want the working directory %q", got, wd)
+	}
+}
+
+// runReap runs `facet reap args...` with reapConfirm answering through answer.
+func runReap(t *testing.T, answer func(string) bool, args ...string) error {
+	t.Helper()
+	saved := reapConfirm
+	t.Cleanup(func() { reapConfirm = saved })
+	reapConfirm = answer
+	cmd := newReapCmd()
+	cmd.SetArgs(args)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	return cmd.Execute()
+}
+
+// Work that starts while reap's prompt waits holds the workspace: reap checks
+// again after the answer, as --reapable does (facet#266).
+func TestReapChecksAgainAfterThePrompt(t *testing.T) {
+	_, free, _ := reapableRoot(t)
+	startWork := func(string) bool {
+		if err := os.WriteFile(filepath.Join(free, "draft.md"), []byte("new work\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return true
+	}
+	if err := runReap(t, startWork, filepath.Base(free)); err == nil {
+		t.Error("reap returned no error although work started during the prompt")
+	}
+	if !exists(t, filepath.Join(free, "draft.md")) {
+		t.Fatal("reap deleted work that started while its prompt waited")
+	}
+
+	// Nothing new: the answer is acted on.
+	if err := os.Remove(filepath.Join(free, "draft.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runReap(t, func(string) bool { return true }, filepath.Base(free)); err != nil {
+		t.Fatal(err)
+	}
+	if exists(t, free) {
+		t.Errorf("%s holds nothing and should be gone", free)
+	}
+}
+
+// --force deletes despite the holders it showed, never despite new ones.
+func TestReapForceRefusesWhatStartedDuringThePrompt(t *testing.T) {
+	_, _, held := reapableRoot(t)
+	startWork := func(string) bool {
+		if err := os.WriteFile(filepath.Join(held, "draft.md"), []byte("new work\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return true
+	}
+	if err := runReap(t, startWork, filepath.Base(held), "--force"); err == nil {
+		t.Error("reap --force returned no error although work started during the prompt")
+	}
+	if !exists(t, filepath.Join(held, "draft.md")) {
+		t.Fatal("reap --force deleted work that started while its prompt waited")
 	}
 }
 

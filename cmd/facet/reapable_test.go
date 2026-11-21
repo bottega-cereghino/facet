@@ -325,7 +325,11 @@ func TestReapReapableCommandReadsTheRoot(t *testing.T) {
 	}
 }
 
-func noTools(string, ...string) ([]byte, error) { return nil, errors.New("not on this test's path") }
+// noTools is a machine without launchctl or plutil: off macOS, which is the
+// one failure read as no jobs loaded.
+func noTools(name string, _ ...string) ([]byte, error) {
+	return nil, &exec.Error{Name: name, Err: exec.ErrNotFound}
+}
 
 // A loaded launchd job that runs from a workspace holds it, running or not
 // (facet#234). Only launchctl and plutil are faked: the job is "loaded" and its
@@ -367,6 +371,42 @@ func TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom(t *testing.T) {
 	b := strings.Join(st.Blockers(), "\n")
 	if !strings.Contains(b, "launchd job com.example.svc runs from it (WorkingDirectory ") || !strings.Contains(b, "unload the job") {
 		t.Errorf("the held reason should name the job and the fix:\n%s", b)
+	}
+}
+
+// A launchctl list that fails cannot say no job runs from a workspace, so it
+// holds the workspace, in reap <name> and in --reapable, and the reason says how
+// to check (facet#273). Only a launchctl that is not installed reads as none.
+func TestReapHoldsAWorkspaceWhenLaunchctlListFails(t *testing.T) {
+	_, free, held := reapableRoot(t)
+	jobs = &launchd.Jobs{Dirs: []string{t.TempDir()}, Run: func(string, ...string) ([]byte, error) {
+		return nil, errors.New("exit status 5")
+	}}
+	var out bytes.Buffer
+	ask := func(string) bool { t.Fatal("asked although nothing is reapable"); return false }
+	if err := reapReapable(&out, []string{free, held}, false, false, ask); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, free) {
+		t.Fatalf("--reapable deleted a workspace whose launchd jobs could not be read:\n%s", out.String())
+	}
+	cmd := newReapCmd()
+	cmd.SetArgs([]string{filepath.Base(free), "--yes"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil {
+		t.Error("reap returned no error although the loaded jobs could not be read")
+	}
+	if !exists(t, free) {
+		t.Fatal("reap deleted a workspace whose launchd jobs could not be read")
+	}
+	st, err := workspace.Inspect(free, git, gh, muxLive())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := strings.Join(st.Blockers(), "\n")
+	if !strings.Contains(b, "could not read the loaded launchd jobs") || !strings.Contains(b, "exit status 5") || !strings.Contains(b, "`launchctl list`") {
+		t.Errorf("the held reason should say the jobs could not be read, why, and how to check:\n%s", b)
 	}
 }
 

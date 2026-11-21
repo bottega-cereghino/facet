@@ -83,7 +83,8 @@ same outcome.
 The one exception is a probe layered on top of those checks for a tool that may
 be missing: tmux, lsof and launchctl. A missing tool there means "nothing
 found", or reap would refuse on every machine without tmux. The git and GitHub
-checks underneath still refuse when they cannot tell.
+checks underneath still refuse when they cannot tell. Only the tool's absence is
+excused: a launchctl that is installed but fails holds the workspace.
 
 ## 3. Package documentation
 

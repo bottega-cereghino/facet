@@ -394,6 +394,82 @@ func TestProjectWorktreesListsEachOnceAndSkipsWorkspaces(t *testing.T) {
 	}
 }
 
+// A worktree made from inside a worktree clone (Claude Code's
+// .claude/worktrees, often ignored, so the clone's status is clean) is deleted
+// with the clone, so it holds the workspace; a sibling elsewhere does not
+// (TestWorktreeCloneIsNotHeldByWhatTheCheckoutKeeps). facet#265.
+func TestWorktreeCloneIsHeldByAWorktreeNestedInIt(t *testing.T) {
+	roots, ws, _, checkout := worktreeSetup(t)
+	excludeIn(t, checkout, ".claude/")
+	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(ws, "repo")
+	nested := filepath.Join(clone, ".claude", "worktrees", "side")
+	gitOut(t, clone, "worktree", "add", "-q", "--detach", nested)
+	if err := os.WriteFile(filepath.Join(nested, "draft.txt"), []byte("only copy\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOut(t, clone, "status", "--porcelain"); got != "" {
+		t.Fatalf("the clone should read clean, the nested worktree being ignored: %q", got)
+	}
+	st, err := Inspect(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := st.Blockers(); len(b) != 1 || !strings.Contains(b[0], "linked worktree at ") || !strings.Contains(b[0], filepath.Join("repo", ".claude", "worktrees", "side")+" -- ") {
+		t.Fatalf("not held by the nested worktree: %v", st.Blockers())
+	}
+
+	// Once the nested worktree's directory is gone, deleting the clone loses
+	// nothing more: its entry lives in the checkout, which stays.
+	if err := os.RemoveAll(nested); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Inspect(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := st.Blockers(); len(b) > 0 {
+		t.Fatalf("held by a nested worktree whose directory is gone: %v", b)
+	}
+}
+
+// The same for a plain worktree reaped by path. facet#265.
+func TestPlainWorktreeIsHeldByAWorktreeNestedInIt(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	excludeIn(t, checkout, "inner/")
+	wt := plainWorktree(t, checkout, "topic")
+	gitOut(t, wt, "worktree", "add", "-q", "--detach", filepath.Join(wt, "inner"))
+	st, err := InspectWorktree(wt, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := st.Blockers(); len(b) != 1 || !strings.Contains(b[0], "linked worktree at ") || !strings.Contains(b[0], filepath.Join("wt", "inner")+" -- ") {
+		t.Fatalf("not held by the nested worktree: %v", st.Blockers())
+	}
+}
+
+// excludeIn makes checkout's repository ignore pattern, for the checkout and
+// every worktree of it.
+func excludeIn(t *testing.T, checkout, pattern string) {
+	t.Helper()
+	path := filepath.Join(checkout, ".git", "info", "exclude")
+	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(pattern + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A folder inside a plain worktree is not a worktree: reaping it would delete
 // that folder alone and leave the worktree (facet#274).
 func TestInspectWorktreeRefusesAFolderInsideOne(t *testing.T) {

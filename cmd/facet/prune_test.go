@@ -12,9 +12,25 @@ import (
 	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
-// pruneWorkspace makes a workspace whose one clone ignores its node_modules,
-// and returns the workspace and that node_modules.
+// pruneWorkspace makes a workspace whose one clone ignores its node_modules and
+// tracks the package.json that rebuilds it, and returns the workspace and that
+// node_modules.
 func pruneWorkspace(t *testing.T, root, name string) (ws, deps string) {
+	t.Helper()
+	ws, deps = bareNodeModules(t, root, name)
+	clone := filepath.Dir(deps)
+	if err := os.WriteFile(filepath.Join(clone, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (gitx.Git{}).Run(clone, nil, "add", "package.json"); err != nil {
+		t.Fatal(err)
+	}
+	return ws, deps
+}
+
+// bareNodeModules is pruneWorkspace without the package.json: nothing the clone
+// tracks rebuilds its node_modules.
+func bareNodeModules(t *testing.T, root, name string) (ws, deps string) {
 	t.Helper()
 	ws = filepath.Join(root, name)
 	clone := filepath.Join(ws, "repo")
@@ -156,3 +172,23 @@ func TestPruneCarriesOnPastAnUnreadableWorkspace(t *testing.T) {
 type switchLive struct{ name string }
 
 func (s *switchLive) Live(session string) bool { return s.name != "" && session == s.name }
+
+// A node_modules with no tracked package.json beside it has no install to come
+// back from: --apply keeps it, and the listing says so even when nothing else
+// in the workspace is named.
+func TestPruneKeepsWhatNothingTrackedRebuildsAndSaysWhy(t *testing.T) {
+	ws, deps := bareNodeModules(t, t.TempDir(), "idle")
+	later := time.Now().Add(60 * 24 * time.Hour)
+	var out bytes.Buffer
+	if err := runPrune(&out, []string{ws}, gitx.Git{}, nil, later, 14*24*time.Hour, true, yesAll); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, deps) {
+		t.Fatalf("--apply deleted a node_modules nothing tracked rebuilds:\n%s", out.String())
+	}
+	for _, want := range []string{"kept: repo/node_modules", "package.json", "nothing rebuilds it"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("listing lacks %q:\n%s", want, out.String())
+		}
+	}
+}

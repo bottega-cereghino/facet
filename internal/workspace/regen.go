@@ -13,25 +13,6 @@ import (
 	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
-// regenNames are the directories Prune deletes, each with what rebuilds it.
-// Each is rebuilt by one command from files the repository tracks (a lockfile,
-// a requirements file, terraform's lock file), so deleting one costs a
-// reinstall, never work. Build output (build/, dist/, out/) is left off on
-// purpose: the same names hold hand-made renders and release artefacts, and
-// nothing in the tree says which is which. .terraform is left off too: it
-// keeps the selected `terraform workspace` and the backend settings given at
-// init, and after a fresh init a plan would quietly target "default".
-var regenNames = map[string]string{
-	"node_modules":  "the package manager's install",
-	".venv":         "uv sync, or a new venv and pip install",
-	".mypy_cache":   "mypy, on its next run",
-	".pytest_cache": "pytest, on its next run",
-	".ruff_cache":   "ruff, on its next run",
-	".next":         "next build",
-	".turbo":        "turbo, on its next run",
-	".parcel-cache": "parcel, on its next run",
-}
-
 // minRegenBytes is the least a directory must free to be named. A node_modules
 // that pnpm cloned from its store frees next to nothing, and deleting it would
 // only cost a reinstall.
@@ -51,9 +32,10 @@ type PruneState struct {
 	Dir      string
 	LastUsed time.Time // the newest git or install activity in any clone
 	Found    []Regen
-	// Kept names the directories of a listed name left alone because they
+	// Kept names the directories of a listed name left alone, and why: they
 	// hold a git repository (`pip install -e git+...` checks one out inside a
-	// .venv, and a fork is sometimes cloned into node_modules to debug it).
+	// .venv, and a fork is sometimes cloned into node_modules to debug it), or
+	// nothing the clone tracks beside them rebuilds them.
 	Kept []string
 	Held []string // why Prune leaves it alone; empty means it may prune
 }
@@ -69,7 +51,8 @@ func (s *PruneState) Frees() int64 {
 
 // InspectPrune finds the regenerable directories in ws's clones: a directory
 // named in regenNames that git ignores, holds no tracked file, is not inside a
-// nested repository or worktree, and frees at least minRegenBytes. It holds the workspace when a clone
+// nested repository or worktree, has a file that rebuilds it tracked beside
+// it, and frees at least minRegenBytes. It holds the workspace when a clone
 // was used within idle, when something runs from it (live, as reap asks), or
 // when a clone's ignored files cannot be listed. idle 0 skips the age check.
 //
@@ -90,7 +73,7 @@ func InspectPrune(ws string, git gitx.Runner, live LiveChecker, now time.Time, i
 		}
 		found, kept, last, err := findRegen(git, dir, p)
 		if err != nil {
-			st.Held = append(st.Held, fmt.Sprintf("%s: cannot list its ignored files (%v) -- fix the clone, then run prune again", dir, err))
+			st.Held = append(st.Held, fmt.Sprintf("%s: cannot list its ignored or tracked files (%v) -- fix the clone, then run prune again", dir, err))
 			continue
 		}
 		st.Found = append(st.Found, found...)
@@ -137,7 +120,7 @@ func liveHolders(ws string, live LiveChecker) []string {
 	if jc, ok := live.(JobChecker); ok {
 		jobs, err := jc.JobsUnder(ws)
 		if err != nil {
-			out = append(out, fmt.Sprintf("could not list its launchd jobs (%v) -- prune holds what it cannot check", err))
+			out = append(out, fmt.Sprintf("could not read the loaded launchd jobs (%v) -- prune holds what it cannot check; run `launchctl list` to see why", err))
 		}
 		for _, j := range jobs {
 			out = append(out, fmt.Sprintf("%s -- unload the job first", j))
@@ -168,13 +151,14 @@ func lastGitUse(git gitx.Runner, clone string) (time.Time, error) {
 }
 
 // findRegen walks one clone for regenerable directories. It returns them, the
-// ones kept because they hold a repository, and the newest install it saw (an
-// install touches the directory it fills).
+// ones kept because they hold a repository or nothing tracked rebuilds them,
+// and the newest install it saw (an install touches the directory it fills).
 func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []string, last time.Time, err error) {
 	ignored, err := ignoredDirs(git, clone)
 	if err != nil {
 		return nil, nil, time.Time{}, err
 	}
+	tracked := trackedBeside(git, clone)
 	err = filepath.WalkDir(clone, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() || path == clone {
 			return nil
@@ -182,7 +166,7 @@ func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []strin
 		if d.Name() == ".git" || isCheckout(path) {
 			return filepath.SkipDir // a nested repository or worktree: another checkout's
 		}
-		rebuild, ok := regenNames[d.Name()]
+		regen, ok := regenNames[d.Name()]
 		if !ok {
 			return nil
 		}
@@ -190,14 +174,26 @@ func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []strin
 		if err != nil || !underIgnored(ignored, filepath.ToSlash(rel)) {
 			return filepath.SkipDir
 		}
+		rel = filepath.ToSlash(rel)
 		last = newer(last, path)
 		if repo, held := holdsRepository(path); held {
-			kept = append(kept, fmt.Sprintf("%s/%s holds a git repository at %s", name, filepath.ToSlash(rel), repo))
+			kept = append(kept, fmt.Sprintf("%s/%s holds a git repository at %s", name, rel, repo))
 			return filepath.SkipDir
 		}
-		if n := freedBytes(path); n >= minRegenBytes {
-			found = append(found, Regen{Clone: name, Rel: filepath.ToSlash(rel), Path: path, Rebuild: rebuild, Bytes: n})
+		n := freedBytes(path)
+		if n < minRegenBytes {
+			return filepath.SkipDir
 		}
+		rebuilt, err := tracked(pathDir(rel), regen.from)
+		if err != nil {
+			return err
+		}
+		if !rebuilt {
+			kept = append(kept, fmt.Sprintf("%s/%s has no %s tracked beside it, so nothing rebuilds it",
+				name, rel, orList(regen.from)))
+			return filepath.SkipDir
+		}
+		found = append(found, Regen{Clone: name, Rel: rel, Path: path, Rebuild: regen.rebuild, Bytes: n})
 		return filepath.SkipDir
 	})
 	return found, kept, last, err
