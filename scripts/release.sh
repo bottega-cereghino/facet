@@ -12,10 +12,13 @@
 #
 # The token reaches release-please in a file only this user can read, removed on
 # exit, so it never shows on a command line.
+#
+# release-please and its dependencies come from scripts/release/package-lock.json,
+# installed with `npm ci --ignore-scripts` into a temporary directory on each run:
+# every package the token is handed to is pinned by version and checksum, and none
+# runs an install script. Renovate moves the pin in scripts/release/package.json.
 set -euo pipefail
 
-# renovate: datasource=npm depName=release-please
-RELEASE_PLEASE_VERSION=17.11.2
 REPO_URL=bottega-cereghino/facet
 
 case "${1:-}" in
@@ -37,12 +40,20 @@ gh auth status >/dev/null 2>&1 || {
 cd "$(git rev-parse --show-toplevel)"
 token_file=$(mktemp)
 notes_file=$(mktemp)
-trap 'rm -f "$token_file" "$notes_file"' EXIT
+npm_dir=$(mktemp -d)
+trap 'rm -f "$token_file" "$notes_file"; rm -rf "$npm_dir"' EXIT
 chmod 600 "$token_file"
+
+cp scripts/release/package.json scripts/release/package-lock.json "$npm_dir"/
+npm ci --prefix "$npm_dir" --ignore-scripts --no-audit --no-fund --loglevel=error >&2 || {
+  echo "could not install release-please from scripts/release/package-lock.json. fix: check npm and the network, then run again" >&2
+  exit 1
+}
+
 gh auth token >"$token_file"
 
 # release-please reads --token as a file when it looks like a path.
-npx --yes "release-please@${RELEASE_PLEASE_VERSION}" "$cmd" \
+"$npm_dir/node_modules/.bin/release-please" "$cmd" \
   --repo-url="$REPO_URL" \
   --target-branch=main \
   --config-file=release-please-config.json \

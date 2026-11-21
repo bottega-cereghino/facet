@@ -71,10 +71,25 @@ func With(path string, opt Options, fn func() error) error {
 	stop := heartbeat(path, opt.Heartbeat)
 	defer func() {
 		stop() // stop and join the heartbeat before dropping the lock
-		_ = f.Close()
-		_ = os.Remove(path)
+		release(path, f)
 	}()
 	return fn()
+}
+
+// release closes the holder's lock and removes it only while path still names
+// the file this holder created. A holder stalled past StaleAge may have had its
+// lock broken and taken by a successor; removing by name would delete the
+// successor's lock and let a third process in beside it. When the holder cannot
+// tell (its own file will not stat), it leaves the lock to go stale.
+func release(path string, f *os.File) {
+	mine, err := f.Stat()
+	_ = f.Close()
+	if err != nil {
+		return
+	}
+	if cur, err := os.Stat(path); err == nil && os.SameFile(mine, cur) {
+		_ = os.Remove(path)
+	}
 }
 
 // acquire polls at opt.Poll until it takes the lock, a fatal error rules it
@@ -107,14 +122,10 @@ func acquire(path string, opt Options) (*os.File, error) {
 				return true
 			}
 			if time.Since(fi.ModTime()) > opt.StaleAge {
-				// Presumed abandoned. Re-check the mtime immediately before removing,
-				// so a lock just re-created (and thus fresh) by someone else is left
-				// alone rather than clobbered -- narrowing the check-then-remove race.
-				if again, err := os.Stat(path); err == nil && time.Since(again.ModTime()) > opt.StaleAge {
-					if opt.Warn != nil {
-						opt.Warn("breaking stale lock %s (untouched for over %s)", path, opt.StaleAge)
-					}
-					_ = os.Remove(path)
+				// Presumed abandoned. breakStale removes this file and no other, so a
+				// lock another waiter broke and re-created meanwhile survives.
+				if breakStale(path, fi, opt.StaleAge) && opt.Warn != nil {
+					opt.Warn("breaking stale lock %s (untouched for over %s)", path, opt.StaleAge)
 				}
 				continue
 			}
@@ -125,6 +136,29 @@ func acquire(path string, opt Options) (*os.File, error) {
 		return nil, fmt.Errorf("could not acquire lock %s within %s", path, opt.MaxWait)
 	}
 	return f, ferr
+}
+
+// breakStale removes the lock that stale describes, and nothing else. Removing
+// by name cannot promise that: between the check and the remove, a second
+// waiter can break the same lock and create its own, and the remove deletes the
+// fresh one. So whatever is at path is first renamed aside, atomically, and then
+// checked: the same file, still untouched for staleAge, is deleted; anything
+// else is a live lock and is linked back under path. The link fails rather than
+// replace a lock a third waiter took in that instant, the one race left. It
+// reports whether it broke the lock.
+func breakStale(path string, stale os.FileInfo, staleAge time.Duration) bool {
+	aside := fmt.Sprintf("%s.broken.%d.%d", path, os.Getpid(), time.Now().UnixNano())
+	if err := os.Rename(path, aside); err != nil {
+		return false // gone already; the caller tries to create it
+	}
+	moved, err := os.Stat(aside)
+	if err == nil && os.SameFile(moved, stale) && time.Since(moved.ModTime()) > staleAge {
+		_ = os.Remove(aside)
+		return true
+	}
+	_ = os.Link(aside, path)
+	_ = os.Remove(aside)
+	return false
 }
 
 // createLock does the O_CREATE|O_EXCL open that claims the lock. It exists to

@@ -19,6 +19,7 @@ reasons. Read the section of CODE.md you are about to touch.
 | `docs/CODE.md` | the house style, numbered so a rule can be cited |
 | `docs/design/` | design notes for single behaviours (reap's refusal) |
 | `scripts/release.sh` | cuts a release with release-please (section Releases) |
+| `scripts/release/` | `package.json` and `package-lock.json` pinning the release-please the script runs |
 
 Code moves to `internal/` when a second caller needs it, not before.
 
@@ -78,7 +79,7 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
 - **The privacy guard** (`internal/privacy`) scans the tree for a word list
   that is never committed: `.denylist` at the root (gitignored) or the
   `FACET_DENYLIST` environment variable, comma-separated (a repo secret in
-  CI). Locally it skips without one, so a green `make check` does not prove
+  CI, handed only to the two `make test` steps). Locally it skips without one, so a green `make check` does not prove
   it ran; in CI it fails without one. Never commit the list, and never
   weaken the guard to get green.
 - **Tests use the real filesystem and real git repositories**, and `mux`
@@ -119,7 +120,12 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
 
 release-please, run from a machine logged in with `gh`, not from a workflow:
 the org does not let Actions open pull requests, and a PR opened with
-`GITHUB_TOKEN` would never run its required checks (#219).
+`GITHUB_TOKEN` would never run its required checks (#219). The script needs
+`node` and `npm`: each run installs release-please and its dependencies from
+`scripts/release/package-lock.json` with `npm ci --ignore-scripts` into a
+temporary directory, so every package the gh token is handed to is pinned by
+version and checksum. Never replace that with `npx`, which resolves the tree
+afresh.
 
 1. `scripts/release.sh pr` opens or updates the release PR from the commits
    on `main` since the last tag. Below 1.0 a breaking change bumps the minor.
@@ -140,12 +146,15 @@ Tags up to v0.3.0 declare the module's old name, so for those it is
 
 Renovate (`renovate.json`) on `config:best-practices`, weekly between
 00:00 and 06:00 on Monday (Europe/Rome), and only releases at least 14 days old. It covers Go modules (then
-`go mod tidy`), action SHAs, the Renovate validator image in `ci.yml`, the Makefile tool pins
-and the gitleaks and zizmor versions in `security.yml`; the last two are
+`go mod tidy`), action SHAs, the Renovate validator image in `ci.yml`, the Makefile tool pins,
+the gitleaks and zizmor versions in `security.yml`, and release-please in
+`scripts/release/package.json` with its lockfile (the npm manager). The
+Makefile and `security.yml` pins are
 found through a `# renovate: datasource=… depName=…` comment on the line
-above the pin. Patch and digest updates merge themselves once every check is
-green; minors and majors
-wait for a person. A gitleaks or zizmor update stays red until its
+above the pin. Patch updates, and digest updates of Go modules, merge
+themselves once every check is green. An action's or image's digest changing
+under the same version means its tag was moved, so that waits for a look, as
+minors and majors wait for a person. A gitleaks or zizmor update stays red until its
 `*_SHA256` is updated in the same PR, because Renovate cannot fetch the
 checksum. The `go` directive in `go.mod` and setup-go's `go-version` move by
 hand, together. The `toolchain` line in `go.mod` is what every build uses,

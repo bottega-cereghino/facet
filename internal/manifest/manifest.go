@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // FileName is the manifest's name inside a workspace directory.
@@ -67,8 +68,13 @@ func (m *Manifest) ensureInit() {
 	}
 }
 
-// Validate enforces the three invariants the manifest schema has always had.
+// Validate enforces the invariants of the manifest schema: every clone and link
+// key is one name inside the workspace, every link target stays under the
+// projects root, and the three invariants the schema has always had.
 func (m *Manifest) Validate() error {
+	if err := m.validatePaths(); err != nil {
+		return err
+	}
 	var both []string
 	for k := range m.Links {
 		if _, ok := m.Clones[k]; ok {
@@ -100,6 +106,48 @@ func (m *Manifest) Validate() error {
 		return fmt.Errorf("manifest %q: lfs declared for non-clone %v", m.Name, orphanLFS)
 	}
 	return nil
+}
+
+// validatePaths refuses a key or a link target that would make sync write
+// outside its root. A clone or link key becomes filepath.Join(workspace, key),
+// so `../x` or `/abs` would clone or link outside the workspace; a link target
+// becomes filepath.Join(projects, target), where a bootstrap clones it.
+func (m *Manifest) validatePaths() error {
+	var bad []string
+	for _, k := range sortedKeys(m.Clones) {
+		if !plainName(k) {
+			bad = append(bad, fmt.Sprintf("clone %q", k))
+		}
+	}
+	for _, k := range sortedKeys(m.Links) {
+		if !plainName(k) {
+			bad = append(bad, fmt.Sprintf("link %q", k))
+		}
+		if t := m.Links[k]; !filepath.IsLocal(t) || filepath.Clean(t) == "." {
+			bad = append(bad, fmt.Sprintf("link %q target %q", k, t))
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("manifest %q: %s would reach outside the workspace or the projects root. "+
+			"fix: in %s, make each clone and link key one directory name, such as \"infra\", "+
+			"and each link target a folder under the projects root, such as \"infra-core\"", m.Name, strings.Join(bad, ", "), FileName)
+	}
+	return nil
+}
+
+// plainName reports whether k is one directory name: not empty, not "." or
+// "..", and without a path separator.
+func plainName(k string) bool {
+	return k != "" && k != "." && k != ".." && !strings.ContainsAny(k, `/\`)
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // IsIssueWorkspace reports whether this workspace was spawned for a GitHub issue.

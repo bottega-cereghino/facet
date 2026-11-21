@@ -126,7 +126,7 @@ func Origin(r Runner, dir string) string {
 
 // RemoteURL returns the URL of the named remote, and whether it exists.
 func RemoteURL(r Runner, dir, remote string) (string, bool) {
-	out, err := r.Run(dir, nil, "remote", "get-url", remote)
+	out, err := r.Run(dir, nil, "remote", "get-url", "--", remote)
 	if err != nil {
 		return "", false
 	}
@@ -155,6 +155,10 @@ type CloneOptions struct {
 //
 // When SetOriginTo is set, origin is repointed *before* the checkout, so that an
 // LFS smudge pulls blobs from the forge rather than from a blob-less mirror.
+//
+// src and dst follow a `--`: they come from a user-authored manifest, and a URL
+// such as `--upload-pack=<command>` would otherwise be read as an option. Every
+// call here that passes a URL, path or name to git does the same.
 func Clone(r Runner, src, dst string, opt CloneOptions) error {
 	var env []string
 	if opt.SkipLFS {
@@ -162,12 +166,12 @@ func Clone(r Runner, src, dst string, opt CloneOptions) error {
 	}
 	if _, err := r.Run("", env,
 		"-c", "core.longpaths=true", "clone", "--no-checkout",
-		"-c", "core.longpaths=true", src, dst,
+		"-c", "core.longpaths=true", "--", src, dst,
 	); err != nil {
 		return err
 	}
 	if opt.SetOriginTo != "" {
-		if _, err := r.Run(dst, nil, "remote", "set-url", "origin", opt.SetOriginTo); err != nil {
+		if _, err := r.Run(dst, nil, "remote", "set-url", "--", "origin", opt.SetOriginTo); err != nil {
 			return err
 		}
 	}

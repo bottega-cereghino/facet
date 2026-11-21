@@ -1,0 +1,8 @@
+{
+  "name": "facet-release",
+  "private": true,
+  "description": "The release-please that scripts/release.sh runs, locked with package-lock.json.",
+  "dependencies": {
+    "release-please": "17.11.2"
+  }
+}
