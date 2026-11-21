@@ -132,28 +132,33 @@ func preflight(req ghx.Requirements) (probs []ghx.Problem, notes []string, st *g
 // operator's: a default `gh auth login` token is a reason to know, not a
 // reason to stop, and a credential that truly cannot reach GitHub fails at the
 // issue lookup, before anything is created.
-func warnPreflight(w io.Writer, what string) {
+//
+// It returns the status it read, or nil when it could not read one, so spawn
+// can say whether the issue's author is the signed-in account without asking
+// gh a second time.
+func warnPreflight(w io.Writer, what string) *ghx.AuthStatus {
 	// The token-type rule guards against another login rotating this token
 	// out, which breaks nothing about the command at hand; it stays in the
 	// full `facet preflight` report and out of the warning every spawn prints.
 	req := ghx.DefaultRequirements()
 	req.ForbiddenTokenTypes = nil
-	probs, notes, _, err := preflight(req)
+	probs, notes, st, err := preflight(req)
 	if err != nil {
 		_, _ = fmt.Fprintf(w, "! %s: could not check the GitHub credential: %v\n\n", what, err)
-		return
+		return nil
 	}
 	// Printed whether or not anything is wrong: a command that proceeds on a
 	// partially-checked credential surface must say which part went unchecked.
 	writeNotes(w, notes)
 	if len(probs) == 0 {
-		return
+		return st
 	}
 	for _, p := range probs {
 		_, _ = fmt.Fprintf(w, "! %s\n", p)
 	}
 	_, _ = fmt.Fprintf(w, "\n! %s is proceeding despite %d credential %s; run `facet preflight` for the full report\n\n",
 		what, len(probs), plural(len(probs), "problem", "problems"))
+	return st
 }
 
 // deprecateUnsoundFlag keeps --unsound-credential accepted, and hidden, on the

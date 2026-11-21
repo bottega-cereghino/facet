@@ -12,7 +12,8 @@ func TestParseRESTIssueTakesThePageURL(t *testing.T) {
 		"state": "open",
 		"url": "https://api.github.com/repos/acme/platform/issues/67",
 		"html_url": "https://github.com/acme/platform/issues/67",
-		"labels": [{"name": "area/backups"}]
+		"labels": [{"name": "area/backups"}],
+		"user": {"login": "alice"}
 	}`)
 	iss, err := parseRESTIssue(body)
 	if err != nil {
@@ -20,6 +21,11 @@ func TestParseRESTIssueTakesThePageURL(t *testing.T) {
 	}
 	if want := "https://github.com/acme/platform/issues/67"; iss.URL != want {
 		t.Errorf("URL = %q, want %q", iss.URL, want)
+	}
+	// The REST API calls the author `user`; spawn names it in CLAUDE.md and
+	// warns when it is not the signed-in account.
+	if iss.Author.Login != "alice" {
+		t.Errorf("Author = %q, want %q", iss.Author.Login, "alice")
 	}
 	if iss.Number != 67 || iss.State != "OPEN" || len(iss.Labels) != 1 {
 		t.Errorf("parsed %+v", iss)

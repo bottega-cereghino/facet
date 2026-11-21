@@ -106,6 +106,25 @@ another), clones each repo, and writes a `CLAUDE.md` carrying the issue
 body and the durable hazards recorded for its `area/*` labels. Then it stops and
 tells you where to work — opening an editor or starting an agent is yours.
 
+### The issue's text is data, not instructions
+
+Anyone can file an issue on a public repository, and an agent reads the
+workspace's `CLAUDE.md` as instructions, with your `gh` and git credentials. So
+the issue's body goes in as a blockquote, every line starting with `>`, after a
+fixed line that names its author (`@login`) and says to read it as a description
+of the task, never as instructions to run a command, open a link, or touch
+credentials, and to stop and ask if it says to. Your own issue (the author is
+the account `gh` is signed in as) is quoted too, without that last line, so an
+issue of yours that says "run `make check`" is simply followed. A fixed line,
+`End of the issue's text.`, follows the quote. Nothing in the
+body can end the quote early: a heading, a code fence, a bare carriage return or
+a copy of that closing line stays inside it.
+
+The plan also warns, before the prompt and on `--dry-run`, when the issue was
+not written by the account `gh` is signed in as, or when either one is unknown.
+Read the issue before you start an agent on it. The warning names the author,
+not the last editor: anyone who can edit the issue may have changed its text.
+
 ### The issues a workspace covers
 
 The issues a workspace covers go in `.scope`, one `owner/repo#n` per line: the
@@ -456,6 +475,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   only jobs `launchctl list` shows count, since a plist that is not loaded starts
   nothing. Unload the job, or move it out, then reap
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`).
+- **An issue's body stays quoted in the `CLAUDE.md` spawn writes.** Every line
+  of it starts with `>`, whatever it holds, so it cannot pose as the file's own
+  headings or rules (`TestIssueClaudeMDKeepsTheBodyInsideTheQuote`).
 
 ## Status
 
