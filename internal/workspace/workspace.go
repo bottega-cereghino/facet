@@ -240,7 +240,7 @@ func syncClone(ws string, m *manifest.Manifest, name string, git gitx.Runner, re
 		have, exists := gitx.RemoteURL(git, dir, rn)
 		switch {
 		case !exists:
-			if _, err := git.Run(dir, nil, "remote", "add", rn, want); err != nil {
+			if _, err := git.Run(dir, nil, "remote", "add", "--", rn, want); err != nil {
 				return err
 			}
 			rep.Created("  remote %s -> %s", rn, want)

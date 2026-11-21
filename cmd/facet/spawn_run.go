@@ -271,7 +271,7 @@ func missingClones(ws string) ([]string, error) {
 // checkoutIssueBranch fetches the branch explicitly, because the mirror may have
 // been created before `gh issue develop` pushed it.
 func checkoutIssueBranch(dir, branch string) error {
-	if _, err := git.Run(dir, nil, "fetch", "origin", branch); err != nil {
+	if _, err := git.Run(dir, nil, "fetch", "--", "origin", branch); err != nil {
 		return err
 	}
 	_, err := git.Run(dir, nil, "checkout", "-B", branch, "--track", "origin/"+branch)
