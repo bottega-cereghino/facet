@@ -6,6 +6,13 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.3](https://github.com/bottega-cereghino/facet/compare/v0.7.2...v0.7.3) (2026-11-21)
+
+
+### Fixed
+
+* **reap:** fetch into refs/remotes only, so a mirror remote cannot prune local branches ([#327](https://github.com/bottega-cereghino/facet/issues/327)) ([75b9616](https://github.com/bottega-cereghino/facet/commit/75b9616e65f8adc69507e7c03041222937fb3449))
+
 ## [0.7.2](https://github.com/bottega-cereghino/facet/compare/v0.7.1...v0.7.2) (2026-11-21)
 
 
