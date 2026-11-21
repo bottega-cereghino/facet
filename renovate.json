@@ -16,7 +16,9 @@
   "vulnerabilityAlerts": {
     "minimumReleaseAge": "14 days"
   },
-  "dependencyDashboard": true,
+  "dependencyDashboard": {
+    "enabled": true
+  },
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
   "postUpdateOptions": [
