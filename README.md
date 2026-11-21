@@ -549,7 +549,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   and its next run would fail. A job counts when its `Program`, an absolute path
   in its `ProgramArguments`, or its `WorkingDirectory` is inside the workspace;
   only jobs `launchctl list` shows count, since a plist that is not loaded starts
-  nothing. Unload the job, or move it out, then reap
+  nothing. A loaded job's plist is read wherever it is: from the LaunchAgents
+  folders, or from the file `launchctl print` says it was loaded from
+  (`TestUnderFindsAJobLoadedFromAPlistElsewhere`). Unload the job, or move it out, then reap
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`).
 - **An issue's body stays quoted in the `CLAUDE.md` spawn writes.** Every line
   of it starts with `>`, whatever it holds, so it cannot pose as the file's own
