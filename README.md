@@ -423,6 +423,13 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `tmux list-panes -a` and `lsof +D` are both a convenience layered on the
   git-based checks: a missing tool degrades to "nothing found", never a false
   refusal.
+- **`reap` refuses while a loaded launchd job runs from the workspace**, running
+  or not: a scheduled job between runs holds nothing open, so `lsof` misses it,
+  and its next run would fail. A job counts when its `Program`, an absolute path
+  in its `ProgramArguments`, or its `WorkingDirectory` is inside the workspace;
+  only jobs `launchctl list` shows count, since a plist that is not loaded starts
+  nothing. Unload the job, or move it out, then reap
+  (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`).
 
 ## Status
 

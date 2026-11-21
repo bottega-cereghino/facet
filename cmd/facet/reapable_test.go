@@ -12,7 +12,9 @@ import (
 	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/ghx"
 	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/workspace"
 )
 
 // reapableRoot makes a workspaces root with two long-lived workspaces: one that
@@ -37,8 +39,9 @@ func reapableRoot(t *testing.T) (root, free, held string) {
 	if err := os.WriteFile(filepath.Join(held, "plan.md"), []byte("the only copy\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	savedRoots, savedGit, savedGH := roots, git, gh
-	t.Cleanup(func() { roots, git, gh = savedRoots, savedGit, savedGH })
+	savedRoots, savedGit, savedGH, savedJobs := roots, git, gh, jobs
+	t.Cleanup(func() { roots, git, gh, jobs = savedRoots, savedGit, savedGH, savedJobs })
+	jobs = &launchd.Jobs{Dirs: []string{t.TempDir()}, Run: noTools}
 	roots = config.Roots{Workspaces: root}
 	git = gitx.Git{}
 	return root, free, held
@@ -293,5 +296,50 @@ func TestReapReapableCommandReadsTheRoot(t *testing.T) {
 	}
 	if !exists(t, filepath.Join(held, "plan.md")) {
 		t.Errorf("%s holds the only copy of a file and must be left alone", held)
+	}
+}
+
+func noTools(string, ...string) ([]byte, error) { return nil, errors.New("not on this test's path") }
+
+// A loaded launchd job that runs from a workspace holds it, running or not
+// (facet#234). Only launchctl and plutil are faked: the job is "loaded" and its
+// plist is already XML.
+func TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom(t *testing.T) {
+	_, free, held := reapableRoot(t)
+	agents := t.TempDir()
+	p := filepath.Join(agents, "com.example.svc.plist")
+	doc := `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>Label</key><string>com.example.svc</string>
+<key>WorkingDirectory</key><string>` + free + `</string>
+</dict></plist>
+`
+	if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jobs = &launchd.Jobs{Dirs: []string{agents}, Run: func(name string, args ...string) ([]byte, error) {
+		if name == "launchctl" {
+			return []byte("PID\tStatus\tLabel\n-\t0\tcom.example.svc\n"), nil
+		}
+		return os.ReadFile(args[len(args)-1])
+	}}
+	var out bytes.Buffer
+	ask := func(string) bool { t.Fatal("asked although nothing is reapable"); return false }
+	if err := reapReapable(&out, []string{free, held}, false, ask); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, free) {
+		t.Fatalf("deleted the directory a loaded launchd job runs from:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "nothing to reap: 2 held") {
+		t.Errorf("output:\n%s", out.String())
+	}
+	st, err := workspace.Inspect(free, git, gh, muxLive())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := strings.Join(st.Blockers(), "\n")
+	if !strings.Contains(b, "launchd job com.example.svc runs from it (WorkingDirectory ") || !strings.Contains(b, "unload the job") {
+		t.Errorf("the held reason should name the job and the fix:\n%s", b)
 	}
 }
