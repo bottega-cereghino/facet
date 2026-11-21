@@ -101,7 +101,8 @@ func newReapCmd() *cobra.Command {
 			"its HEAD reaches, its branch's pull request and what runs in it, then removes\n" +
 			"it with git. Its branches stay in the checkout.\n\n" +
 			"--reapable deletes every workspace at the root that reap would delete now, and\n" +
-			"every such worktree of the checkouts under the projects root:\n" +
+			"every such worktree inside a checkout under the projects root (not one\n" +
+			"elsewhere, nor any of a bare repository's; name those to reap them):\n" +
 			"it lists them with the disk each frees, asks once, and checks each again just\n" +
 			"before deleting it. It never forces; held workspaces are left alone, and so\n" +
 			"is one with a remote it could not fetch, since its pushed work cannot be\n" +
@@ -129,8 +130,8 @@ func newReapCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				// The worktrees of the checkouts under the projects root, Claude
-				// Code's among them; a workspace's own are reaped with it.
+				// The worktrees inside the checkouts under the projects root,
+				// Claude Code's among them; a workspace's own are reaped with it.
 				wts, unchecked, err := workspace.ProjectWorktrees(git, roots.Projects, root)
 				if err != nil && !os.IsNotExist(err) {
 					return err

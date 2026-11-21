@@ -326,6 +326,86 @@ func TestReapReapableCommandReadsTheRoot(t *testing.T) {
 	}
 }
 
+// sweepProjects makes a projects root holding the two layouts facet#275 lost
+// data in, and one worktree the sweep is for:
+//   - app, a bare repository in app/.bare with the everyday checkout at
+//     app/main, a linked worktree whose ignored .env is the only copy;
+//   - svc, a checkout with a worktree outside it, a service run from a tag with
+//     its ignored database beside the code;
+//   - an agent's worktree in svc/.claude/worktrees, clean and pushed.
+func sweepProjects(t *testing.T) (projects, env, db, agent string) {
+	t.Helper()
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin")
+	if err := os.MkdirAll(origin, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, origin, "init", "-q", "-b", "main")
+	gitIn(t, origin, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init")
+	projects = filepath.Join(root, "Projects")
+
+	app := filepath.Join(projects, "app")
+	gitIn(t, "", "clone", "-q", "--bare", origin, filepath.Join(app, ".bare"))
+	putFile(t, filepath.Join(app, ".git"), "gitdir: ./.bare\n")
+	gitIn(t, app, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	gitIn(t, app, "fetch", "-q", "origin")
+	everyday := filepath.Join(app, "main")
+	gitIn(t, app, "worktree", "add", "-q", everyday, "main")
+	gitIn(t, everyday, "branch", "-q", "-u", "origin/main")
+	putFile(t, filepath.Join(app, ".bare", "info", "exclude"), ".env\n")
+	env = filepath.Join(everyday, ".env")
+	putFile(t, env, "API_KEY=only-copy\n")
+
+	svc := filepath.Join(projects, "svc")
+	gitIn(t, "", "clone", "-q", origin, svc)
+	putFile(t, filepath.Join(svc, ".git", "info", "exclude"), "*.db\n.claude/\n")
+	service := filepath.Join(root, "Services", "svc")
+	gitIn(t, svc, "worktree", "add", "-q", "--detach", service, "origin/main")
+	db = filepath.Join(service, "prod.db")
+	putFile(t, db, "rows\n")
+	agent = filepath.Join(svc, ".claude", "worktrees", "agent")
+	gitIn(t, svc, "worktree", "add", "-q", "--detach", agent, "origin/main")
+	return projects, env, db, agent
+}
+
+func putFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o666); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// --reapable sweeps only worktrees inside their checkout, never a bare
+// layout's: the everyday checkout of a bare repository and a service run from
+// a worktree elsewhere both keep their ignored files (facet#275).
+func TestReapReapableSweepsOnlyWorktreesInsideTheirCheckout(t *testing.T) {
+	root, _, _ := reapableRoot(t)
+	projects, env, db, agent := sweepProjects(t)
+	roots.Projects = projects
+	cmd := newReapCmd()
+	cmd.SetArgs([]string{"--reapable", "--yes"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, env) {
+		t.Errorf("%s went: the bare layout's everyday checkout was swept", env)
+	}
+	if !exists(t, db) {
+		t.Errorf("%s went: a worktree outside its checkout was swept", db)
+	}
+	if exists(t, agent) {
+		t.Errorf("%s holds nothing, is inside its checkout and should be gone", agent)
+	}
+	if exists(t, filepath.Join(root, "facet-test-reapable-free")) {
+		t.Errorf("the free workspace should be gone too")
+	}
+}
+
 // noTools is a machine without launchctl or plutil: off macOS, which is the
 // one failure read as no jobs loaded.
 func noTools(name string, _ ...string) ([]byte, error) {

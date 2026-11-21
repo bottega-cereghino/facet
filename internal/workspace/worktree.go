@@ -191,7 +191,9 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 		clonePR = nil
 	}
 	c := inspectClone(git, filepath.Base(dir), dir, repo, clonePR)
-	st := &IssueState{Dir: dir, Name: filepath.Base(dir), Worktree: true, Clone: []CloneState{c}}
+	// The worktree comes first: Reap removes it through Clone[0].WorktreeOf.
+	clones := append([]CloneState{c}, submoduleStates(git, filepath.Base(dir), dir)...)
+	st := &IssueState{Dir: dir, Name: filepath.Base(dir), Worktree: true, Clone: clones}
 	if clonePR != nil && c.Branch != "" && c.Branch != "HEAD" {
 		// As for an issue workspace: a lookup that fails is not "no PR".
 		if found, err := clonePR.ViewPR(repo, c.Branch); err == nil {
@@ -205,8 +207,14 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 	return st, nil
 }
 
-// ProjectWorktrees lists the linked worktrees of the repositories directly
-// under projects, each once, leaving out those under skip (a workspace's
+// ProjectWorktrees lists, for reap --reapable, the linked worktrees of the
+// checkouts directly under projects. It offers only a worktree inside its
+// checkout's own directory, as Claude Code's .claude/worktrees are: one
+// elsewhere, beside the checkout or in a folder of its own, may be a long-lived
+// working copy, a service run from a tag with its ignored data beside the code.
+// It offers none of a bare repository's: there every working copy is a linked
+// worktree, the everyday one included. Those are still reaped by path, one at
+// a time. It leaves out those under skip (a workspace's
 // worktree clones are reaped with their workspace) and those whose directory
 // is gone (`git worktree prune` forgets them). A checkout git cannot list is
 // named in unchecked.
@@ -216,7 +224,6 @@ func ProjectWorktrees(git gitx.Runner, projects, skip string) (out, unchecked []
 		return nil, nil, err
 	}
 	skipReal := realPath(skip)
-	seen := map[string]bool{}
 	for _, e := range entries {
 		dir := filepath.Join(projects, e.Name())
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || !gitx.IsRepo(dir) {
@@ -227,12 +234,26 @@ func ProjectWorktrees(git gitx.Runner, projects, skip string) (out, unchecked []
 			unchecked = append(unchecked, fmt.Sprintf("%s: git worktree list failed: %v", dir, err))
 			continue
 		}
+		if mainIsBare(list) {
+			continue
+		}
+		// A worktree directly under projects lists its checkout's worktrees
+		// too, but they are offered only through the checkout's own entry,
+		// as the ones inside it.
+		of, err := worktreeOf(git, dir)
+		if err != nil {
+			unchecked = append(unchecked, fmt.Sprintf("%s: cannot tell whether it is a worktree: %v", dir, err))
+			continue
+		}
+		if of != "" {
+			continue
+		}
+		root := realPath(dir)
 		for _, wt := range linkedWorktrees(list) {
 			key := realPath(wt)
-			if seen[key] || (skipReal != "" && isUnder(skipReal, key)) {
+			if !isUnder(root, key) || (skipReal != "" && isUnder(skipReal, key)) {
 				continue
 			}
-			seen[key] = true
 			if fi, err := os.Stat(wt); err != nil || !fi.IsDir() {
 				continue
 			}
@@ -240,6 +261,21 @@ func ProjectWorktrees(git gitx.Runner, projects, skip string) (out, unchecked []
 		}
 	}
 	return out, unchecked, nil
+}
+
+// mainIsBare reads `git worktree list --porcelain` for whether the repository
+// is bare: its main worktree, the first entry, is then marked "bare", and every
+// working copy is a linked worktree.
+func mainIsBare(porcelain string) bool {
+	for _, line := range strings.Split(porcelain, "\n") {
+		if line == "" {
+			return false
+		}
+		if line == "bare" {
+			return true
+		}
+	}
+	return false
 }
 
 // listed reports whether dir is one of worktrees, comparing resolved paths.
