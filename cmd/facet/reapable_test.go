@@ -5,15 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/ghx"
 	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/mux"
 	"github.com/bottega-cereghino/facet/internal/workspace"
 )
 
@@ -341,5 +344,50 @@ func TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom(t *testing.T) {
 	b := strings.Join(st.Blockers(), "\n")
 	if !strings.Contains(b, "launchd job com.example.svc runs from it (WorkingDirectory ") || !strings.Contains(b, "unload the job") {
 		t.Errorf("the held reason should name the job and the fix:\n%s", b)
+	}
+}
+
+// reap <name> refuses while something holds the workspace, and deletes nothing:
+// the guarantee the rest of reap exists for, through the command itself.
+func TestReapRefusesAHeldWorkspace(t *testing.T) {
+	_, _, held := reapableRoot(t)
+	cmd := newReapCmd()
+	cmd.SetArgs([]string{filepath.Base(held), "--yes"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil {
+		t.Error("reap of a held workspace returned no error")
+	}
+	if !exists(t, filepath.Join(held, "plan.md")) {
+		t.Fatal("reap deleted a workspace holding the only copy of a file")
+	}
+}
+
+// A process whose working directory is in the workspace holds it, through
+// the command and with whatever multiplexer the machine has, tmux or none.
+func TestReapRefusesWhileAProcessIsInTheWorkspace(t *testing.T) {
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("lsof not installed: the process probe cannot run here")
+	}
+	_, free, _ := reapableRoot(t)
+	sleeper := exec.Command("sleep", "30")
+	sleeper.Dir = free
+	if err := sleeper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sleeper.Process.Kill(); _ = sleeper.Wait() })
+	deadline := time.Now().Add(5 * time.Second)
+	for len(mux.ProcessesUnder(free)) == 0 && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	cmd := newReapCmd()
+	cmd.SetArgs([]string{filepath.Base(free), "--yes"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil {
+		t.Error("reap returned no error with a process in the workspace")
+	}
+	if !exists(t, free) {
+		t.Fatal("reap deleted a workspace a process is running in")
 	}
 }

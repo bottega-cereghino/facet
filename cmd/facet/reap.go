@@ -25,9 +25,12 @@ func newIssuesCmd() *cobra.Command {
 			if !offline {
 				pr = gh
 			}
-			states, err := workspace.ListIssues(roots, git, pr, muxLive())
+			states, unchecked, err := workspace.ListIssues(roots, git, pr, muxLive())
 			if err != nil {
 				return err
+			}
+			for _, u := range unchecked {
+				fmt.Fprintf(os.Stderr, "! could not check %s -- left out of the list\n", u)
 			}
 			if len(states) == 0 {
 				fmt.Println("no issue workspaces")
@@ -232,7 +235,8 @@ func (c liveChecks) LiveRoots(dir string) ([]string, error) {
 	if lr, ok := c.mux.(workspace.LiveRootChecker); ok {
 		return lr.LiveRoots(dir)
 	}
-	return nil, nil
+	// No multiplexer: a process rooted in the workspace still holds it.
+	return mux.ProcessesUnder(dir), nil
 }
 
 func (c liveChecks) JobsUnder(dir string) ([]string, error) {
