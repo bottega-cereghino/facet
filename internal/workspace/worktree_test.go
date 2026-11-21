@@ -361,16 +361,28 @@ func TestReapRemovesAPlainWorktreeAndKeepsItsBranch(t *testing.T) {
 	gitOut(t, checkout, "rev-parse", "--verify", "refs/heads/topic")
 }
 
-func TestProjectWorktreesListsEachOnceAndSkipsWorkspaces(t *testing.T) {
+// --reapable sweeps only worktrees inside their checkout's directory, Claude
+// Code's .claude/worktrees among them. One checked out elsewhere may be a
+// long-lived working copy: beside the checkout, or a service run from a tag
+// with its ignored data beside the code (facet#275).
+func TestProjectWorktreesOffersOnlyWorktreesInsideTheirCheckout(t *testing.T) {
 	roots, ws, _, checkout := worktreeSetup(t)
+	excludeIn(t, checkout, ".claude/")
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
 		t.Fatal(err)
 	}
-	keep := plainWorktree(t, checkout, "topic")
-	// A worktree checked out beside the checkout lists the same set again.
+	inside := filepath.Join(checkout, ".claude", "worktrees", "topic")
+	gitOut(t, checkout, "worktree", "add", "-q", "-b", "topic", inside, "origin/main")
+	// A worktree beside the checkout is a repository directly under projects
+	// itself, and lists the same worktrees again.
 	beside := filepath.Join(roots.Projects, "repo-wt")
 	gitOut(t, checkout, "worktree", "add", "-q", "-b", "beside", beside, "origin/main")
-	gone := filepath.Join(t.TempDir(), "gone")
+	service := filepath.Join(t.TempDir(), "services", "svc")
+	gitOut(t, checkout, "worktree", "add", "-q", "--detach", service, "origin/main")
+	if err := os.WriteFile(filepath.Join(service, "prod.db"), []byte("rows\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(checkout, ".claude", "worktrees", "gone")
 	gitOut(t, checkout, "worktree", "add", "-q", "-b", "gone", gone, "origin/main")
 	if err := os.RemoveAll(gone); err != nil {
 		t.Fatal(err)
@@ -383,14 +395,48 @@ func TestProjectWorktreesListsEachOnceAndSkipsWorkspaces(t *testing.T) {
 	if err != nil || len(unchecked) > 0 {
 		t.Fatalf("ProjectWorktrees: %v %v", err, unchecked)
 	}
-	want := map[string]bool{realPath(keep): true, realPath(beside): true}
-	if len(got) != len(want) {
-		t.Fatalf("ProjectWorktrees = %v; want %v", got, want)
+	if len(got) != 1 || realPath(got[0]) != realPath(inside) {
+		t.Fatalf("ProjectWorktrees = %v; want only %s", got, inside)
 	}
-	for _, g := range got {
-		if !want[realPath(g)] {
-			t.Errorf("unexpected %s in %v", g, got)
+}
+
+// bareLayout lays out the "bare repository plus worktrees" layout at
+// projects/app: the bare repository at app/<gitDir>, and the everyday checkout
+// at app/main, a linked worktree on main.
+func bareLayout(t *testing.T, projects, origin, gitDir string) (app, everyday string) {
+	t.Helper()
+	app = filepath.Join(projects, "app")
+	gitOut(t, "", "clone", "-q", "--bare", origin, filepath.Join(app, gitDir))
+	if gitDir != ".git" {
+		if err := os.WriteFile(filepath.Join(app, ".git"), []byte("gitdir: ./"+gitDir+"\n"), 0o666); err != nil {
+			t.Fatal(err)
 		}
+	}
+	everyday = filepath.Join(app, "main")
+	gitOut(t, app, "worktree", "add", "-q", everyday, "main")
+	return app, everyday
+}
+
+// With a bare repository, every working copy is a linked worktree, the
+// everyday one included, so the sweep offers none of them: whether the bare
+// repository sits in app/.bare, named by a .git file, or in app/.git itself
+// (facet#275). `facet reap <path>` still takes one by name.
+func TestProjectWorktreesSkipsABareLayout(t *testing.T) {
+	for _, gitDir := range []string{".bare", ".git"} {
+		t.Run(gitDir, func(t *testing.T) {
+			roots, _, origin := setup(t)
+			_, everyday := bareLayout(t, roots.Projects, origin, gitDir)
+			got, unchecked, err := ProjectWorktrees(gitx.Git{}, roots.Projects, roots.Workspaces)
+			if err != nil || len(unchecked) > 0 {
+				t.Fatalf("ProjectWorktrees: %v %v", err, unchecked)
+			}
+			if len(got) != 0 {
+				t.Fatalf("ProjectWorktrees = %v; want none: %s is the everyday checkout", got, everyday)
+			}
+			if _, err := InspectWorktree(everyday, gitx.Git{}, nil, nil); err != nil {
+				t.Errorf("reap by path no longer takes the worktree: %v", err)
+			}
+		})
 	}
 }
 
