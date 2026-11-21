@@ -7,6 +7,9 @@
 // directory it runs from breaks it at its next run (facet#234).
 //
 // Only the jobs `launchctl list` shows are considered: the user's own domain.
+// Their plists are read from the LaunchAgents folders, and a loaded job whose
+// plist sits anywhere else (`launchctl load ~/elsewhere/job.plist`) is found
+// through `launchctl print`, which names the file it was loaded from.
 // A plist that is not loaded starts nothing, so it holds nothing. Like the
 // probes in package mux, a missing tool is not a failure: off macOS there is
 // nothing to report.
@@ -89,22 +92,68 @@ func (j *Jobs) load() {
 	if len(loaded) == 0 {
 		return
 	}
+	found := map[string]bool{}
 	for _, d := range j.Dirs {
 		files, _ := filepath.Glob(filepath.Join(d, "*.plist"))
 		sort.Strings(files)
 		for _, f := range files {
-			raw, err := j.Run("plutil", "-convert", "xml1", "-o", "-", f)
-			if err != nil {
-				continue
+			if jb, ok := j.read(f, loaded); ok {
+				found[jb.label] = true
 			}
-			jb, err := parsePlist(raw)
-			if err != nil || !loaded[jb.label] {
-				continue
-			}
-			jb.plist = f
-			j.jobs = append(j.jobs, jb)
 		}
 	}
+	labels := make([]string, 0, len(loaded))
+	for l := range loaded {
+		labels = append(labels, l)
+	}
+	sort.Strings(labels)
+	for _, l := range labels {
+		if found[l] || !elsewhere(l) {
+			continue
+		}
+		if f := j.plistOf(l); f != "" {
+			j.read(f, map[string]bool{l: true})
+		}
+	}
+}
+
+// read parses the plist f and keeps its job when its label is loaded.
+func (j *Jobs) read(f string, loaded map[string]bool) (job, bool) {
+	raw, err := j.Run("plutil", "-convert", "xml1", "-o", "-", f)
+	if err != nil {
+		return job{}, false
+	}
+	jb, err := parsePlist(raw)
+	if err != nil || !loaded[jb.label] {
+		return job{}, false
+	}
+	jb.plist = f
+	j.jobs = append(j.jobs, jb)
+	return jb, true
+}
+
+// elsewhere reports whether a loaded label no folder matched is worth asking
+// launchctl about. Apple's own agents live under /System, and an app's
+// `application.*` jobs are launched without a plist: neither runs from a
+// workspace, and asking about each would cost a launchctl call apiece.
+func elsewhere(label string) bool {
+	return !strings.HasPrefix(label, "com.apple.") && !strings.HasPrefix(label, "application.")
+}
+
+// plistOf asks launchctl which file the loaded job label came from: the
+// "path = ..." line of `launchctl print gui/<uid>/<label>`. "" when it names
+// none (a job submitted without a plist) or launchctl cannot say.
+func (j *Jobs) plistOf(label string) string {
+	raw, err := j.Run("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), label))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if p, ok := strings.CutPrefix(line, "\tpath = "); ok && strings.HasSuffix(p, ".plist") {
+			return strings.TrimSpace(p)
+		}
+	}
+	return ""
 }
 
 // loadedLabels reads `launchctl list`: a header line, then PID, status and
