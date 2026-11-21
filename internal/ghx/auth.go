@@ -137,7 +137,7 @@ func tokenType(line string) string {
 //
 //   - A repair path that can leave the machine with no credential is the same
 //     class of fault as the incident. The 2026-07-27 swap script's
-//     install-failure fallback ran `gh auth logout` and left the mini with no
+//     install-failure fallback ran `gh auth logout` and left the machine with no
 //     credential for about 72 seconds. Its probe folds in here; its fallback
 //     does not, and must not be reintroduced.
 func (CLI) Auth() (*AuthStatus, error) { return parseAuthStatus(ghAuthStatus()) }

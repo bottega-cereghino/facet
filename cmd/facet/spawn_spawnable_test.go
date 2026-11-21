@@ -113,9 +113,9 @@ func TestSpawnStillReachesTheForgeForASpawnableRepo(t *testing.T) {
 	gh = &recordingGH{reached: &reached}
 	t.Cleanup(func() { gh = prevGH })
 
-	// Past ViewIssue, runSpawn goes on to create a workspace on disk (no
-	// --dry-run) and will fail for reasons unrelated to spawnable:false --
-	// that is expected and not what this test checks.
+	// A dry run stops before anything is written. Past ViewIssue it may still
+	// fail for reasons unrelated to spawnable:false -- that is expected and not
+	// what this test checks.
 	_ = runSpawn(spawnOpts{
 		Repo: "acme/gateway", Number: 1, DryRun: true,
 	})

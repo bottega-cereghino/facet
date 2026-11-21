@@ -1,6 +1,6 @@
 # Reap's refusal logic — a review
 
-**Issue: facet#83.** Ruled by the sculptor 2026-07-31: *"review the facet reap logic."*
+**Issue: facet#83.** Asked for by the author on 2026-07-31: *"review the facet reap logic."*
 Written after facet#77, facet#80 and facet#78, because a review of `proofLanded` written
 before them would have been a review of code that was about to change.
 
