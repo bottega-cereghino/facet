@@ -12,7 +12,8 @@
 // through `launchctl print`, which names the file it was loaded from.
 // A plist that is not loaded starts nothing, so it holds nothing. Like the
 // probes in package mux, a missing tool is not a failure: off macOS there is
-// nothing to report.
+// nothing to report. A launchctl that is there but fails is: it cannot say no
+// job runs from a directory, so Under returns the error and reap holds.
 package launchd
 
 import (
@@ -44,6 +45,8 @@ type Jobs struct {
 
 	once sync.Once
 	jobs []job
+	// err is why the loaded jobs could not be read; Under returns it.
+	err error
 }
 
 // job is one loaded job and the paths its plist runs it from.
@@ -71,9 +74,13 @@ func run(name string, args ...string) ([]byte, error) {
 }
 
 // Under describes each loaded job whose program, arguments or working
-// directory is dir or inside it, naming the job, the key and the plist.
+// directory is dir or inside it, naming the job, the key and the plist. It
+// fails when `launchctl list` does, unless launchctl is not installed.
 func (j *Jobs) Under(dir string) ([]string, error) {
 	j.once.Do(j.load)
+	if j.err != nil {
+		return nil, j.err
+	}
 	root := canonical(dir)
 	var out []string
 	for _, jb := range j.jobs {
@@ -88,7 +95,11 @@ func (j *Jobs) Under(dir string) ([]string, error) {
 }
 
 func (j *Jobs) load() {
-	loaded := j.loadedLabels()
+	loaded, err := j.loadedLabels()
+	if err != nil {
+		j.err = err
+		return
+	}
 	if len(loaded) == 0 {
 		return
 	}
@@ -157,11 +168,19 @@ func (j *Jobs) plistOf(label string) string {
 }
 
 // loadedLabels reads `launchctl list`: a header line, then PID, status and
-// label separated by tabs.
-func (j *Jobs) loadedLabels() map[string]bool {
+// label separated by tabs. A launchctl that is not installed loads nothing;
+// any other failure is an error, since no job could be ruled out.
+func (j *Jobs) loadedLabels() (map[string]bool, error) {
 	raw, err := j.Run("launchctl", "list")
+	if errors.Is(err, exec.ErrNotFound) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(bytes.TrimSpace(exit.Stderr)) > 0 {
+			return nil, fmt.Errorf("launchctl list: %w: %s", err, bytes.TrimSpace(exit.Stderr))
+		}
+		return nil, fmt.Errorf("launchctl list: %w", err)
 	}
 	labels := map[string]bool{}
 	for _, line := range strings.Split(string(raw), "\n") {
@@ -171,7 +190,7 @@ func (j *Jobs) loadedLabels() map[string]bool {
 		}
 		labels[strings.TrimSpace(f[2])] = true
 	}
-	return labels
+	return labels, nil
 }
 
 // parsePlist reads the keys of an XML plist's top-level dict that say where a
