@@ -485,6 +485,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` counts commits reachable from any local branch or HEAD and from no
   remote.** Unlike `@{u}..HEAD`, that also catches a branch which was never
   pushed at all — the branch most easily lost.
+- **`reap` sees every untracked and modified file whatever git's config says.**
+  Its status check names `--untracked-files=all` and `--ignore-submodules=none`,
+  so `status.showUntrackedFiles=no` cannot hide a new file from it
+  (`TestReapHoldsAnUntrackedFileTheConfigHides`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
   gh's "no pull requests found" counts as none; a repository gh cannot resolve
   (renamed, transferred, unreadable) holds the workspace
