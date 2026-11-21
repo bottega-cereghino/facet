@@ -86,7 +86,9 @@ platform   1        ok      812M   reapable
 It runs reap's own checks, so it fetches every clone and asks GitHub about
 open pull requests, and it is slower than a plain `ls`. The size counts disk
 blocks, and leaves out objects a clone shares with the mirror: deleting the
-workspace does not free those.
+workspace does not free those. On APFS it also leaves out the extents a file
+shares with a clone of it outside the workspace, such as a `node_modules` that
+pnpm cloned from its store, so it can be far below what `du` reports.
 
 ## Working from GitHub issues
 
@@ -302,6 +304,16 @@ and leaves every held workspace alone. It never forces, and it checks each
 workspace again just before deleting it, so work started while the prompt
 waited is not lost. `facet ls --size` shows the same list without deleting.
 
+`reap` also takes a plain git worktree: one made with `git worktree add`, by
+hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
+`facet reap <path>` refuses while it has uncommitted or untracked files,
+commits only its HEAD reaches, an open pull request for its branch, or a
+process, tmux pane or launchd job inside it, then removes it with
+`git worktree remove`. Its branches stay in the checkout. `--reapable` adds
+every reapable worktree of the checkouts directly under `~/Projects`, named by
+its path; the worktree clones of a workspace go only with their workspace, and
+`reap` refuses one named on its own.
+
 `facet prune` frees the disk a workspace keeps without deleting it: the
 directories in its clones that one command rebuilds (`node_modules`, `.venv`
 and the tool caches). It lists what each workspace would free and deletes only
@@ -510,6 +522,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   forgets it, and never touches the checkout's own files or branches
   (`TestWorktreeCloneIsNotHeldByWhatTheCheckoutKeeps`,
   `TestReapRemovesTheWorktreeAndLeavesTheCheckout`).
+- **`reap` never deletes a checkout.** Given a directory with no manifest, it
+  acts only when that is a linked worktree, and removes it through git, which
+  keeps the repository and every branch (`TestInspectWorktreeRefusesACheckout`,
+  `TestReapRemovesAPlainWorktreeAndKeepsItsBranch`).
 - **`reap` never touches the mirror.** Deleting a hardlinked object drops that
   name; the mirror keeps its own, with its mode: reap changes no file's mode,
   only a directory's, to empty a read-only one

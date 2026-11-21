@@ -81,6 +81,9 @@ type IssueState struct {
 	Dir   string
 	Name  string
 	Issue *manifest.Issue
+	// Worktree marks a plain linked worktree reaped on its own, not a
+	// workspace: Dir is the worktree, and Clone holds it as its one entry.
+	Worktree bool
 	// Enclosing is the top level of a repository the workspace directory sits
 	// inside (~/Workspaces is one), or "" when there is none.
 	Enclosing string
@@ -307,18 +310,24 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 	if mux != nil {
 		st.SessionLive = mux.Live(filepath.Base(ws))
 	}
+	st.checkRunning(ws, mux)
+	st.SizeBytes = freedBytes(ws)
+	return st
+}
+
+// checkRunning records the panes, processes and launchd jobs running from dir,
+// asked through mux's optional interfaces.
+func (s *IssueState) checkRunning(dir string, mux LiveChecker) {
 	if lr, ok := mux.(LiveRootChecker); ok {
-		if roots, err := lr.LiveRoots(ws); err == nil {
-			st.LiveRoots = roots
+		if roots, err := lr.LiveRoots(dir); err == nil {
+			s.LiveRoots = roots
 		}
 	}
 	if jc, ok := mux.(JobChecker); ok {
-		if jobs, err := jc.JobsUnder(ws); err == nil {
-			st.Jobs = jobs
+		if jobs, err := jc.JobsUnder(dir); err == nil {
+			s.Jobs = jobs
 		}
 	}
-	st.SizeBytes = freedBytes(ws)
-	return st
 }
 
 // ownFiles are facet's own files at a workspace root. Deleting the workspace
@@ -819,6 +828,9 @@ func Reap(st *IssueState, git gitx.Runner) error {
 		if err := os.Chdir(filepath.Dir(st.Dir)); err != nil {
 			return fmt.Errorf("step out of %s before deleting it: %w", st.Dir, err)
 		}
+	}
+	if st.Worktree {
+		return removeWorktree(git, st.Clone[0].WorktreeOf, st.Dir)
 	}
 	for _, c := range st.Clone {
 		if c.WorktreeOf == "" {

@@ -151,3 +151,87 @@ func removeWorktree(git gitx.Runner, checkout, dir string) error {
 	}
 	return nil
 }
+
+// InspectWorktree gathers the state of a plain linked worktree, one made by
+// `git worktree add` by hand or by an agent (Claude Code keeps its own under
+// .claude/worktrees), for reap. It is judged as a worktree clone is: by its
+// uncommitted files and the commits only its HEAD reaches. Its branch's pull
+// request is looked up too, since a worktree is usually one pull request's
+// work. A directory that is a repository of its own is refused: reap never
+// deletes a checkout.
+func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) (*IssueState, error) {
+	of, err := worktreeOf(git, dir)
+	if err != nil {
+		return nil, fmt.Errorf("%s: cannot tell whether it is a worktree: %w", dir, err)
+	}
+	if of == "" {
+		return nil, fmt.Errorf("%s is neither a workspace nor a linked worktree: it has a repository of its own, and reap never deletes a checkout\n"+
+			"fix: name a workspace, or a worktree that `git worktree list` shows", dir)
+	}
+	repo, clonePR := githubRepo(gitx.Origin(git, dir)), pr
+	if repo == "" {
+		clonePR = nil
+	}
+	c := inspectClone(git, filepath.Base(dir), dir, repo, clonePR)
+	st := &IssueState{Dir: dir, Name: filepath.Base(dir), Worktree: true, Clone: []CloneState{c}}
+	if clonePR != nil && c.Branch != "" && c.Branch != "HEAD" {
+		// As for an issue workspace: a lookup that fails is not "no PR".
+		if found, err := clonePR.ViewPR(repo, c.Branch); err == nil {
+			st.PR = found
+		} else {
+			st.PRUnknown = true
+		}
+	}
+	st.checkRunning(dir, mux)
+	st.SizeBytes = freedBytes(dir)
+	return st, nil
+}
+
+// ProjectWorktrees lists the linked worktrees of the repositories directly
+// under projects, each once, leaving out those under skip (a workspace's
+// worktree clones are reaped with their workspace) and those whose directory
+// is gone (`git worktree prune` forgets them). A checkout git cannot list is
+// named in unchecked.
+func ProjectWorktrees(git gitx.Runner, projects, skip string) (out, unchecked []string, err error) {
+	entries, err := os.ReadDir(projects)
+	if err != nil {
+		return nil, nil, err
+	}
+	skipReal := realPath(skip)
+	seen := map[string]bool{}
+	for _, e := range entries {
+		dir := filepath.Join(projects, e.Name())
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || !gitx.IsRepo(dir) {
+			continue
+		}
+		list, err := git.Run(dir, nil, "worktree", "list", "--porcelain")
+		if err != nil {
+			unchecked = append(unchecked, fmt.Sprintf("%s: git worktree list failed: %v", dir, err))
+			continue
+		}
+		for _, wt := range linkedWorktrees(list) {
+			key := realPath(wt)
+			if seen[key] || (skipReal != "" && isUnder(skipReal, key)) {
+				continue
+			}
+			seen[key] = true
+			if fi, err := os.Stat(wt); err != nil || !fi.IsDir() {
+				continue
+			}
+			out = append(out, wt)
+		}
+	}
+	return out, unchecked, nil
+}
+
+// realPath resolves symlinks in p, so two spellings of one directory compare
+// equal (/var and /private/var on macOS); p itself when it cannot.
+func realPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
