@@ -13,6 +13,10 @@ release-please writes each entry from the Conventional Commit titles on `main`
 
 * **reap:** --dry-run prints what --reapable would delete and stops ([#263](https://github.com/bottega-cereghino/facet/issues/263)) ([d8274de](https://github.com/bottega-cereghino/facet/commit/d8274dee10a905dd93d643d38d93ae56f5a20c85))
 
+### Removed
+
+* The Windows code paths, unsupported since July: facet no longer builds for Windows ([#262](https://github.com/bottega-cereghino/facet/issues/262))
+
 ## [0.6.1](https://github.com/bottega-cereghino/facet/compare/v0.6.0...v0.6.1) (2026-11-21)
 
 
