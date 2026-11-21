@@ -8,7 +8,8 @@ import (
 	"github.com/bottega-cereghino/facet/internal/gitx"
 )
 
-// fetchRemotes fetches every remote of the repository at dir with --prune, each
+// fetchRemotes fetches every remote of the repository at dir with --prune, into
+// refs/remotes/<name>/ and nowhere else, each
 // bounded by fetchTimeout where the Runner supports it, and returns the ones
 // that could not be fetched. The unpushed count subtracts every remote's refs,
 // so each must be fresh: a branch pushed to a fork and deleted there since
@@ -23,7 +24,12 @@ func fetchRemotes(git gitx.Runner, dir string) (stale []string, err error) {
 		return nil, err
 	}
 	for _, name := range strings.Fields(out) {
-		args := []string{"fetch", "--prune", "--", name}
+		// The refspec is explicit: a remote's own may write outside
+		// refs/remotes (`remote add --mirror=fetch` writes refs/heads), and
+		// --prune would then delete every local branch the remote lacks. This
+		// one also refreshes every branch of the remote, so a narrowed refspec
+		// cannot leave a stale ref that reads as pushed.
+		args := []string{"fetch", "--prune", "--", name, "+refs/heads/*:refs/remotes/" + name + "/*"}
 		if tr, ok := git.(timeoutRunner); ok {
 			_, err = tr.RunTimeout(dir, nil, fetchTimeout, args...)
 		} else {

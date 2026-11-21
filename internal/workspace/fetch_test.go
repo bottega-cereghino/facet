@@ -129,3 +129,31 @@ func TestSharedFetchFetchesEachRepositoryOnce(t *testing.T) {
 		}
 	}
 }
+
+// A remote whose configured refspec writes into refs/heads (`git remote add
+// --mirror=fetch`) deletes, under --prune, every local branch it lacks: the
+// inspection itself, a dry run included, would delete the only copy of a
+// commit and then count nothing unpushed. Reap fetches into refs/remotes only,
+// whatever the remote's refspec says (facet#321).
+func TestReapsFetchNeverWritesOutsideRefsRemotes(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	mirror := filepath.Join(t.TempDir(), "mirror.git")
+	gitOut(t, "", "init", "-q", "--bare", mirror)
+	gitOut(t, clone, "remote", "add", "--mirror=fetch", "mirror", mirror)
+	gitOut(t, clone, "switch", "-q", "-c", "wip")
+	writeTestFile(t, filepath.Join(clone, "wip.txt"), "only copy\n")
+	gitOut(t, clone, "add", "wip.txt")
+	gitOut(t, clone, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "wip")
+	gitOut(t, clone, "switch", "-q", "--detach", "HEAD~1")
+
+	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (gitx.Git{}).Run(clone, nil, "rev-parse", "--verify", "refs/heads/wip"); err != nil {
+		t.Fatalf("inspecting the workspace deleted branch wip, the only copy of a commit: %v", err)
+	}
+	if !hasBlocker(st, "1 unpushed commit") {
+		t.Errorf("branch wip's commit is not held: %v", st.Blockers())
+	}
+}
