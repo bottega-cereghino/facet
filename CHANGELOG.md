@@ -6,6 +6,18 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.1](https://github.com/bottega-cereghino/facet/compare/v0.7.0...v0.7.1) (2026-11-21)
+
+
+### Fixed
+
+* **prune:** keep a rebuildable directory when nothing tracked beside it rebuilds it ([#280](https://github.com/bottega-cereghino/facet/issues/280)) ([491f69e](https://github.com/bottega-cereghino/facet/commit/491f69ed705e779ea32c80ac1fbbfb18e9ad73f0))
+* **reap:** a failed launchctl list holds the workspace instead of reading as no jobs ([#279](https://github.com/bottega-cereghino/facet/issues/279)) ([454c281](https://github.com/bottega-cereghino/facet/commit/454c2813fcbf4182dd2b46efb28b2a02be5577a6))
+* **reap:** check again after the prompt, as --reapable does ([#282](https://github.com/bottega-cereghino/facet/issues/282)) ([b0a4c95](https://github.com/bottega-cereghino/facet/commit/b0a4c9575ebd4ed919abbb3af2353873e64de9f5))
+* **reap:** hold on a worktree nested inside a worktree clone or a plain worktree ([#281](https://github.com/bottega-cereghino/facet/issues/281)) ([e99ae0f](https://github.com/bottega-cereghino/facet/commit/e99ae0f3a8d9da8826f81136c56d4d787fc95e0c))
+* **reap:** read untracked files and dirty submodules whatever the git config says ([#278](https://github.com/bottega-cereghino/facet/issues/278)) ([11380cc](https://github.com/bottega-cereghino/facet/commit/11380cccc05820b98e41c029b1a3ccf604cf0e8f))
+* **reap:** refuse a folder inside a workspace or a worktree, instead of deleting it alone ([#283](https://github.com/bottega-cereghino/facet/issues/283)) ([fe65a10](https://github.com/bottega-cereghino/facet/commit/fe65a10921c3c5c4414f8e64b7889e7f8155c8ae))
+
 ## [0.7.0](https://github.com/bottega-cereghino/facet/compare/v0.6.1...v0.7.0) (2026-11-21)
 
 
