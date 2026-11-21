@@ -9,7 +9,9 @@ than working around it.
 Three things worth knowing before you open a pull request:
 
 - **Run `make check`.** It is every gate CI's first tier runs, target for
-  target, so a green run locally means a green run there.
+  target. Green locally is not quite green there: the privacy guard skips
+  without a word list (CI has one; a pull request from a fork does not, so
+  its `linux` job fails on the guard until a maintainer runs it).
 - **This repository is public.** No private repository names and no issue
   references an outside reader cannot follow. Keep the reasoning, drop the
   coordinate — `docs/CODE.md` section 8 has the detail.
