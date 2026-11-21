@@ -157,11 +157,16 @@ func newReapCmd() *cobra.Command {
 			if l := mux.Pick(); l != nil {
 				_ = l.Kill(filepath.Base(st.Dir))
 			}
-			if err := workspace.Reap(st); err != nil {
+			if err := workspace.Reap(st, git); err != nil {
 				return err
 			}
 			fmt.Printf("removed %s\n", st.Dir)
 			fmt.Println("the shared mirror was not touched.")
+			for _, c := range st.Clone {
+				if c.WorktreeOf != "" {
+					fmt.Printf("%s was a worktree of %s; its branches stay there.\n", c.Dir, c.WorktreeOf)
+				}
+			}
 			if st.Enclosing != "" {
 				fmt.Printf("its tracked files are now deletions in %s; commit them there.\n", st.Enclosing)
 			}

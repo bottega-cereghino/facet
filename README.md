@@ -382,8 +382,29 @@ Both are also true of the failure path, and `preflight` works with no workspaces
 root and a broken config: the thing you reach for when the lab is wrong cannot
 require the lab to be right.
 
+## A checkout you already have becomes a worktree
+
+When `~/Projects` already holds a checkout of a repository a workspace
+declares, `sync`, `restore` and `spawn` add a git worktree of that checkout
+instead of cloning again. The workspace then costs its working tree and
+nothing more: no second `.git`, and no mirror to keep in step.
+
+- The checkout is `~/Projects/<name>` or `~/Projects/<repository>`, and is
+  used only when its `origin` is the clone's URL. A directory of that name
+  tracking another repository is left alone, and the clone is made as below.
+- facet fetches `origin` there and adds the worktree on a detached HEAD at the
+  default branch; `spawn` then puts the home clone on the issue branch. The
+  checkout's own branch, index and files are never touched, so it stays on
+  `main`. A local branch of the issue's name that holds commits origin lacks
+  makes `spawn` refuse rather than reset it.
+- A worktree shares the checkout's branches, stash, remotes and hooks. A
+  branch made in the workspace is a branch of the checkout, and stays there
+  after `reap`.
+- `--no-worktree` clones every repository, as before.
+
 ## Mirrors make the clones cheap
 
+A repository with no checkout under `~/Projects` is cloned.
 `facet sync --via-mirror`, and every `facet spawn`, clones from a bare mirror under
 `~/Projects/.mirrors/` rather than from the forge. Git hardlinks `.git/objects`
 when cloning from a local path, so a second workspace over the same repository
@@ -429,7 +450,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`sync` writes only inside the workspace.** A clone or link key must be one
   directory name and a link target a folder under the projects root; a manifest
   naming `../x`, `a/b` or `/abs` is refused when it is read, before anything is
-  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`).
+  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`). The one
+  write outside it is git's own, in a checkout a clone becomes a worktree of:
+  a fetch of `origin`, and the worktree's entry in that checkout's `.git`.
 - **A manifest URL is never read as a git option.** Every git call that takes a
   URL, path or remote name from the manifest puts `--` before it, so a URL such
   as `--upload-pack=<command>` is looked up as a repository and fails
@@ -458,6 +481,13 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`.
+- **`reap` judges a worktree clone by what removing it loses**: its
+  uncommitted files and the commits only its HEAD reaches. The checkout's
+  other branches, its stash and its other worktrees stay where they are, so
+  they do not hold it. It removes the worktree through git, so the checkout
+  forgets it, and never touches the checkout's own files or branches
+  (`TestWorktreeCloneIsNotHeldByWhatTheCheckoutKeeps`,
+  `TestReapRemovesTheWorktreeAndLeavesTheCheckout`).
 - **`reap` never touches the mirror.** Deleting a hardlinked object drops that
   name; the mirror keeps its own, with its mode: reap changes no file's mode,
   only a directory's, to empty a read-only one

@@ -27,6 +27,12 @@ type CloneState struct {
 	// which read only the main worktree, and deleting the clone deletes their
 	// repository. Non-empty is a blocker.
 	Worktrees []string
+	// WorktreeOf is the checkout this clone is a linked worktree of, or "" for
+	// a clone with a repository of its own. A worktree shares its branches,
+	// stashes and other worktrees with that checkout, and they stay there when
+	// the worktree is removed, so only what removing it loses is judged: its
+	// uncommitted files and the commits only its HEAD reaches.
+	WorktreeOf string
 	// Unpushed counts commits reachable from HEAD or any local branch that no
 	// remote has *and* whose content is not proven to have already landed on
 	// the remote's default branch (see proofLanded). This deliberately covers
@@ -451,16 +457,30 @@ func capLoose(loose []string) []string {
 func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState {
 	c := CloneState{Dir: dir}
 
+	// A probe that fails leaves WorktreeOf empty, so the clone is judged as a
+	// repository of its own: the stricter reading, which holds on every
+	// branch and stash the repository has.
+	if of, err := worktreeOf(git, p); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell whether it is a worktree: %v", err))
+	} else {
+		c.WorktreeOf = of
+	}
+	own := c.WorktreeOf == ""
+
 	if out, err := git.Run(p, nil, "status", "--porcelain"); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git status failed: %v", err))
 	} else {
 		c.Dirty = strings.TrimSpace(out) != ""
 	}
 
-	if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
-		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
-	} else {
-		c.Worktrees = linkedWorktrees(out)
+	// A worktree's siblings, the checkout's own included, belong to the
+	// checkout's repository, which removing this one leaves in place.
+	if own {
+		if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
+			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
+		} else {
+			c.Worktrees = linkedWorktrees(out)
+		}
 	}
 
 	// The branch name is informational only, so a failure here is not a safety
@@ -490,7 +510,14 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 	// no branch at all -- is counted too; a branch that was never pushed has all
 	// of its commits counted. This is a cheap fast-path check: the common case
 	// is 0, and only then is the more expensive per-ref landing proof run.
-	if out, err := git.Run(p, nil, "rev-list", "--count", "HEAD", "--branches", "--not", "--remotes"); err != nil {
+	//
+	// In a worktree, --branches would be the checkout's branches, which outlive
+	// the worktree, so only HEAD is counted there.
+	countArgs := []string{"rev-list", "--count", "HEAD", "--branches", "--not", "--remotes"}
+	if !own {
+		countArgs = []string{"rev-list", "--count", "HEAD", "--not", "--remotes"}
+	}
+	if out, err := git.Run(p, nil, countArgs...); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git rev-list failed: %v", err))
 	} else if _, err := strconv.Atoi(strings.TrimSpace(out)); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not read the unpushed-commit count: %v", err))
@@ -503,7 +530,7 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		if pr != nil {
 			commitPR, _ = pr.(CommitPRLookup)
 		}
-		if unpushed, landed, defUnresolved, err := unpushedLanding(git, p, repo, commitPR); err != nil {
+		if unpushed, landed, defUnresolved, err := unpushedLanding(git, p, repo, commitPR, !own); err != nil {
 			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not verify unpushed commits: %v", err))
 		} else {
 			c.Unpushed = unpushed
@@ -512,6 +539,10 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		}
 	}
 
+	// A worktree's stash belongs to the checkout's repository and stays with it.
+	if !own {
+		return c
+	}
 	if out, err := git.Run(p, nil, "stash", "list"); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git stash list failed: %v", err))
 	} else {
@@ -545,20 +576,31 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 // only copy of one commit was told three commits were at risk (facet#77). The
 // classification is still per ref, because "landed" is a property of the ref
 // that was proven, not of an individual sha; only the accounting is a set.
-func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup) (unpushed, landed int, defUnresolved bool, err error) {
+//
+// headOnly walks HEAD alone: in a linked worktree the local branches are the
+// checkout's, and they outlive the worktree.
+func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup, headOnly bool) (unpushed, landed int, defUnresolved bool, err error) {
 	def := remoteDefaultBranch(git, dir)
 
 	current, detached, err := currentRef(git, dir)
 	if err != nil {
 		return 0, 0, false, err
 	}
-	refsOut, err := git.Run(dir, nil, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-	if err != nil {
-		return 0, 0, false, err
-	}
-	refs := strings.Fields(refsOut)
-	if detached {
-		refs = append(refs, "HEAD")
+	var refs []string
+	switch {
+	case headOnly && detached:
+		refs = []string{"HEAD"}
+	case headOnly:
+		refs = []string{current}
+	default:
+		refsOut, err := git.Run(dir, nil, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+		if err != nil {
+			return 0, 0, false, err
+		}
+		refs = strings.Fields(refsOut)
+		if detached {
+			refs = append(refs, "HEAD")
+		}
 	}
 
 	unpushedShas := map[string]struct{}{}
@@ -765,7 +807,10 @@ func ListIssues(roots config.Roots, git gitx.Runner, pr PRLookup, mux LiveChecke
 //
 // Callers must check Blockers() first; Reap does not, so that --force has
 // somewhere to go.
-func Reap(st *IssueState) error {
+//
+// A clone that is a worktree of a checkout is removed through that checkout
+// first, so the checkout forgets it; its branch stays there.
+func Reap(st *IssueState, git gitx.Runner) error {
 	// Windows will not remove a directory that is some process's working
 	// directory -- and reap is meant to be run from inside the workspace it
 	// deletes. Step out first, or the tree is half-removed and the error blames
@@ -773,6 +818,14 @@ func Reap(st *IssueState) error {
 	if wd, err := os.Getwd(); err == nil && isUnder(st.Dir, wd) {
 		if err := os.Chdir(filepath.Dir(st.Dir)); err != nil {
 			return fmt.Errorf("step out of %s before deleting it: %w", st.Dir, err)
+		}
+	}
+	for _, c := range st.Clone {
+		if c.WorktreeOf == "" {
+			continue
+		}
+		if err := removeWorktree(git, c.WorktreeOf, filepath.Join(st.Dir, c.Dir)); err != nil {
+			return err
 		}
 	}
 	return removeAllForce(st.Dir)

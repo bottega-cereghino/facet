@@ -18,6 +18,7 @@ func newSpawnCmd() *cobra.Command {
 		base      string
 		yes       bool
 		noBranch  bool
+		noWT      bool
 		dryRun    bool
 		writeback bool
 		launchF   launchFlags
@@ -27,7 +28,8 @@ func newSpawnCmd() *cobra.Command {
 		Short: "Create an ephemeral workspace for one GitHub issue",
 		Long: "Reads the issue, works out which repositories it needs, shows you why, and\n" +
 			"waits. On confirmation it creates an issue-linked branch, clones each repo\n" +
-			"from the local mirror, and writes a CLAUDE.md carrying the issue body and the\n" +
+			"from the local mirror (or adds a worktree of its checkout under the projects\n" +
+			"root, when there is one; --no-worktree clones), and writes a CLAUDE.md carrying the issue body and the\n" +
 			"durable hazards recorded for its areas.\n\n" +
 			"It records the issues the workspace covers in .scope, one per line: the\n" +
 			"spawned issue first, then any --scope. `facet scope` reads and amends it.\n\n" +
@@ -51,7 +53,7 @@ func newSpawnCmd() *cobra.Command {
 			return runSpawn(spawnOpts{
 				Number: number, Repo: repo, Clones: clones, Add: addClones, Remove: rmClones,
 				Scope: scope,
-				Slug:  slug, Base: base, Yes: yes, NoBranch: noBranch, DryRun: dryRun,
+				Slug:  slug, Base: base, Yes: yes, NoBranch: noBranch, DryRun: dryRun, NoWorktree: noWT,
 				Writeback: writeback, Launch: l,
 			})
 		},
@@ -66,6 +68,7 @@ func newSpawnCmd() *cobra.Command {
 	f.StringVar(&base, "base", "", "base branch for the issue branch (default: the repository's default branch, which gh looks up)")
 	f.BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	f.BoolVar(&noBranch, "no-branch", false, "do not create or check out an issue branch")
+	f.BoolVar(&noWT, noWorktreeFlag, false, noWorktreeHelp)
 	f.BoolVar(&dryRun, "dry-run", false, "show the inference and exit, creating nothing")
 	f.BoolVar(&writeback, "writeback", false,
 		"record the confirmed repo set in the issue body (default: off -- a wrong "+
@@ -84,6 +87,9 @@ type spawnOpts struct {
 	Scope                 []string
 	Slug, Base            string
 	Yes, NoBranch, DryRun bool
+	// NoWorktree clones every repository, even one checked out under the
+	// projects root, which is otherwise added as a worktree of that checkout.
+	NoWorktree bool
 	// Writeback records the confirmed repo set in the issue body when true.
 	// Default is false (facet#69): a wrong inference used to write to
 	// someone else's issue silently, on by default. Leaving it off means the

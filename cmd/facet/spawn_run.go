@@ -160,7 +160,7 @@ func runSpawn(o spawnOpts) error {
 	}
 	rep.Created("%s: %s", scope.ScopeFile, scope.Join(scopeRefs))
 
-	if err := workspace.Sync(roots, ws, git, rep, workspace.SyncOptions{Source: sourceFor(true, rep)}); err != nil {
+	if err := workspace.Sync(roots, ws, git, rep, workspace.SyncOptions{Source: sourceFor(true, rep), Worktrees: !o.NoWorktree}); err != nil {
 		return err
 	}
 
@@ -310,9 +310,20 @@ func missingClones(ws string) ([]string, error) {
 
 // checkoutIssueBranch fetches the branch explicitly, because the mirror may have
 // been created before `gh issue develop` pushed it.
+//
+// A fresh clone has no local branch of that name, but a worktree shares the
+// checkout's branches, and `checkout -B` resets one that exists. That is safe
+// only when the local branch holds nothing origin's lacks, so anything else
+// refuses rather than drop the checkout's commits.
 func checkoutIssueBranch(dir, branch string) error {
 	if _, err := git.Run(dir, nil, "fetch", "--", "origin", branch); err != nil {
 		return err
+	}
+	if _, err := git.Run(dir, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+		if _, err := git.Run(dir, nil, "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/origin/"+branch); err != nil {
+			return fmt.Errorf("the local branch %s has commits origin/%s does not, and checking it out here would reset it\n"+
+				"fix: push or rename that branch in %s, or spawn again with --no-worktree", branch, branch, dir)
+		}
 	}
 	_, err := git.Run(dir, nil, "checkout", "-B", branch, "--track", "origin/"+branch)
 	return err

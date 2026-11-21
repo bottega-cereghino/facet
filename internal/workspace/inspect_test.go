@@ -181,7 +181,7 @@ func TestReapRemovesALinkAndLeavesItsTarget(t *testing.T) {
 	if b := st.Blockers(); len(b) != 0 {
 		t.Fatalf("a link must not hold the workspace, got %v", b)
 	}
-	if err := Reap(st); err != nil {
+	if err := Reap(st, gitx.Git{}); err != nil {
 		t.Fatalf("Reap: %v", err)
 	}
 	if _, err := os.Stat(ws); !os.IsNotExist(err) {
