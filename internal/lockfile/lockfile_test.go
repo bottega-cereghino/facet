@@ -141,3 +141,110 @@ func TestCreateLock(t *testing.T) {
 	}
 	_ = f2.Close()
 }
+
+// A holder that stalls past StaleAge can have its lock broken and taken by a
+// successor. Its release must then leave the successor's lock in place, or a
+// third process could take the lock beside the successor.
+func TestReleaseLeavesASuccessorsLock(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "x.lock")
+	err := With(lock, Options{}, func() error {
+		// What a waiter that broke this lock, and then took it, leaves behind.
+		if err := os.Remove(lock); err != nil {
+			return err
+		}
+		return os.WriteFile(lock, []byte("successor\n"), 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(lock)
+	if err != nil {
+		t.Fatalf("release removed the successor's lock: %v", err)
+	}
+	if string(b) != "successor\n" {
+		t.Errorf("lock holds %q, want the successor's", b)
+	}
+}
+
+// Two waiters can judge the same lock stale. When the second comes to break
+// it, the first may already have broken it and created its own fresh lock at
+// the same path; breakStale must leave that lock, the same file, in place.
+func TestBreakStaleLeavesAFreshLock(t *testing.T) {
+	dir := t.TempDir()
+	lock := filepath.Join(dir, "x.lock")
+	if err := os.WriteFile(lock, []byte("pid 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first waiter breaks the stale lock and takes its own.
+	if err := os.Remove(lock); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lock, []byte("first waiter\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if breakStale(lock, stale, time.Minute) {
+		t.Error("breakStale reported breaking a lock that was not the stale one")
+	}
+	now, err := os.Stat(lock)
+	if err != nil {
+		t.Fatalf("the first waiter's fresh lock was removed: %v", err)
+	}
+	if !os.SameFile(now, fresh) {
+		t.Error("the lock at the path is no longer the first waiter's file")
+	}
+	assertOnlyLock(t, dir)
+}
+
+// The stale file itself is removed, with nothing left beside it.
+func TestBreakStaleRemovesTheStaleLock(t *testing.T) {
+	dir := t.TempDir()
+	lock := filepath.Join(dir, "x.lock")
+	if err := os.WriteFile(lock, []byte("pid 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := os.Stat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !breakStale(lock, stale, time.Minute) {
+		t.Error("breakStale did not break a stale lock")
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Errorf("stale lock survived: %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("breakStale left %d files behind", len(entries))
+	}
+}
+
+func assertOnlyLock(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "x.lock" {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("want only x.lock in the directory, got %v", names)
+	}
+}

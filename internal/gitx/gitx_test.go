@@ -3,6 +3,7 @@ package gitx
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -103,5 +104,25 @@ func TestRunKeepsLeadingWhitespace(t *testing.T) {
 	}
 	if out != " M a\x00" && out != " M a" {
 		t.Errorf("status = %q, want the status column kept: \" M a\"", out)
+	}
+}
+
+// A manifest URL is user-authored. One that begins with `--` must reach git as
+// a repository, never as an option: `--upload-pack=<command>` would run the
+// command. With the `--` in Clone, git looks for a repository by that name and
+// finds none; without it, git reads the URL as an option and dst as the source.
+func TestCloneTakesAURLStartingWithDashesAsARepository(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	src := "--upload-pack=touch " + marker + "; git-upload-pack"
+	err := Clone(Git{}, src, filepath.Join(dir, "dst"), CloneOptions{})
+	if err == nil {
+		t.Fatal("Clone succeeded from a URL that names no repository")
+	}
+	if want := "repository '" + src + "' does not exist"; !strings.Contains(err.Error(), want) {
+		t.Errorf("git did not read the URL as a repository\nwant an error containing %q\ngot %v", want, err)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Errorf("the URL ran as a command: %s exists", marker)
 	}
 }

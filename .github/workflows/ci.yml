@@ -19,17 +19,6 @@ env:
   GIT_AUTHOR_EMAIL: ci@facet.invalid
   GIT_COMMITTER_NAME: facet CI
   GIT_COMMITTER_EMAIL: ci@facet.invalid
-  # The organisation-name guard (internal/privacy) must not carry an employer's
-  # internal names in this public repo, so its word list is supplied
-  # out-of-band as a secret rather than committed. With the secret set, the
-  # guard runs; unset, the guard fails in CI (CI=true) rather than passing green
-  # having checked nothing. Define it under repo Settings -> Secrets and
-  # variables -> Actions as a comma-separated list.
-  #
-  # Workflow-level, not job-level: the guard runs wherever `go test` runs, so
-  # every tier needs it. Scoping it to the Linux job made the other two fail
-  # closed, which is the guard behaving correctly and the workflow being wrong.
-  FACET_DENYLIST: ${{ secrets.FACET_DENYLIST }}
 
 # Third-party actions are pinned to full-length commit SHAs, per GitHub's
 # hardening guidance. A tag is mutable: `@v4` is a promise the upstream owner
@@ -73,7 +62,18 @@ jobs:
       - run: make fmt
       - run: make vet
       - run: make lint
+      # The organisation-name guard (internal/privacy) must not carry an
+      # employer's internal names in this public repo, so its word list is a
+      # secret (Settings -> Secrets and variables -> Actions, comma-separated)
+      # rather than committed. With it set, the guard runs; unset, the guard
+      # fails in CI (CI=true) rather than passing green having checked nothing.
+      #
+      # The secret reaches this one step and macos's test step: the guard is a
+      # Go test, so only `make test` needs it, and no other step or action is
+      # handed it.
       - run: make test
+        env:
+          FACET_DENYLIST: ${{ secrets.FACET_DENYLIST }}
       - run: make tidy
       - run: make vuln
 
@@ -127,7 +127,9 @@ jobs:
           go-version: '1.25' # newest patch of the series; see the linux job
           check-latest: true
       - run: make build
-      - run: make test
+      - run: make test # the word list, as in the linux job
+        env:
+          FACET_DENYLIST: ${{ secrets.FACET_DENYLIST }}
 
   # renovate.json must pass Renovate's own validator. The image is the Renovate
   # release that holds it, pinned by tag and digest; Renovate moves it like any
@@ -143,10 +145,6 @@ jobs:
       # The checkout writes into the runner workspace, which the image user
       # cannot write.
       options: --user root
-    # The validator needs no secret, so the workflow-level word list is not
-    # handed to a third-party image.
-    env:
-      FACET_DENYLIST: ''
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:

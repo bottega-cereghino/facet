@@ -199,7 +199,7 @@ func (s *Store) Update(raw string) (string, error) {
 			// mirror can also write paths past Windows' MAX_PATH.
 			if _, err := s.Git.Run("", nil,
 				"-c", "core.longpaths=true", "clone", "--mirror",
-				"-c", "core.longpaths=true", raw, tmp,
+				"-c", "core.longpaths=true", "--", raw, tmp, // `--`: raw is never an option
 			); err != nil {
 				_ = os.RemoveAll(tmp) // never leave a partial clone behind
 				return fmt.Errorf("mirror clone %s: %w", raw, err)

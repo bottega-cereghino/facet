@@ -316,7 +316,7 @@ func missingClones(ws string) ([]string, error) {
 // only when the local branch holds nothing origin's lacks, so anything else
 // refuses rather than drop the checkout's commits.
 func checkoutIssueBranch(dir, branch string) error {
-	if _, err := git.Run(dir, nil, "fetch", "origin", branch); err != nil {
+	if _, err := git.Run(dir, nil, "fetch", "--", "origin", branch); err != nil {
 		return err
 	}
 	if _, err := git.Run(dir, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
