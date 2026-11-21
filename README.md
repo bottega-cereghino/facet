@@ -302,7 +302,8 @@ only copy. Links are removed, never followed, so their targets are untouched.
 delete now. It lists them with the disk each frees and the total, asks once,
 and leaves every held workspace alone. It never forces, and it checks each
 workspace again just before deleting it, so work started while the prompt
-waited is not lost. `facet ls --size` shows the same list without deleting.
+waited is not lost. `--dry-run` prints the list, worktrees included, and stops
+there; `facet ls --size` shows the workspaces without deleting.
 
 `reap` also takes a plain git worktree: one made with `git worktree add`, by
 hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
@@ -514,7 +515,8 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestPruneChecksAgainBeforeDeleting`, `TestPruneDoesNotFollowASwappedParent`).
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
-  It refuses `--force`.
+  It refuses `--force`, and with `--dry-run` it deletes nothing
+  (`TestReapReapableDryRunDeletesNothing`).
 - **`reap` judges a worktree clone by what removing it loses**: its
   uncommitted files and the commits only its HEAD reaches. The checkout's
   other branches, its stash and its other worktrees stay where they are, so

@@ -13,7 +13,8 @@ import (
 )
 
 // reapReapable is `facet reap --reapable`: every workspace or plain worktree
-// in dirs that reap would delete now, after one confirmation.
+// in dirs that reap would delete now, after one confirmation. With dryRun it
+// prints the list and stops there, without asking.
 //
 // It never forces. A workspace something holds is counted and left alone, and
 // `facet ls --size` or `facet reap <name>` says what holds it. Each workspace is
@@ -23,7 +24,7 @@ import (
 // Workspaces are named by their directory, as `facet ls` names them: a copied
 // workspace keeps the manifest's name, and the list must say which directory
 // goes.
-func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool) error {
+func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(string) bool) error {
 	states, inspectErrs := inspectEach(dirs)
 	var picked []*workspace.IssueState
 	var held, unchecked int
@@ -58,6 +59,10 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 		return err
 	}
 	_, _ = fmt.Fprintf(out, "\n%d reapable, freeing %s; %s left alone.\n", len(picked), humanBytes(total), left)
+	if dryRun {
+		_, _ = fmt.Fprintln(out, "dry run: nothing was deleted.")
+		return nil
+	}
 	question := fmt.Sprintf("Delete these %d workspaces?", len(picked))
 	switch {
 	case len(picked) == 1 && picked[0].Worktree:

@@ -26,7 +26,7 @@ func worktreeRoots(t *testing.T) (checkout, wt string) {
 func TestReapReapableReapsAPlainWorktree(t *testing.T) {
 	checkout, wt := worktreeRoots(t)
 	var out bytes.Buffer
-	if err := reapReapable(&out, []string{wt}, false, func(string) bool { return true }); err != nil {
+	if err := reapReapable(&out, []string{wt}, false, false, func(string) bool { return true }); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
 	if exists(t, wt) {
@@ -44,7 +44,7 @@ func TestReapReapableLeavesAWorktreeWithWorkAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := reapReapable(&out, []string{wt}, false, func(string) bool { return true }); err != nil {
+	if err := reapReapable(&out, []string{wt}, false, false, func(string) bool { return true }); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(t, filepath.Join(wt, "notes.md")) {
