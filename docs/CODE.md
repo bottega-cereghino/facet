@@ -45,9 +45,10 @@ not in anticipation of one.**
 When the same idea is written twice, it gets one definition and one owner. Where
 that owner lives follows from who depends on whom:
 
-- **Neither caller should own it →  its own small package.** `internal/wait` holds
-  the one deadline-poll loop that `internal/lockfile` and `cmd/facet` both need.
-  Neither should have to import the other, so it belongs to neither.
+- **Neither caller should own it →  its own small package.** Two packages that
+  should not import each other get a third that belongs to neither. There is
+  none today: `internal/wait` was one, and went back into `internal/lockfile`
+  when that became its only caller.
 - **Test-only support for a package → nested under it.** `internal/gitx/gitxtest`
   holds the shared `gitx.Runner` fake, mirroring `net/http/httptest`. An exported
   non-test helper inside `gitx` itself would compile into every binary that
@@ -57,7 +58,7 @@ that owner lives follows from who depends on whom:
   `internal/mux`'s `tmuxRun`/`tmuxOutput` are the only places that package names
   the tmux executable.
 
-Keep the helper as small as its call sites require. `internal/wait` is one
+Keep the helper as small as its call sites require. lockfile's `until` is one
 function with a deadline, an interval and an attempt func — no backoff, no jitter,
 no builder. **A configurable framework where three call sites wanted a loop is the
 ceremony this layout exists to avoid.**

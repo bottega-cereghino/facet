@@ -163,7 +163,7 @@ func newRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := workspace.Remove(ws, args[0], workspace.Reporter{W: os.Stdout})
+			res, err := workspace.Remove(ws, args[0])
 			if err != nil {
 				return err
 			}

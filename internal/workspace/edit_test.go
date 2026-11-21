@@ -26,7 +26,7 @@ func TestNewAddRemove(t *testing.T) {
 
 	// A clone's checkout survives removal from the manifest: it may hold the only
 	// copy of unpushed work.
-	res, err := Remove(ws, "repo", rep)
+	res, err := Remove(ws, "repo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestRemoveUnknownEntry(t *testing.T) {
 	if err := m.Write(ws); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Remove(ws, "nope", quiet()); err == nil {
+	if _, err := Remove(ws, "nope"); err == nil {
 		t.Error("Remove accepted an unknown entry")
 	}
 }

@@ -1,4 +1,4 @@
-package wait
+package lockfile
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 
 func TestUntilReturnsTrueAssoonAsAttemptSucceeds(t *testing.T) {
 	calls := 0
-	ok := Until(time.Now().Add(time.Second), time.Millisecond, func() bool {
+	ok := until(time.Now().Add(time.Second), time.Millisecond, func() bool {
 		calls++
 		return calls == 3
 	})
@@ -21,7 +21,7 @@ func TestUntilReturnsTrueAssoonAsAttemptSucceeds(t *testing.T) {
 
 func TestUntilReturnsFalseWhenDeadlinePasses(t *testing.T) {
 	start := time.Now()
-	ok := Until(start.Add(20*time.Millisecond), 5*time.Millisecond, func() bool {
+	ok := until(start.Add(20*time.Millisecond), 5*time.Millisecond, func() bool {
 		return false
 	})
 	if ok {
@@ -34,7 +34,7 @@ func TestUntilReturnsFalseWhenDeadlinePasses(t *testing.T) {
 
 func TestUntilNeverSleepsOnImmediateSuccess(t *testing.T) {
 	start := time.Now()
-	ok := Until(start.Add(time.Hour), time.Hour, func() bool { return true })
+	ok := until(start.Add(time.Hour), time.Hour, func() bool { return true })
 	if !ok {
 		t.Fatal("Until returned false for an attempt that succeeded on the first try")
 	}
