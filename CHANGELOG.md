@@ -6,6 +6,20 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.2](https://github.com/bottega-cereghino/facet/compare/v0.7.1...v0.7.2) (2026-11-21)
+
+
+### Fixed
+
+* **reap:** --reapable holds a workspace judged against a failed fetch, and fetches each repository once ([#294](https://github.com/bottega-cereghino/facet/issues/294)) ([5da2c2f](https://github.com/bottega-cereghino/facet/commit/5da2c2f05f28b6f4c9a4d5fbe7ec3b9ed265b0a5))
+* **reap:** --reapable sweeps only worktrees inside their checkout, never a bare layout's ([#287](https://github.com/bottega-cereghino/facet/issues/287)) ([4eb0612](https://github.com/bottega-cereghino/facet/commit/4eb0612f78bfdc4bc35a2a253a5f445595ff60f7)), refs [#275](https://github.com/bottega-cereghino/facet/issues/275)
+* **reap:** an edited CLAUDE.md in an issue workspace holds it ([#285](https://github.com/bottega-cereghino/facet/issues/285)) ([b01a873](https://github.com/bottega-cereghino/facet/commit/b01a873fba4332a0a9ce751711a949ce03e22a0c))
+* **reap:** check initialised submodules for unpushed commits, stashes and changes ([#289](https://github.com/bottega-cereghino/facet/issues/289)) ([23b0175](https://github.com/bottega-cereghino/facet/commit/23b017520abc32a54c81a4268d66b442f787686d))
+* **reap:** fetch every remote before counting work as pushed ([#290](https://github.com/bottega-cereghino/facet/issues/290)) ([0195a12](https://github.com/bottega-cereghino/facet/commit/0195a121e2db9a0ff4486e9d49bb1c66349e5f1b))
+* **reap:** hold on a git repository inside an ignored directory of a clone ([#288](https://github.com/bottega-cereghino/facet/issues/288)) ([65d1c67](https://github.com/bottega-cereghino/facet/commit/65d1c67ef0721b34edf5f2d0d4a731e9d845520d))
+* **reap:** hold when the probe for panes and processes fails ([#293](https://github.com/bottega-cereghino/facet/issues/293)) ([7278382](https://github.com/bottega-cereghino/facet/commit/727838214867d5793b6206ba873c2c30635360ac))
+* **reap:** judge a real directory that sits where the manifest declares a link ([#286](https://github.com/bottega-cereghino/facet/issues/286)) ([aaac288](https://github.com/bottega-cereghino/facet/commit/aaac28832c4d2a2ceda3f102f0ce6390b7a70758))
+
 ## [0.7.1](https://github.com/bottega-cereghino/facet/compare/v0.7.0...v0.7.1) (2026-11-21)
 
 
