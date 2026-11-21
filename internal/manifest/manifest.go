@@ -36,7 +36,7 @@ type Issue struct {
 type Manifest struct {
 	Name        string                       `json:"name"`
 	Description string                       `json:"description"`
-	Links       map[string]string            `json:"links"`   // junction name -> project folder under ProjectsRoot
+	Links       map[string]string            `json:"links"`   // symlink name -> project folder under ProjectsRoot
 	Clones      map[string]string            `json:"clones"`  // dir name -> git URL to clone from
 	Remotes     map[string]map[string]string `json:"remotes"` // clone name -> extra remotes besides origin
 	LFS         map[string]bool              `json:"lfs"`     // clone name -> false to fetch LFS pointers only

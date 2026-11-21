@@ -1464,10 +1464,8 @@ func hasBlocker(st *IssueState, substr string) bool {
 	return false
 }
 
-// reap is documented as "run it from inside the workspace". Windows refuses to
-// remove a directory that is a process's working directory, so Reap must step
-// out first -- otherwise the tree is half-deleted and the error blames "another
-// process", after the clones are already gone.
+// reap is documented as "run it from inside the workspace", so Reap steps out
+// of it before deleting it.
 func TestReapFromInsideTheWorkspace(t *testing.T) {
 	ws, _ := issueWorkspace(t)
 	orig, err := os.Getwd()

@@ -49,7 +49,7 @@ func TestWriteAuthorWarning(t *testing.T) {
 // TestWarnPreflightReturnsTheStatus: spawn compares the issue's author with
 // the account warnPreflight already read, rather than asking gh again.
 func TestWarnPreflightReturnsTheStatus(t *testing.T) {
-	withFakes(t, "")
+	withFakes(t, nil)
 	var buf bytes.Buffer
 	st := warnPreflight(&buf, "spawn")
 	if st == nil || st.Account == "" {

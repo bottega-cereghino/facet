@@ -13,7 +13,7 @@ import (
 // Entry is one row of `facet ls`.
 type Entry struct {
 	Name      string // the directory inside the workspace
-	Kind      string // "junction"/"symlink", or "clone"
+	Kind      string // "symlink" or "clone"
 	Target    string // project folder for a link; git URL for a clone
 	Status    string // ok | broken | missing
 	Transient bool
@@ -35,7 +35,7 @@ func List(roots config.Roots, ws string, git gitx.Runner) (*manifest.Manifest, [
 	for _, name := range sortedKeys(m.Links) {
 		project := m.Links[name]
 		e := Entry{
-			Name: name, Kind: fslink.Kind, Target: project,
+			Name: name, Kind: "symlink", Target: project,
 			Transient: transient[name], Origin: m.Origins[project],
 			Status: "broken",
 		}

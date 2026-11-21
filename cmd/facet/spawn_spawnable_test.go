@@ -33,7 +33,7 @@ func (f *forbidViewIssue) ViewIssue(repo string, number int) (*ghx.Issue, error)
 func withSpawnableRouting(t *testing.T) {
 	t.Helper()
 	prevCheck := checkSSHKey
-	checkSSHKey = func(string) ([]ghx.Problem, string) { return nil, "" }
+	checkSSHKey = func(string) []ghx.Problem { return nil }
 	t.Cleanup(func() { checkSSHKey = prevCheck })
 
 	dir := t.TempDir()
