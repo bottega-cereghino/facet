@@ -462,8 +462,10 @@ func excludeIn(t *testing.T, checkout, pattern string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
 	if _, err := f.WriteString(pattern + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 }

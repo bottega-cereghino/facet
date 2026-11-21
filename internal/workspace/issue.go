@@ -441,8 +441,8 @@ func nestedWorktrees(worktrees []string, dir string) []string {
 	root := realPath(dir)
 	var out []string
 	for _, w := range worktrees {
-		real := realPath(w)
-		if real == root || !isUnder(root, real) {
+		resolved := realPath(w)
+		if resolved == root || !isUnder(root, resolved) {
 			continue
 		}
 		if fi, err := os.Stat(w); err != nil || !fi.IsDir() {
