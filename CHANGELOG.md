@@ -6,6 +6,19 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.6.0](https://github.com/bottega-cereghino/facet/compare/v0.5.0...v0.6.0) (2026-11-21)
+
+
+### Added
+
+* **prune:** free the rebuildable directories of idle workspaces ([#255](https://github.com/bottega-cereghino/facet/issues/255)) ([d09e223](https://github.com/bottega-cereghino/facet/commit/d09e223e4af22e69ee19500b68baa2e80a30d045))
+* **reap:** check and remove plain git worktrees, Claude Code's included ([#249](https://github.com/bottega-cereghino/facet/issues/249)) ([b9205c7](https://github.com/bottega-cereghino/facet/commit/b9205c70bd724979a9e093f3e14593c68974d22d))
+
+
+### Fixed
+
+* **size:** leave out extents a file shares with an APFS clone ([#251](https://github.com/bottega-cereghino/facet/issues/251)) ([7a8c8b8](https://github.com/bottega-cereghino/facet/commit/7a8c8b81dbecbdbc98a0283fc00549d1fb2a759c))
+
 ## [0.5.0](https://github.com/bottega-cereghino/facet/compare/v0.4.1...v0.5.0) (2026-11-21)
 
 
