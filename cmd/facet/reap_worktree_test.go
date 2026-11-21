@@ -59,7 +59,7 @@ func TestReapRefusesAWorkspacesClone(t *testing.T) {
 	if err := (&manifest.Manifest{Name: "w", Clones: map[string]string{"agent-wt": "o/r"}}).Write(ws); err != nil {
 		t.Fatal(err)
 	}
-	_, err := inspectTarget(wt, nil)
+	_, err := inspectTarget(wt, git, nil)
 	if err == nil || !strings.Contains(err.Error(), "fix: facet reap "+ws) {
 		t.Fatalf("inspectTarget(clone) = %v; want a refusal naming the workspace", err)
 	}

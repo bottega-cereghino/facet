@@ -2,12 +2,15 @@ package workspace
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/bottega-cereghino/facet/internal/gitx/gitxtest"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // Work pushed to a second remote, a fork, whose branch was deleted there
@@ -58,5 +61,71 @@ func TestReapNamesTheRemoteItCouldNotFetch(t *testing.T) {
 	}
 	if n := st.Notes(); len(n) != 1 || !strings.Contains(n[0], "could not fetch fork") || strings.Contains(n[0], "origin") {
 		t.Errorf("Notes() = %v; want one naming fork alone", n)
+	}
+}
+
+// countingGit is the real git, counting fetches; safe for concurrent use.
+type countingGit struct {
+	mu      sync.Mutex
+	fetches int
+}
+
+func (c *countingGit) Run(dir string, env []string, args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "fetch" {
+		c.mu.Lock()
+		c.fetches++
+		c.mu.Unlock()
+	}
+	return gitx.Git{}.Run(dir, env, args...)
+}
+
+// Worktree clones of one checkout share its refs, so their fetches, run at
+// once by the parallel inspection, collide ("reference already exists") and
+// leave the count judged stale. Through one SharedFetch each repository is
+// fetched once, whichever workspace asks first (facet#267).
+func TestSharedFetchFetchesEachRepositoryOnce(t *testing.T) {
+	roots, _, origin, checkout := worktreeSetup(t)
+	var dirs []string
+	for _, name := range []string{"a", "b", "c", "d"} {
+		ws := filepath.Join(roots.Workspaces, name)
+		m := &manifest.Manifest{Name: name, Clones: map[string]string{"repo": origin}}
+		if err := os.MkdirAll(ws, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		if err := m.Write(ws); err != nil {
+			t.Fatal(err)
+		}
+		if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
+			t.Fatal(err)
+		}
+		if !isGitFile(t, filepath.Join(ws, "repo")) {
+			t.Fatalf("%s/repo is not a worktree of %s", name, checkout)
+		}
+		dirs = append(dirs, ws)
+	}
+	counting := &countingGit{}
+	shared := NewSharedFetch(counting)
+	states := make([]*IssueState, len(dirs))
+	var wg sync.WaitGroup
+	for i, ws := range dirs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			st, err := Inspect(ws, shared, nil, nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			states[i] = st
+		}()
+	}
+	wg.Wait()
+	if counting.fetches != 1 {
+		t.Errorf("%d fetches for one repository with one remote; want 1", counting.fetches)
+	}
+	for i, st := range states {
+		if st != nil && len(st.Clone) == 1 && len(st.Clone[0].StaleRemotes) > 0 {
+			t.Errorf("%s judged stale: %v", dirs[i], st.Clone[0].StaleRemotes)
+		}
 	}
 }
