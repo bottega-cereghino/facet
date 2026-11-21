@@ -159,3 +159,18 @@ func TestReapForceRefusesWhatStartedDuringThePrompt(t *testing.T) {
 		t.Fatal("reap --force deleted work that started while its prompt waited")
 	}
 }
+
+// reap pointed at a folder anywhere inside a workspace (run from a clone's
+// src/, say) refuses and names the workspace, instead of reaping the folder
+// alone (facet#274).
+func TestReapRefusesAFolderInsideAWorkspace(t *testing.T) {
+	_, free, _ := reapableRoot(t)
+	src := filepath.Join(free, "repo", "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := inspectTarget(src, nil)
+	if err == nil || !strings.Contains(err.Error(), "inside the workspace "+free) || !strings.Contains(err.Error(), "fix: facet reap "+free) {
+		t.Fatalf("reap %s = %v; want a refusal naming the workspace", src, err)
+	}
+}

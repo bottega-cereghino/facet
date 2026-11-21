@@ -533,6 +533,13 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   just before deleting, and checks that no step of the path is a symlink, so a
   parent swapped for one cannot send it outside the clone
   (`TestPruneChecksAgainBeforeDeleting`, `TestPruneDoesNotFollowASwappedParent`).
+- **`reap` deletes a whole workspace or worktree, never a folder inside one.**
+  Pointed at a clone or a folder within a workspace, or at a folder inside a
+  worktree, it refuses and names what to reap instead; a worktree git will not
+  remove is deleted by hand only when its checkout lists it
+  (`TestReapRefusesAFolderInsideAWorkspace`,
+  `TestInspectWorktreeRefusesAFolderInsideOne`,
+  `TestRemoveWorktreeLeavesAFolderItDoesNotList`).
 - **`reap` checks again after its prompt**, so work that started while it
   waited holds the workspace, with `--force` too: force covers the holders it
   showed, never new ones (`TestReapChecksAgainAfterThePrompt`,
