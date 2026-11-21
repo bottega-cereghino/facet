@@ -156,7 +156,10 @@ func TestSyncLinkAndPrune(t *testing.T) {
 	// A link points at a project under ProjectsRoot.
 	project := filepath.Join(roots.Projects, "proj")
 	originRepo(t, project)
-	_ = origin
+	const projOrigin = "https://github.com/o/proj.git"
+	if _, err := (gitx.Git{}).Run(project, nil, "remote", "add", "origin", projOrigin); err != nil {
+		t.Fatal(err)
+	}
 
 	m := &manifest.Manifest{Name: "w", Links: map[string]string{"proj": "proj"}}
 	if err := m.Write(ws); err != nil {
@@ -174,8 +177,8 @@ func TestSyncLinkAndPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if back.Origins["proj"] == "" {
-		t.Log("note: project has no origin remote, so none was captured (expected here)")
+	if got := back.Origins["proj"]; got != projOrigin {
+		t.Errorf("sync captured origin %q for the link, want %q", got, projOrigin)
 	}
 
 	// Drop the link from the manifest, add a clone, then prune. The link goes;
