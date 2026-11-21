@@ -322,7 +322,15 @@ with `--apply`, after one confirmation (`-y` skips it), and only from a
 workspace no clone of which was used within `--idle-days` (14 by default) and
 that nothing runs from. A directory that frees under 1 MiB, such as a
 `node_modules` pnpm cloned from its store, is not named: deleting it would only
-cost a reinstall. `.terraform` is never named: it keeps the selected
+cost a reinstall. A directory is named only when the clone tracks a file
+that rebuilds it in the same directory, the one its tool reads when it
+writes it: `package.json` for `node_modules`, `.next`, `.turbo` and
+`.parcel-cache`; `pyproject.toml`, `setup.py`, `setup.cfg`, `Pipfile` or a
+`requirements*.txt` for `.venv` and the Python caches, which also take their
+tool's own config (`mypy.ini`, `pytest.ini` or `conftest.py`, `ruff.toml`). A
+file further up does not count: the root's `pyproject.toml` does not install
+a `.venv` in `api/`. Without one the directory is kept, and the listing says
+so on a `kept:` line. `.terraform` is never named: it keeps the selected
 `terraform workspace`, and a fresh `init` would quietly plan against `default`.
 
 ## The issue graph was removed
@@ -485,6 +493,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` counts commits reachable from any local branch or HEAD and from no
   remote.** Unlike `@{u}..HEAD`, that also catches a branch which was never
   pushed at all — the branch most easily lost.
+- **`reap` sees every untracked and modified file whatever git's config says.**
+  Its status check names `--untracked-files=all` and `--ignore-submodules=none`,
+  so `status.showUntrackedFiles=no` cannot hide a new file from it
+  (`TestReapHoldsAnUntrackedFileTheConfigHides`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
   gh's "no pull requests found" counts as none; a repository gh cannot resolve
   (renamed, transferred, unreadable) holds the workspace
@@ -492,6 +504,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` refuses while a clone has a linked worktree** (`git worktree add`):
   its files and detached commits are invisible to the checks above, and deleting
   the clone deletes its repository (`TestLinkedWorktreeBlocksReap`).
+  A clone or plain worktree that is itself a worktree is held by any worktree
+  inside its directory, such as Claude Code's `.claude/worktrees`, which goes
+  with it (`TestWorktreeCloneIsHeldByAWorktreeNestedInIt`,
+  `TestPlainWorktreeIsHeldByAWorktreeNestedInIt`).
 - **`reap` refuses while anything beside the clones exists nowhere else**, in an
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. Inside an enclosing repository
@@ -506,7 +522,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   or worktree; an ignored `.secrets/` or an unignored `node_modules` stays
   (`TestPruneDeletesWhatWasFoundAndNothingElse`). One with a git repository
   anywhere inside it, such as an editable pip install in a `.venv`, stays too
-  (`TestInspectPruneKeepsADirectoryHoldingARepository`).
+  (`TestInspectPruneKeepsADirectoryHoldingARepository`), and so does one with
+  no file that rebuilds it tracked beside it, such as a hand-built `.venv` with
+  no `pyproject.toml`: an untracked one, or one further up, does not count
+  (`TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds`,
+  `TestPruneKeepsWhatNothingTrackedRebuildsAndSaysWhy`).
 - **`prune` holds what it cannot check**: a clone whose last use cannot be
   read (looked up in its own git directory, so a worktree clone is dated too),
   or a probe for what runs from it that fails. It checks each workspace again
@@ -558,7 +578,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   nothing. A loaded job's plist is read wherever it is: from the LaunchAgents
   folders, or from the file `launchctl print` says it was loaded from
   (`TestUnderFindsAJobLoadedFromAPlistElsewhere`). Unload the job, or move it out, then reap
-  (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`).
+  (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
+  that fails holds every workspace, since no job can be ruled out; only a
+  launchctl that is not installed (off macOS) reads as no jobs
+  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`).
 - **An issue's body stays quoted in the `CLAUDE.md` spawn writes.** Every line
   of it starts with `>`, whatever it holds, so it cannot pose as the file's own
   headings or rules (`TestIssueClaudeMDKeepsTheBodyInsideTheQuote`).
