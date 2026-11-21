@@ -1599,3 +1599,29 @@ func TestListIssuesNamesWhatItCouldNotCheck(t *testing.T) {
 		t.Errorf("unchecked = %q, want the broken workspace named", unchecked)
 	}
 }
+
+// The dirty check reads untracked files whatever the clone's config says:
+// status.showUntrackedFiles=no, which large repositories recommend, would
+// otherwise hide a new file and reap would delete it (facet#270).
+func TestReapHoldsAnUntrackedFileTheConfigHides(t *testing.T) {
+	roots, ws, origin := setup(t)
+	m := &manifest.Manifest{Name: "w", Clones: map[string]string{"repo": origin}}
+	if err := m.Write(ws); err != nil {
+		t.Fatal(err)
+	}
+	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(ws, "repo")
+	gitOut(t, clone, "config", "status.showUntrackedFiles", "no")
+	if err := os.WriteFile(filepath.Join(clone, "new.go"), []byte("package x\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Inspect(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := st.Blockers(); len(b) == 0 {
+		t.Fatal("reap would delete the untracked new.go that status.showUntrackedFiles=no hides")
+	}
+}

@@ -490,7 +490,10 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 	}
 	own := c.WorktreeOf == ""
 
-	if out, err := git.Run(p, nil, "status", "--porcelain"); err != nil {
+	// The flags are explicit so no config can hide a file from the check:
+	// status.showUntrackedFiles=no drops untracked files, and
+	// submodule.<name>.ignore or diff.ignoreSubmodules drop a dirty submodule.
+	if out, err := git.Run(p, nil, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git status failed: %v", err))
 	} else {
 		c.Dirty = strings.TrimSpace(out) != ""
