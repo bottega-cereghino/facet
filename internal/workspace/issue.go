@@ -473,13 +473,14 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		c.Dirty = strings.TrimSpace(out) != ""
 	}
 
-	if !own {
-		// Its sibling worktrees, the checkout's own included, belong to the
-		// checkout's repository, which removing this one leaves in place.
-	} else if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
-		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
-	} else {
-		c.Worktrees = linkedWorktrees(out)
+	// A worktree's siblings, the checkout's own included, belong to the
+	// checkout's repository, which removing this one leaves in place.
+	if own {
+		if out, err := git.Run(p, nil, "worktree", "list", "--porcelain"); err != nil {
+			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git worktree list failed: %v", err))
+		} else {
+			c.Worktrees = linkedWorktrees(out)
+		}
 	}
 
 	// The branch name is informational only, so a failure here is not a safety
@@ -538,9 +539,11 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		}
 	}
 
+	// A worktree's stash belongs to the checkout's repository and stays with it.
 	if !own {
-		// The stash belongs to the checkout's repository and stays with it.
-	} else if out, err := git.Run(p, nil, "stash", "list"); err != nil {
+		return c
+	}
+	if out, err := git.Run(p, nil, "stash", "list"); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git stash list failed: %v", err))
 	} else {
 		c.Stashed = countLines(strings.TrimSpace(out))
