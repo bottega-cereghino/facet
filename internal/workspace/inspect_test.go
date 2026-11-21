@@ -265,3 +265,51 @@ func TestGithubRepo(t *testing.T) {
 		}
 	}
 }
+
+// A repository inside a directory the clone ignores (a fork cloned into
+// vendor/ to patch, a scratch clone in tmp/) has commits of its own, and is
+// more than an ignored file: prune keeps such a directory, and reap holds on
+// it. In a worktree clone too, since the ignored directory goes with it.
+func TestReapHoldsARepositoryInAnIgnoredDirectory(t *testing.T) {
+	for _, worktree := range []bool{false, true} {
+		t.Run(map[bool]string{false: "own clone", true: "worktree clone"}[worktree], func(t *testing.T) {
+			roots, ws, _, checkout := worktreeSetup(t)
+			excludeIn(t, checkout, "vendor/")
+			if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: worktree}); err != nil {
+				t.Fatal(err)
+			}
+			clone := filepath.Join(ws, "repo")
+			if !worktree {
+				excludeIn(t, clone, "vendor/")
+			}
+			lib := filepath.Join(clone, "vendor", "lib")
+			gitOut(t, "", "init", "-q", lib)
+			writeTestFile(t, filepath.Join(lib, "fix.txt"), "local fix, never pushed\n")
+			gitOut(t, lib, "add", "fix.txt")
+			gitOut(t, lib, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "fix")
+			if got := gitOut(t, clone, "status", "--porcelain"); got != "" {
+				t.Fatalf("the clone should read clean, vendor/ being ignored: %q", got)
+			}
+			st, err := Inspect(ws, gitx.Git{}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasBlocker(st, filepath.Join("vendor", "lib")) {
+				t.Fatalf("reap would delete vendor/lib and its commit: %v", st.Blockers())
+			}
+
+			// An ignored directory with no repository in it holds nothing.
+			if err := os.RemoveAll(lib); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, filepath.Join(clone, "vendor", "cache.bin"), "rebuildable\n")
+			st, err = Inspect(ws, gitx.Git{}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b := st.Blockers(); len(b) != 0 {
+				t.Fatalf("an ignored file alone holds: %v", b)
+			}
+		})
+	}
+}

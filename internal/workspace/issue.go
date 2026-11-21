@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -68,6 +70,10 @@ type CloneState struct {
 	DefaultBranchUnresolved bool
 	// Stashed counts `git stash` entries, which no push would ever carry.
 	Stashed int
+	// IgnoredRepos names the git repositories inside directories the clone
+	// ignores. Their commits are invisible to the checks here, and they go with
+	// the clone. Non-empty is a blocker.
+	IgnoredRepos []string
 	// Unverifiable holds the reasons this clone's state could not be confirmed --
 	// a git command that failed, or a directory that is not a readable repo. A
 	// non-empty slice is itself a blocker: a clone we could not inspect must not
@@ -147,6 +153,11 @@ func (s *IssueState) Blockers() []string {
 	for _, c := range s.Clone {
 		for _, w := range c.Worktrees {
 			out = append(out, fmt.Sprintf("%s has a linked worktree at %s -- reap cannot see its work; push it, then `git worktree remove` it", c.Dir, w))
+		}
+	}
+	for _, c := range s.Clone {
+		for _, r := range c.IgnoredRepos {
+			out = append(out, fmt.Sprintf("%s has a git repository at %s, in a directory it ignores -- reap cannot see its work; push it or move it out of the clone", c.Dir, r))
 		}
 	}
 	for _, c := range s.Clone {
@@ -358,9 +369,40 @@ var ownFiles = map[string]bool{
 	syncLockName: true,
 }
 
-// issueOwnFiles are written by `facet spawn` at an issue workspace's root and
-// rewritten by the next spawn, so they are facet's own there too.
-var issueOwnFiles = map[string]bool{"CLAUDE.md": true}
+// claudeMD is the file `facet spawn` writes at an issue workspace's root. It is
+// facet's own only while it is what spawn wrote: nothing rewrites it, since
+// spawn refuses a workspace that exists, so an edited one may hold an agent's
+// notes and nothing else has them.
+const claudeMD = "CLAUDE.md"
+
+// WriteIssueClaudeMD writes an issue workspace's CLAUDE.md and records its hash
+// in the manifest, so reap can tell spawn's file from one edited since.
+func WriteIssueClaudeMD(ws string, m *manifest.Manifest, md []byte) error {
+	if m.Issue == nil {
+		return fmt.Errorf("%s is not an issue workspace", ws)
+	}
+	if err := os.WriteFile(filepath.Join(ws, claudeMD), md, 0o666); err != nil {
+		return err
+	}
+	m.Issue.ClaudeMD = contentHash(md)
+	return m.Write(ws)
+}
+
+// spawnsClaudeMD reports whether the CLAUDE.md in ws is still the one spawn
+// wrote. A manifest with no hash (spawned before it was recorded) or a file
+// that cannot be read is not: either may hide notes, so the file is judged.
+func spawnsClaudeMD(ws string, m *manifest.Manifest) bool {
+	if m.Issue == nil || m.Issue.ClaudeMD == "" {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(ws, claudeMD))
+	return err == nil && contentHash(b) == m.Issue.ClaudeMD
+}
+
+func contentHash(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
 
 // maxLoose bounds how many loose paths are named one by one.
 const maxLoose = 10
@@ -384,10 +426,10 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		if _, ok := m.Clones[n]; ok {
 			continue
 		}
-		if _, ok := m.Links[n]; ok {
-			continue
-		}
-		if ownFiles[n] || (m.Issue != nil && issueOwnFiles[n]) || e.Type()&os.ModeSymlink != 0 {
+		// A link name is skipped only as a symlink, below: a real directory at
+		// a name the manifest declares a link is no clone either, so nothing
+		// else would judge it.
+		if ownFiles[n] || (n == claudeMD && spawnsClaudeMD(ws, m)) || e.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		names = append(names, n)
@@ -530,6 +572,12 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		c.Worktrees = linkedWorktrees(out)
 	} else {
 		c.Worktrees = nestedWorktrees(linkedWorktrees(out), p)
+	}
+
+	if repos, err := ignoredRepos(git, p, c.Worktrees); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for repositories in its ignored directories: %v", err))
+	} else {
+		c.IgnoredRepos = repos
 	}
 
 	// The branch name is informational only, so a failure here is not a safety
