@@ -6,6 +6,13 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.4.1](https://github.com/bottega-cereghino/facet/compare/v0.4.0...v0.4.1) (2026-11-21)
+
+
+### Fixed
+
+* **reap:** hold a workspace that a loaded launchd job runs from ([#235](https://github.com/bottega-cereghino/facet/issues/235)) ([ce67fdf](https://github.com/bottega-cereghino/facet/commit/ce67fdfe6e258c00d0fe7cf0548aec05b3401f4b)), refs [#234](https://github.com/bottega-cereghino/facet/issues/234)
+
 ## [0.4.0](https://github.com/bottega-cereghino/facet/compare/v0.3.0...v0.4.0) (2026-11-21)
 
 
