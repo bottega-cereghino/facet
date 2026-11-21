@@ -11,8 +11,6 @@ import (
 	"os"
 	"runtime"
 	"time"
-
-	"github.com/bottega-cereghino/facet/internal/wait"
 )
 
 const (
@@ -95,12 +93,12 @@ func release(path string, f *os.File) {
 // acquire polls at opt.Poll until it takes the lock, a fatal error rules it
 // out, or opt.MaxWait passes. The immediate-retry paths (a released lock
 // racing our stat, a just-broken stale lock) loop inside the attempt itself
-// rather than through wait.Until's sleep, so they cost no wait at all -- only
+// rather than through until's sleep, so they cost no wait at all -- only
 // genuine contention pays the poll interval.
 func acquire(path string, opt Options) (*os.File, error) {
 	var f *os.File
 	var ferr error
-	ok := wait.Until(time.Now().Add(opt.MaxWait), opt.Poll, func() bool {
+	ok := until(time.Now().Add(opt.MaxWait), opt.Poll, func() bool {
 		for {
 			var err error
 			f, err = createLock(path)
@@ -129,7 +127,7 @@ func acquire(path string, opt Options) (*os.File, error) {
 				}
 				continue
 			}
-			return false // genuine contention; let wait.Until sleep and recheck the deadline
+			return false // genuine contention; let until sleep and recheck the deadline
 		}
 	})
 	if !ok {
@@ -216,5 +214,20 @@ func heartbeat(path string, interval time.Duration) (stop func()) {
 	return func() {
 		close(done)
 		<-stopped
+	}
+}
+
+// until calls attempt every interval until it reports true or deadline has
+// passed. It reports whether attempt ever returned true. There is no backoff
+// and no jitter: a waiter polls a lockfile at a fixed interval.
+func until(deadline time.Time, interval time.Duration, attempt func() bool) bool {
+	for {
+		if attempt() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(interval)
 	}
 }
