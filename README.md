@@ -296,7 +296,9 @@ clearing what it names and re-running should not turn up more.
 A long-lived workspace can also hold files of its own beside its clones: notes,
 a `CLAUDE.md`. Any that are not committed in an enclosing repository (a
 versioned `~/Workspaces`, say) hold it as well, because the workspace is their
-only copy. Links are removed, never followed, so their targets are untouched.
+only copy. An issue workspace holds the same way, except for the `CLAUDE.md`
+spawn wrote, as long as it is unchanged. Links are removed, never followed, so
+their targets are untouched.
 
 `facet reap --reapable` deletes every workspace at the root that `reap` would
 delete now. It lists them with the disk each frees and the total, asks once,
@@ -512,7 +514,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. Inside an enclosing repository
   (`~/Workspaces` usually is one), a file committed there does not hold
-  (`TestIssueWorkspaceHoldsFilesBesideItsClones`).
+  (`TestIssueWorkspaceHoldsFilesBesideItsClones`). The `CLAUDE.md` spawn
+  writes is facet's own only while it hashes to what spawn recorded in the
+  manifest; edited, or spawned before the hash was recorded, it holds: nothing
+  rewrites it, so an agent's notes there are the only copy
+  (`TestIssueWorkspaceHoldsAnEditedClaudeMD`).
 - **What `reap` does not protect:** files git ignores inside a clone (`.env`,
   `node_modules`, build output: holding on them would hold every workspace), and
   commits reachable only from a local tag (a clone carries every upstream tag,

@@ -29,6 +29,10 @@ type Issue struct {
 	URL     string   `json:"url"`    //
 	Created string   `json:"created"`
 	Labels  []string `json:"labels"`
+	// ClaudeMD is the sha256, in hex, of the CLAUDE.md spawn wrote at the
+	// workspace root. Reap treats that file as facet's own only while it still
+	// hashes to this: an edited one may hold the only copy of an agent's notes.
+	ClaudeMD string `json:"claude_md,omitempty"`
 }
 
 // Manifest is a workspace's declared layout. Field order here is the on-disk key
