@@ -152,7 +152,7 @@ func newReapCmd() *cobra.Command {
 			// handles on the working tree, which on some platforms would
 			// refuse the removeAll below.
 			if l := mux.Pick(); l != nil {
-				_ = l.Kill(st.Name)
+				_ = l.Kill(filepath.Base(st.Dir))
 			}
 			if err := workspace.Reap(st); err != nil {
 				return err
