@@ -151,9 +151,10 @@ the gitleaks and zizmor versions in `security.yml`, and release-please in
 `scripts/release/package.json` with its lockfile (the npm manager). The
 Makefile and `security.yml` pins are
 found through a `# renovate: datasource=… depName=…` comment on the line
-above the pin. Patch and digest updates merge themselves once every check is
-green; minors and majors
-wait for a person. A gitleaks or zizmor update stays red until its
+above the pin. Patch updates, and digest updates of Go modules, merge
+themselves once every check is green. An action's or image's digest changing
+under the same version means its tag was moved, so that waits for a look, as
+minors and majors wait for a person. A gitleaks or zizmor update stays red until its
 `*_SHA256` is updated in the same PR, because Renovate cannot fetch the
 checksum. The `go` directive in `go.mod` and setup-go's `go-version` move by
 hand, together. The `toolchain` line in `go.mod` is what every build uses,

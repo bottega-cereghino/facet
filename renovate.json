@@ -68,6 +68,18 @@
       "automerge": true
     },
     {
+      "description": "An action or image digest that changes under the same version means the tag was moved, so it waits for a look rather than merging itself.",
+      "matchDatasources": [
+        "github-tags",
+        "github-actions",
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "automerge": false
+    },
+    {
       "groupName": "go modules",
       "matchManagers": [
         "gomod"
