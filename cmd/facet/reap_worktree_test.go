@@ -1,0 +1,66 @@
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/bottega-cereghino/facet/internal/manifest"
+)
+
+// worktreeRoots points facet at a workspaces root and a projects root holding
+// one checkout, and returns a plain worktree of that checkout on a branch of
+// its own, outside both roots.
+func worktreeRoots(t *testing.T) (checkout, wt string) {
+	t.Helper()
+	reapableRoot(t)
+	checkout, _ = branchSetup(t)
+	roots.Projects = filepath.Dir(checkout)
+	wt = filepath.Join(t.TempDir(), "agent-wt")
+	gitIn(t, checkout, "worktree", "add", "-q", "-b", "agent", wt, "origin/main")
+	return checkout, wt
+}
+
+func TestReapReapableReapsAPlainWorktree(t *testing.T) {
+	checkout, wt := worktreeRoots(t)
+	var out bytes.Buffer
+	if err := reapReapable(&out, []string{wt}, false, func(string) bool { return true }); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if exists(t, wt) {
+		t.Fatalf("the worktree is still there:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "(worktree)") {
+		t.Errorf("the list does not say it is a worktree:\n%s", out.String())
+	}
+	gitIn(t, checkout, "rev-parse", "--verify", "refs/heads/agent")
+}
+
+func TestReapReapableLeavesAWorktreeWithWorkAlone(t *testing.T) {
+	_, wt := worktreeRoots(t)
+	if err := os.WriteFile(filepath.Join(wt, "notes.md"), []byte("only here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := reapReapable(&out, []string{wt}, false, func(string) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, filepath.Join(wt, "notes.md")) {
+		t.Fatalf("a worktree with an untracked file was reaped:\n%s", out.String())
+	}
+}
+
+// A worktree that is a workspace's clone goes with its workspace, never alone.
+func TestReapRefusesAWorkspacesClone(t *testing.T) {
+	_, wt := worktreeRoots(t)
+	ws := filepath.Dir(wt)
+	if err := (&manifest.Manifest{Name: "w", Clones: map[string]string{"agent-wt": "o/r"}}).Write(ws); err != nil {
+		t.Fatal(err)
+	}
+	_, err := inspectTarget(wt, nil)
+	if err == nil || !strings.Contains(err.Error(), "fix: facet reap "+ws) {
+		t.Fatalf("inspectTarget(clone) = %v; want a refusal naming the workspace", err)
+	}
+}

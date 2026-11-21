@@ -6,6 +6,23 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.5.0](https://github.com/bottega-cereghino/facet/compare/v0.4.1...v0.5.0) (2026-11-21)
+
+
+### Added
+
+* **sync:** make a clone a worktree of its ~/Projects checkout ([#248](https://github.com/bottega-cereghino/facet/issues/248)) ([264a4b0](https://github.com/bottega-cereghino/facet/commit/264a4b0325d085bfe8d5e185d2af698dbb8b516c))
+
+
+### Fixed
+
+* harden git arguments, manifest keys, the CI secret, the release install and the lockfile ([#244](https://github.com/bottega-cereghino/facet/issues/244)) ([71af217](https://github.com/bottega-cereghino/facet/commit/71af217c64711539197d97041306ebce0afe7dc2))
+* **reap:** leave the mirror alone, and hold for worktrees and files beside an issue workspace's clones ([#237](https://github.com/bottega-cereghino/facet/issues/237)) ([2bb46dd](https://github.com/bottega-cereghino/facet/commit/2bb46ddaad2e88cc052b1e4935c90d8034acd8a0))
+* **reap:** reap from inside the workspace, and test the refusal through the command ([#241](https://github.com/bottega-cereghino/facet/issues/241)) ([2c0c738](https://github.com/bottega-cereghino/facet/commit/2c0c738c096e77a78f7ae34ebdf409b0fd286507))
+* refuse where gh could not tell, and say why GitHub refused ([#242](https://github.com/bottega-cereghino/facet/issues/242)) ([b356ad5](https://github.com/bottega-cereghino/facet/commit/b356ad51c3606c7db351d81018273fec08c09557))
+* **routing:** read CRLF fences, H1 headings, fenced sections and issue links right ([#243](https://github.com/bottega-cereghino/facet/issues/243)) ([4b5aa41](https://github.com/bottega-cereghino/facet/commit/4b5aa41e9e9a5797be80b2827e6320d6e0b80576))
+* **spawn:** quote the issue body in CLAUDE.md and warn about a stranger's issue ([#240](https://github.com/bottega-cereghino/facet/issues/240)) ([feda698](https://github.com/bottega-cereghino/facet/commit/feda6982abc5cbb346c28521ae1bd28b548a75fa))
+
 ## [0.4.1](https://github.com/bottega-cereghino/facet/compare/v0.4.0...v0.4.1) (2026-11-21)
 
 
