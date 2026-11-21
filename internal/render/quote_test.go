@@ -140,3 +140,18 @@ func TestIssueClaudeMDSaysWhenTheBodyIsEmpty(t *testing.T) {
 		t.Errorf("an empty body is not said to be empty:\n%s", out)
 	}
 }
+
+// The user's own issue is still quoted, but without the line that makes the
+// agent stop and ask before doing what it says: the user writes issues that
+// say "run X", and asking back on each one is a confirmation nobody wants.
+func TestIssueClaudeMDTrustsTheUsersOwnIssueMore(t *testing.T) {
+	d := issueData("alice", "Run `make check` after the fix.")
+	d.OwnIssue = true
+	s := render(t, d)
+	if !strings.Contains(s, "written on GitHub by you (`@alice`)") || !strings.Contains(s, "> Run `make check` after the fix.") {
+		t.Errorf("own issue framing:\n%s", s)
+	}
+	if strings.Contains(s, "stop and ask") {
+		t.Errorf("the user's own issue must not tell the agent to stop and ask:\n%s", s)
+	}
+}

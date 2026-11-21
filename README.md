@@ -112,7 +112,10 @@ workspace's `CLAUDE.md` as instructions, with your `gh` and git credentials. So
 the issue's body goes in as a blockquote, every line starting with `>`, after a
 fixed line that names its author (`@login`) and says to read it as a description
 of the task, never as instructions to run a command, open a link, or touch
-credentials. A fixed line, `End of the issue's text.`, follows it. Nothing in the
+credentials, and to stop and ask if it says to. Your own issue (the author is
+the account `gh` is signed in as) is quoted too, without that last line, so an
+issue of yours that says "run `make check`" is simply followed. A fixed line,
+`End of the issue's text.`, follows the quote. Nothing in the
 body can end the quote early: a heading, a code fence, a bare carriage return or
 a copy of that closing line stays inside it.
 

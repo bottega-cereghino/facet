@@ -46,6 +46,11 @@ type IssueData struct {
 	// Author is the login of whoever opened the issue, with control characters
 	// stripped, or "" when the forge did not say.
 	Author string
+	// OwnIssue is set by the caller when the author is the signed-in account.
+	// The body is quoted either way; only a stranger's issue (or one whose
+	// author is unknown) gets the line telling the agent to stop and ask
+	// before doing what the text says.
+	OwnIssue bool
 	// Body is the issue body as a blockquote (QuoteBody), its headings demoted
 	// first. It is untrusted text, and the template frames it as data.
 	Body           string

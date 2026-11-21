@@ -186,6 +186,7 @@ func runSpawn(o spawnOpts) error {
 	}
 
 	data := render.BuildIssueData(wsName, o.Repo, branch, homeDir, iss, sel, hints, route, frags, fragErrs, time.Now())
+	data.OwnIssue = ownIssue(iss, auth)
 	md, err := render.IssueClaudeMD(data)
 	if err != nil {
 		return err
@@ -240,6 +241,12 @@ func runSpawn(o spawnOpts) error {
 	return nil
 }
 
+// ownIssue reports whether the signed-in account opened the issue. Not knowing
+// either side is not "own".
+func ownIssue(iss *ghx.Issue, st *ghx.AuthStatus) bool {
+	return st != nil && st.Account != "" && iss.Author.Login != "" && strings.EqualFold(iss.Author.Login, st.Account)
+}
+
 // writeAuthorWarning warns when the issue was not opened by the signed-in
 // account. Anyone can file an issue on a public repository, and its body goes
 // into CLAUDE.md, where an agent started with --claude reads it. The template
@@ -247,6 +254,9 @@ func runSpawn(o spawnOpts) error {
 // is. Not knowing the author or the account counts as a stranger: "I could not
 // tell" must not read as "it is yours".
 func writeAuthorWarning(w io.Writer, repo string, iss *ghx.Issue, st *ghx.AuthStatus) {
+	if ownIssue(iss, st) {
+		return
+	}
 	author := iss.Author.Login
 	me := ""
 	if st != nil {
@@ -258,8 +268,6 @@ func writeAuthorWarning(w io.Writer, repo string, iss *ghx.Issue, st *ghx.AuthSt
 		who = "GitHub did not say who wrote it"
 	case me == "":
 		who = fmt.Sprintf("it was written by @%s, and the signed-in account is unknown", author)
-	case strings.EqualFold(author, me):
-		return
 	default:
 		who = fmt.Sprintf("it was written by @%s, not by you (@%s)", author, me)
 	}
