@@ -17,6 +17,7 @@ import (
 type commentGH interface {
 	IssueComments(repo string, number int) ([]ghx.Comment, error)
 	PostComment(repo string, number int, body string) (string, error)
+	ViewComment(repo string, commentID int64) (*ghx.Comment, error)
 	EditComment(repo string, commentID int64, body string) (string, error)
 }
 
@@ -117,7 +118,9 @@ func newCommentEditCmd() *cobra.Command {
 		Use:   "edit <owner/repo#n> --id <comment-id> --body-file <path>",
 		Short: "Replace a comment's body",
 		Long: "--id is the COMMENT's own id, from `facet comment list` -- not the issue\n" +
-			"number and not the comment's position in the thread.\n\n" +
+			"number and not the comment's position in the thread. An id names a\n" +
+			"comment anywhere in the repository, so the edit refuses when it is not on\n" +
+			"the issue named, and says which issue it is on.\n\n" +
 			"GitHub permits editing only comments this credential wrote, and refuses\n" +
 			"the rest, so this cannot rewrite anyone else's words.",
 		Args: cobra.ExactArgs(1),
@@ -279,7 +282,27 @@ func runCommentPost(w io.Writer, gh commentGH, ref ghx.IssueRef, body string) er
 	return nil
 }
 
+// runCommentEdit edits comment id only when it is on ref's issue. A comment id
+// is unique in the whole repository, so the API would edit it wherever it is,
+// and an id copied from the wrong thread would rewrite a comment on another
+// issue.
 func runCommentEdit(w io.Writer, gh commentGH, ref ghx.IssueRef, id int64, body string) error {
+	c, err := gh.ViewComment(ref.OwnerRepo(), id)
+	if err != nil {
+		return fmt.Errorf("could not check that comment %d is on %s, so nothing was edited: %w\n"+
+			"fix: take the id from `facet comment list %s`", id, ref, err, ref)
+	}
+	on, ok := c.Issue()
+	if !ok {
+		return fmt.Errorf("GitHub did not say which issue comment %d is on (issue_url %q), so nothing was edited\n"+
+			"fix: take the id from `facet comment list %s`", id, c.IssueURL, ref)
+	}
+	if on != ref.Number {
+		actual := ghx.IssueRef{Owner: ref.Owner, Repo: ref.Repo, Number: on}
+		return fmt.Errorf("comment %d is on %s, not %s, so nothing was edited\n"+
+			"fix: if that is the comment you mean, run `facet comment edit %s --id %d --body-file <path>`; "+
+			"otherwise take the id from `facet comment list %s`", id, actual, ref, actual, id, ref)
+	}
 	url, err := gh.EditComment(ref.OwnerRepo(), id, body)
 	if err != nil {
 		return err

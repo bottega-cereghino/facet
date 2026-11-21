@@ -74,12 +74,13 @@ func runPreflight(w io.Writer) error {
 }
 
 // passLine states plainly how much of the preflight actually ran, so a green
-// tick cannot overstate itself.
+// tick cannot overstate itself. A check is skipped on a platform that cannot
+// run it, or for a credential it does not apply to.
 func passLine(notes []string) string {
 	if len(notes) == 0 {
 		return "✓ credential preflight passed"
 	}
-	return fmt.Sprintf("✓ credential preflight passed — but %d %s did NOT run on this platform (see above)",
+	return fmt.Sprintf("✓ credential preflight passed — but %d %s did NOT run (see above)",
 		len(notes), plural(len(notes), "check", "checks"))
 }
 
@@ -110,6 +111,9 @@ func preflight(req ghx.Requirements) (probs []ghx.Problem, notes []string, st *g
 		return nil, nil, nil, fmt.Errorf("read gh auth status: %w", err)
 	}
 	probs = ghx.Check(st, req)
+	if note := ghx.ScopesNotApplicable(st); note != "" && st.State == ghx.StateConfirmed {
+		notes = append(notes, note)
+	}
 	keyProbs, notApplicable := checkSSHKey(req.SSHKey)
 	probs = append(probs, keyProbs...)
 	if notApplicable != "" {

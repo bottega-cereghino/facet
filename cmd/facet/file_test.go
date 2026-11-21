@@ -22,6 +22,11 @@ type fakeGH struct {
 	repoLabelErrs map[string]error
 	createURL     string
 	createdWith   []string // the labels CreateIssue was given
+	created       int      // CreateIssue calls
+
+	searchHits []ghx.Issue // what SearchIssues finds
+	searchErr  error       // what SearchIssues fails with
+	searches   int         // SearchIssues calls
 
 	issueIDs  map[string]int64 // "owner/repo#n" -> id
 	issueErrs map[string]error // "owner/repo#n" -> error from IssueID
@@ -61,15 +66,22 @@ func (f *fakeGH) ViewIssue(_ string, _ int) (*ghx.Issue, error) { return nil, ni
 func (f *fakeGH) DevelopBranch(_ string, _ int, _, _ string) (string, error) {
 	return "", nil
 }
-func (f *fakeGH) BranchesFor(_ string, _ int) ([]string, error) { return nil, nil }
-func (f *fakeGH) ViewPR(_, _ string) (*ghx.PR, error)           { return nil, nil }
+func (f *fakeGH) ViewPR(_, _ string) (*ghx.PR, error) { return nil, nil }
 func (f *fakeGH) MergedPRForSHA(_, _ string) (*ghx.PRForCommit, error) {
 	return nil, nil
 }
 func (f *fakeGH) SetIssueStatus(_ ghx.ProjectTarget, _ string) error { return nil }
 func (f *fakeGH) SetIssueBody(_ string, _ int, _ string) error       { return nil }
-func (f *fakeGH) SearchIssues(_, _ string) ([]ghx.Issue, error)      { return nil, nil }
+
+// SearchIssues answers with the scripted duplicates or error, and counts the
+// calls so a test can tell the search ran.
+func (f *fakeGH) SearchIssues(_, _ string) ([]ghx.Issue, error) {
+	f.searches++
+	return f.searchHits, f.searchErr
+}
+
 func (f *fakeGH) CreateIssue(_, _, _ string, labels []string) (string, error) {
+	f.created++
 	f.createdWith = labels
 	return f.createURL, nil
 }
@@ -115,6 +127,24 @@ func (f *fakeGH) IssueComments(repo string, number int) ([]ghx.Comment, error) {
 func (f *fakeGH) PostComment(repo string, number int, body string) (string, error) {
 	f.postedComments = append(f.postedComments, f.key(repo, number)+": "+body)
 	return "https://github.com/" + f.key(repo, number) + "-comment", nil
+}
+
+// ViewComment finds the comment by id across every scripted issue in repo, as
+// the real API does: an id is unique in the repository, not in one issue.
+func (f *fakeGH) ViewComment(repo string, commentID int64) (*ghx.Comment, error) {
+	for key, cs := range f.comments {
+		r, n, _ := strings.Cut(key, "#")
+		if r != repo {
+			continue
+		}
+		for _, c := range cs {
+			if c.ID == commentID {
+				c.IssueURL = "https://api.github.com/repos/" + r + "/issues/" + n
+				return &c, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("fakeGH.ViewComment: no comment %d in %s (HTTP 404)", commentID, repo)
 }
 
 func (f *fakeGH) EditComment(_ string, commentID int64, body string) (string, error) {
@@ -410,5 +440,94 @@ func TestRunFileSkipsAComplexityLabelTheRepoDoesNotDefine(t *testing.T) {
 	}
 	if want := []string{"area/api"}; !equalSlices(fake.createdWith, want) {
 		t.Errorf("labels = %v, want %v", fake.createdWith, want)
+	}
+}
+
+// fileAgainst runs runFile with a fake whose duplicate search is scripted.
+func fileAgainst(t *testing.T, fake *fakeGH, force, dryRun bool) error {
+	t.Helper()
+	withTempRouting(t, "acme/gateway")
+	fake.createURL = "https://github.com/acme/gateway/issues/42"
+	prevGH := gh
+	gh = fake
+	t.Cleanup(func() { gh = prevGH })
+	bodyPath := t.TempDir() + "/body.md"
+	if err := writeFile(bodyPath, "### What\n\nx\n"); err != nil {
+		t.Fatal(err)
+	}
+	return runFile(fileOpts{
+		Repo: "acme/gateway", Title: "gateway: fix the thing", BodyFile: bodyPath,
+		Force: force, DryRun: dryRun,
+	})
+}
+
+var similarIssue = []ghx.Issue{{Number: 7, Title: "gateway: fix the thing", State: "CLOSED"}}
+
+// Concurrent sessions file into the same repository, so a similar title stops
+// the filing.
+func TestRunFileRefusesADuplicate(t *testing.T) {
+	fake := &fakeGH{searchHits: similarIssue}
+	err := fileAgainst(t, fake, false, false)
+	if err == nil {
+		t.Fatal("an issue was filed beside a similar one")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("the refusal does not name the way past it: %v", err)
+	}
+	if fake.created != 0 {
+		t.Errorf("CreateIssue ran %d times despite the refusal", fake.created)
+	}
+}
+
+// A search that could not run must not read as a search that found nothing.
+func TestRunFileRefusesWhenTheSearchFails(t *testing.T) {
+	fake := &fakeGH{searchErr: errIssueNotFound}
+	err := fileAgainst(t, fake, false, false)
+	if err == nil {
+		t.Fatal("an issue was filed although the duplicate search failed")
+	}
+	if !strings.Contains(err.Error(), "duplicate search failed") || !strings.Contains(err.Error(), "--force") {
+		t.Errorf("the refusal does not say what failed and how past it: %v", err)
+	}
+	if fake.created != 0 {
+		t.Errorf("CreateIssue ran %d times despite the refusal", fake.created)
+	}
+}
+
+// --force files past a duplicate and past a failed search, and the search
+// still runs so the duplicates are printed.
+func TestRunFileForceFilesAnyway(t *testing.T) {
+	for name, fake := range map[string]*fakeGH{
+		"duplicate":     {searchHits: similarIssue},
+		"failed search": {searchErr: errIssueNotFound},
+	} {
+		if err := fileAgainst(t, fake, true, false); err != nil {
+			t.Fatalf("%s: --force refused: %v", name, err)
+		}
+		if fake.searches != 1 || fake.created != 1 {
+			t.Errorf("%s: searches=%d created=%d, want 1 and 1", name, fake.searches, fake.created)
+		}
+	}
+}
+
+// --dry-run runs the checks and the search, and creates nothing.
+func TestRunFileDryRunCreatesNothing(t *testing.T) {
+	fake := &fakeGH{}
+	if err := fileAgainst(t, fake, false, true); err != nil {
+		t.Fatalf("--dry-run: %v", err)
+	}
+	if fake.searches != 1 {
+		t.Errorf("--dry-run skipped the duplicate search (%d searches)", fake.searches)
+	}
+	if fake.created != 0 || len(fake.addBlockedByCalls) != 0 {
+		t.Errorf("--dry-run created %d issues and %d edges", fake.created, len(fake.addBlockedByCalls))
+	}
+}
+
+// The dry run is still refused on a duplicate: it answers "would this file?".
+func TestRunFileDryRunStillRefusesADuplicate(t *testing.T) {
+	fake := &fakeGH{searchHits: similarIssue}
+	if err := fileAgainst(t, fake, false, true); err == nil {
+		t.Fatal("--dry-run passed beside a similar issue")
 	}
 }

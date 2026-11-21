@@ -3,6 +3,7 @@ package ghx
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +17,24 @@ type Comment struct {
 	UpdatedAt string `json:"updated_at"`
 	URL       string `json:"html_url"`
 	User      User   `json:"user"`
+	// IssueURL is the API address of the issue the comment is on
+	// (https://api.github.com/repos/<owner>/<repo>/issues/<n>). An id names a
+	// comment anywhere in the repository, so this is what ties it to one issue.
+	IssueURL string `json:"issue_url"`
+}
+
+// Issue returns the number of the issue the comment is on, read from
+// IssueURL, and false when IssueURL does not end in one.
+func (c Comment) Issue() (int, bool) {
+	i := strings.LastIndex(c.IssueURL, "/issues/")
+	if i < 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(c.IssueURL[i+len("/issues/"):])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // Edited reports whether the comment has been changed since it was posted.
@@ -44,7 +63,7 @@ func (CLI) IssueComments(repo string, number int) ([]Comment, error) {
 
 // parseComments decodes `gh api --paginate` output: one JSON array per page,
 // concatenated rather than merged, so `[...][...]` for anything past the first
-// page. See parseDependencyEdges for why this is a stream decode.
+// page. json.Unmarshal refuses that, so it is decoded as a stream of arrays.
 func parseComments(out []byte) ([]Comment, error) {
 	dec := json.NewDecoder(strings.NewReader(string(out)))
 	var all []Comment
@@ -75,6 +94,19 @@ func (CLI) PostComment(repo string, number int, body string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// ViewComment fetches one comment by its own id.
+func (CLI) ViewComment(repo string, commentID int64) (*Comment, error) {
+	out, err := run("api", fmt.Sprintf("repos/%s/issues/comments/%d", repo, commentID))
+	if err != nil {
+		return nil, err
+	}
+	var c Comment
+	if err := json.Unmarshal(out, &c); err != nil {
+		return nil, fmt.Errorf("parse comment %d in %s: %w", commentID, repo, err)
+	}
+	return &c, nil
 }
 
 // EditComment replaces a comment's body. commentID is the id from

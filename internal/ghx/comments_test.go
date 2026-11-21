@@ -51,3 +51,27 @@ func TestCommentEdited(t *testing.T) {
 		t.Error("a zero comment reported as edited")
 	}
 }
+
+// An id names a comment anywhere in the repository; ViewComment carries the
+// issue it is on so an edit can check it.
+func TestViewCommentReadsTheIssueItIsOn(t *testing.T) {
+	args := fakeGh(t, `{"id":42,"body":"hi","issue_url":"https://api.github.com/repos/acme/lab/issues/9"}`, "", 0)
+	c, err := CLI{}.ViewComment("acme/lab", 42)
+	if err != nil {
+		t.Fatalf("ViewComment: %v", err)
+	}
+	if n, ok := c.Issue(); !ok || n != 9 {
+		t.Errorf("Issue() = %d, %v; want 9, true", n, ok)
+	}
+	if a := args(); len(a) != 2 || a[1] != "repos/acme/lab/issues/comments/42" {
+		t.Errorf("gh args = %q", a)
+	}
+}
+
+func TestCommentIssueRefusesAMalformedURL(t *testing.T) {
+	for _, u := range []string{"", "https://api.github.com/repos/acme/lab", "https://api.github.com/repos/acme/lab/issues/x"} {
+		if n, ok := (Comment{IssueURL: u}).Issue(); ok {
+			t.Errorf("Issue() on %q = %d, true; want false", u, n)
+		}
+	}
+}

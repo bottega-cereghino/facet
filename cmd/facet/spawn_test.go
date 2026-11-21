@@ -71,3 +71,18 @@ func TestIssueBranchNameCarriesFeaturePrefix(t *testing.T) {
 		t.Errorf("issueBranchName(42, %q) = %q, want %q", "some-slug", got, want)
 	}
 }
+
+// --base defaults to nothing, so `gh issue develop` branches from the
+// repository's own default branch. A default of "main" failed on every
+// repository whose default branch is called something else.
+// TestDevelopBranchPassesBaseOnlyWhenGiven holds the other half: an empty base
+// reaches gh as no --base at all.
+func TestSpawnBaseDefaultsToTheRepositorysDefaultBranch(t *testing.T) {
+	f := newSpawnCmd().Flags().Lookup("base")
+	if f == nil {
+		t.Fatal("spawn has no --base")
+	}
+	if f.DefValue != "" {
+		t.Errorf("--base defaults to %q; want empty, so gh uses the repository's default branch", f.DefValue)
+	}
+}

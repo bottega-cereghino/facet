@@ -9,28 +9,17 @@
 //	REST     5000 REQUESTS/hour a 304 Not Modified costs ZERO.
 //
 // Measured, on this account, minutes apart: `graphql 0/5000` beside
-// `core 4928/5000` -- an exhausted derivation next to an untouched budget. And
-// a conditional repeat: remaining 4921 -> 4921, delta 0.
+// `core 4928/5000` -- an exhausted GraphQL budget next to an untouched REST
+// one. And a conditional repeat: remaining 4921 -> 4921, delta 0.
 //
-// That matters because the walk's real workload is a REPEAT. A loop reading the
-// same tree every five minutes re-reads a tree that mostly did not change, and
-// GraphQL has no way to say so: it bills the full price for the same answer
-// twelve times an hour. Conditional REST bills it once.
+// That matters because an issue read is usually a REPEAT: spawn reads the
+// issue, and reads it again before writing its body back, and a re-spawn reads
+// it once more. GraphQL has no way to say "unchanged" and bills the full price
+// each time; conditional REST bills it once. ViewIssue is the one read that
+// goes through here.
 //
-// ONE GRAPHQL POINT PER WALK REMAINS, AND IT IS NOT "NONE". An issue's PARENT
-// has no REST endpoint at all, so LevelOf's climb is GraphQL and always will
-// be -- measured at exactly 1 point per walk, repeatably. Every PER-NODE read
-// moved; the root's single climb did not. Claiming "no GraphQL at all" was
-// wrong, and it is the kind of claim that stops anyone re-measuring.
-//
-// THE FAILURE THIS PREVENTS IS NOT SLOWNESS. A GraphQL budget that runs out
-// does not error the walk -- it SHORTENS it. Measured: with 15 points left, a
-// walk printed 49 of 160 nodes, exited zero and wrote nothing to stderr, and
-// every consumer downstream then filtered a short tree and reported
-// confidently on it.
-//
-// AND A CACHE MUST NEVER SERVE STALE DATA. Cheap and wrong is worse than the
-// walk this replaces. Nothing here decides for itself that an entry is still
+// AND A CACHE MUST NEVER SERVE STALE DATA. Cheap and wrong is worse than
+// paying in full. Nothing here decides for itself that an entry is still
 // good: GitHub decides, by answering 304, and a 200 replaces the entry
 // outright. There is no expiry to tune and no staleness window to be wrong
 // about.
@@ -49,17 +38,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-// condResult is one conditional read.
-type condResult struct {
-	Body []byte
-	// NotModified says GitHub answered 304, so Body came from the cache and
-	// the read cost nothing.
-	NotModified bool
-	// More says the response was paginated and this is only the first page.
-	// The caller must fall back to a full read rather than treat it as whole.
-	More bool
-}
 
 // cacheEntry is what is kept on disk per request path.
 type cacheEntry struct {
@@ -125,7 +103,7 @@ func writeCache(requestPath string, e cacheEntry) {
 	if err != nil {
 		return
 	}
-	// Write beside and rename, so a walk interrupted mid-write cannot leave a
+	// Write beside and rename, so a run interrupted mid-write cannot leave a
 	// half-written entry that later reads as a valid one.
 	tmp := p + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
@@ -134,14 +112,17 @@ func writeCache(requestPath string, e cacheEntry) {
 	_ = os.Rename(tmp, p)
 }
 
-// condGet performs a conditional GET through gh and returns the body, whether
-// it came free, and whether more pages exist.
+// condGet performs a conditional GET through gh and returns the body, from
+// the cache when GitHub answers 304.
 //
 // `gh api -i` is what makes this expressible: WITHOUT it, gh exits 1 on a 304
 // with only "gh: HTTP 304" on stderr, and the response is indistinguishable
 // from a failure. With it, gh exits 0 and the status line and headers are
 // readable. Measured both ways.
-func condGet(requestPath string) (condResult, error) {
+//
+// It is meant for one resource, never a list: a 304 carries no Link header,
+// so a cached first page could later be served as the whole answer.
+func condGet(requestPath string) ([]byte, error) {
 	cached, haveCache := readCache(requestPath)
 
 	args := []string{"api", "-i", requestPath}
@@ -171,53 +152,41 @@ func condGet(requestPath string) (condResult, error) {
 		if msg == "" {
 			msg = "no HTTP status in the response"
 		}
-		return condResult{}, fmt.Errorf("gh api -i %s: %s", requestPath, msg)
+		return nil, fmt.Errorf("gh api -i %s: %s", requestPath, msg)
 	}
 	switch {
 	case status == 304 && haveCache:
-		return condResult{Body: cached.Body, NotModified: true}, nil
+		return cached.Body, nil
 	case status == 304:
 		// A 304 with nothing to serve it from. Never observed, and if it ever
 		// happens the honest answer is that this read did not answer.
-		return condResult{}, fmt.Errorf("%s: 304 Not Modified with no cached copy to serve", requestPath)
+		return nil, fmt.Errorf("%s: 304 Not Modified with no cached copy to serve", requestPath)
 	case status < 200 || status > 299:
-		return condResult{}, fmt.Errorf("%s: HTTP %d", requestPath, status)
+		return nil, fmt.Errorf("%s: HTTP %d: %s", requestPath, status, failureMessage(body, stderr.String()))
 	}
 
-	more := hasNextPage(headers["link"])
-	retainResponse(requestPath, headers["etag"], body, more)
-	return condResult{Body: body, More: more}, nil
-}
-
-// retainResponse decides what, if anything, this response leaves behind.
-//
-// A PARTIAL BODY IS NEVER CACHED, and any entry already held for the path is
-// dropped. The entry cannot carry "there were more pages": a 304 has NO Link
-// header, so that fact cannot survive the round trip -- and a later conditional
-// read would then serve page one as the whole answer, silently, with exit 0.
-// That is the very failure this file exists to remove, a short list that looks
-// complete, arriving by the cache instead of by the rate limit.
-//
-// The cost is that a paginated path is never cheap. It stays correct, which is
-// the half that may not be traded.
-//
-// Split out from condGet so the decision is testable without a live request:
-// it is one branch, and it was wrong once.
-func retainResponse(requestPath, etag string, body []byte, more bool) {
-	if more {
-		dropCache(requestPath)
-		return
-	}
-	if etag != "" {
+	if etag := headers["etag"]; etag != "" {
 		writeCache(requestPath, cacheEntry{ETag: etag, Body: body})
 	}
+	return body, nil
 }
 
-// dropCache removes an entry, so nothing partial or superseded is ever held.
-func dropCache(requestPath string) {
-	if p, ok := cachePath(requestPath); ok {
-		_ = os.Remove(p)
+// failureMessage says why GitHub refused, in GitHub's words: the `message` of
+// its JSON error body ("API rate limit exceeded for …", "Bad credentials",
+// "Not Found"), else what gh printed on stderr. The status alone reads the
+// same for a rate limit and a missing permission, and those need different
+// fixes.
+func failureMessage(body []byte, stderr string) string {
+	var e struct {
+		Message string `json:"message"`
 	}
+	if json.Unmarshal(body, &e) == nil && strings.TrimSpace(e.Message) != "" {
+		return strings.TrimSpace(e.Message)
+	}
+	if msg := strings.TrimSpace(stderr); msg != "" {
+		return msg
+	}
+	return "GitHub gave no reason"
 }
 
 // splitResponse pulls the status code, the headers and the body out of what
@@ -268,10 +237,4 @@ func parseHeaderBlock(block []byte) (int, map[string]string) {
 		headers[strings.ToLower(strings.TrimSpace(name))] = strings.TrimSpace(value)
 	}
 	return status, headers
-}
-
-// hasNextPage reads GitHub's Link header. A page-one answer read as the whole
-// answer is the same defect class as a truncated connection: it looks complete.
-func hasNextPage(link string) bool {
-	return strings.Contains(link, `rel="next"`)
 }

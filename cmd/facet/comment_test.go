@@ -229,3 +229,49 @@ func TestCommentKindRefusalDoesNotRecommendAnUnanchoredPattern(t *testing.T) {
 		t.Errorf("the fix line does not warn about anchoring:\n%s", msg)
 	}
 }
+
+// A comment id is unique in the repository, so the API would edit comment 4
+// even when the command names another issue. The edit refuses, edits nothing,
+// and names the issue the comment is really on.
+func TestCommentEditRefusesACommentOnAnotherIssue(t *testing.T) {
+	f := commentFake()
+	f.comments["acme/lab#5"] = []ghx.Comment{{ID: 50, Body: "on five"}}
+	err := runCommentEdit(&bytes.Buffer{}, f, iref("acme", "lab", 5), 4, "new body")
+	if err == nil {
+		t.Fatal("comment 4, which is on #75, was edited through #5")
+	}
+	if len(f.editedComments) != 0 {
+		t.Errorf("a comment was edited despite the refusal: %v", f.editedComments)
+	}
+	for _, want := range []string{"acme/lab#75", "fix:", "facet comment edit acme/lab#75 --id 4"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal is missing %q:\n%s", want, err)
+		}
+	}
+}
+
+func TestCommentEditEditsACommentOnTheNamedIssue(t *testing.T) {
+	f := commentFake()
+	if err := runCommentEdit(&bytes.Buffer{}, f, iref("acme", "lab", 75), 4, "new body"); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	if want := []string{"4: new body"}; !equalSlices(f.editedComments, want) {
+		t.Errorf("edited = %v, want %v", f.editedComments, want)
+	}
+}
+
+// A lookup that fails is not a pass: the edit refuses rather than editing a
+// comment it could not place.
+func TestCommentEditRefusesWhenTheCommentCannotBeLookedUp(t *testing.T) {
+	f := commentFake()
+	err := runCommentEdit(&bytes.Buffer{}, f, iref("acme", "lab", 75), 999, "new body")
+	if err == nil {
+		t.Fatal("an unknown comment id was edited")
+	}
+	if len(f.editedComments) != 0 {
+		t.Errorf("a comment was edited despite the refusal: %v", f.editedComments)
+	}
+	if !strings.Contains(err.Error(), "fix:") {
+		t.Errorf("refusal does not print the fix:\n%s", err)
+	}
+}
