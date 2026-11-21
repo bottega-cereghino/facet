@@ -93,9 +93,16 @@ func run(ctx context.Context, dir string, env []string, args ...string) (string,
 		if errors.As(err, &ee) {
 			code = ee.ExitCode()
 		}
-		return strings.TrimSpace(stdout.String()), &Error{Args: args, ExitCode: code, Stderr: stderr.String()}
+		return trimOutput(stdout.String()), &Error{Args: args, ExitCode: code, Stderr: stderr.String()}
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return trimOutput(stdout.String()), nil
+}
+
+// trimOutput drops the trailing newline git ends its output with. Leading
+// whitespace is kept: in `status --porcelain` it is the status column, and
+// trimming it cut a character off the first path and hid a modified file.
+func trimOutput(s string) string {
+	return strings.TrimRight(s, " \t\r\n")
 }
 
 // IsRepo reports whether dir contains a git repository.

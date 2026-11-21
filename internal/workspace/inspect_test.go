@@ -99,6 +99,8 @@ func TestLooseFileOutsideARepositoryBlocksReap(t *testing.T) {
 func TestFacetsOwnFilesAreNotLoose(t *testing.T) {
 	ws, _ := longLivedWorkspace(t, t.TempDir())
 	writeTestFile(t, filepath.Join(ws, ".scope"), "o/repo#1\n")
+	// A sync that crashed leaves its lock behind.
+	writeTestFile(t, filepath.Join(ws, syncLockName), "")
 
 	st, err := Inspect(ws, gitx.Git{}, nil, nil)
 	if err != nil {

@@ -70,3 +70,38 @@ func TestRunTimeoutSucceedsWithinBudget(t *testing.T) {
 		t.Error("RunTimeout did not run the command")
 	}
 }
+
+// Leading whitespace is data: in `status --porcelain` it is the status column.
+// Trimming it once cut the first character off a path and hid a modified file
+// from reap.
+func TestRunKeepsLeadingWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	g := Git{}
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"},
+	} {
+		if _, err := g.Run(dir, nil, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Run(dir, nil, "add", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Run(dir, nil, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a"), []byte("2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := g.Run(dir, nil, "status", "--porcelain=v1", "-z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != " M a\x00" && out != " M a" {
+		t.Errorf("status = %q, want the status column kept: \" M a\"", out)
+	}
+}
