@@ -304,8 +304,12 @@ their targets are untouched.
 delete now. It lists them with the disk each frees and the total, asks once,
 and leaves every held workspace alone. It never forces, and it checks each
 workspace again just before deleting it, so work started while the prompt
-waited is not lost. `--dry-run` prints the list, worktrees included, and stops
-there; `facet ls --size` shows the workspaces without deleting.
+waited is not lost. It never guesses either: a workspace with a remote it could
+not fetch is left alone and named, since a branch deleted upstream would still
+read as pushed; `facet reap <name>` takes it with a note saying so. It fetches
+each repository once, however many worktree clones share it. `--dry-run`
+prints the list, worktrees included, and stops there; `facet ls --size` shows
+the workspaces without deleting.
 
 `reap` also takes a plain git worktree: one made with `git worktree add`, by
 hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
@@ -503,6 +507,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   was pushed there no longer reads as pushed; a remote it cannot fetch is named
   (`TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed`,
   `TestReapNamesTheRemoteItCouldNotFetch`).
+- **`reap --reapable` leaves alone a workspace it could not fetch for**, and
+  names it: "nothing unpushed" was judged against refs on disk
+  (`TestReapReapableHoldsAWorkspaceJudgedAgainstAFailedFetch`). It fetches
+  each repository once, so worktree clones of one checkout do not fetch into
+  the same refs at once and collide (`TestSharedFetchFetchesEachRepositoryOnce`).
 - **`reap` judges each initialised submodule as a clone of its own**,
   recursively: its commits, branches and stash live in the clone's git
   directory and go with it, while the superproject sees only the commit it

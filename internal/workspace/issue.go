@@ -191,6 +191,19 @@ func (s *IssueState) Blockers() []string {
 	return out
 }
 
+// StaleFetch reports whether any clone was judged against refs that could not
+// be fetched first. A single reap goes ahead with a note, since refusing every
+// offline reap would make it useless without a network; reap --reapable, which
+// never guesses, leaves such a workspace alone.
+func (s *IssueState) StaleFetch() bool {
+	for _, c := range s.Clone {
+		if len(c.StaleRemotes) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Notes lists non-blocking information about a workspace's state -- things
 // worth saying so an operator does not read silence as "nothing to report"
 // (facet#66). Nothing here belongs in Blockers(): every entry is something

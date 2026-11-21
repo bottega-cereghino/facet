@@ -14,6 +14,7 @@ import (
 	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/ghx"
 	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/gitx/gitxtest"
 	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/manifest"
 	"github.com/bottega-cereghino/facet/internal/mux"
@@ -532,5 +533,44 @@ func TestReapRefusesWhileAProcessIsInTheWorkspace(t *testing.T) {
 	}
 	if !exists(t, free) {
 		t.Fatal("reap deleted a workspace a process is running in")
+	}
+}
+
+// A pushed branch deleted upstream since, then a sweep while origin cannot be
+// reached: "nothing unpushed" was judged against refs on disk that still name
+// the branch. A single reap says so in a note; --reapable never guesses, so it
+// leaves the workspace alone and says why (facet#267).
+func TestReapReapableHoldsAWorkspaceJudgedAgainstAFailedFetch(t *testing.T) {
+	root, _, _ := reapableRoot(t)
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	gitIn(t, "", "init", "-q", "--bare", "-b", "main", origin)
+	seed := filepath.Join(t.TempDir(), "seed")
+	gitIn(t, "", "clone", "-q", origin, seed)
+	gitIn(t, seed, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
+	gitIn(t, seed, "push", "-q", "origin", "HEAD:main")
+	ws := filepath.Join(root, "facet-test-reapable-stale")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&manifest.Manifest{Name: "stale", Clones: map[string]string{"app": origin}}).Write(ws); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "", "clone", "-q", origin, filepath.Join(ws, "app"))
+	git = &gitxtest.Runner{
+		Real: gitx.Git{},
+		Fail: func(args []string) bool { return len(args) > 0 && args[0] == "fetch" },
+		Err:  errors.New("could not resolve host"),
+	}
+	var out bytes.Buffer
+	if err := reapReapable(&out, []string{ws}, true, false, nil); err != nil {
+		t.Fatalf("reapReapable: %v\n%s", err, out.String())
+	}
+	if !exists(t, filepath.Join(ws, "app")) {
+		t.Fatalf("a workspace judged against a failed fetch was deleted:\n%s", out.String())
+	}
+	for _, want := range []string{"could not fetch origin", "facet reap facet-test-reapable-stale"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
 	}
 }

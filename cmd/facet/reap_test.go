@@ -169,7 +169,7 @@ func TestReapRefusesAFolderInsideAWorkspace(t *testing.T) {
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := inspectTarget(src, nil)
+	_, err := inspectTarget(src, git, nil)
 	if err == nil || !strings.Contains(err.Error(), "inside the workspace "+free) || !strings.Contains(err.Error(), "fix: facet reap "+free) {
 		t.Fatalf("reap %s = %v; want a refusal naming the workspace", src, err)
 	}
