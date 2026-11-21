@@ -8,24 +8,30 @@ import (
 	"github.com/bottega-cereghino/facet/internal/ghx"
 )
 
-// windowsNote is a Windows-shaped not-applicable notice. The real one comes
-// from ghx and only exists on that platform; this stands in for it so the
-// DISPLAY rule can be exercised on every host.
-const windowsNote = "ssh key permissions were NOT checked on this platform. " +
-	"Verify it yourself with `icacls %USERPROFILE%\\.ssh\\id_ed25519`."
+// fineGrained is a sound credential whose scopes check cannot run: a
+// fine-grained token reports no scopes, so the preflight notes the check as
+// skipped (ghx.ScopesNotApplicable).
+var fineGrained = &ghx.AuthStatus{
+	Host: "github.com", State: ghx.StateConfirmed,
+	Account: "someone", Active: true,
+	TokenType: "github_pat_", GitProtocol: "ssh", ConfigSource: "/dev/null",
+}
 
-// withFakes points the command's two seams at scripted values: a sound
-// credential, and an SSH-key check that reports one skipped check.
-func withFakes(t *testing.T, note string) {
+// withFakes points the command's two seams at scripted values: auth as the
+// credential (nil for a sound classic token), and an SSH key that passes.
+func withFakes(t *testing.T, auth *ghx.AuthStatus) {
 	t.Helper()
 	prevGH := gh
-	gh = &fakeGH{}
+	gh = &fakeGH{auth: auth}
 	t.Cleanup(func() { gh = prevGH })
 
 	prevCheck := checkSSHKey
-	checkSSHKey = func(string) ([]ghx.Problem, string) { return nil, note }
+	checkSSHKey = func(string) []ghx.Problem { return nil }
 	t.Cleanup(func() { checkSSHKey = prevCheck })
 }
+
+// skippedNote is the note fineGrained produces.
+var skippedNote = ghx.ScopesNotApplicable(fineGrained)
 
 // TestRunPreflightDisplaysTheSkippedCheck is the guard on the rule itself.
 //
@@ -39,7 +45,7 @@ func withFakes(t *testing.T, note string) {
 // the notes, hardcodes an unqualified pass, or prints the notice below the
 // green tick -- ordering is a property of the composition, not of either piece.
 func TestRunPreflightDisplaysTheSkippedCheck(t *testing.T) {
-	withFakes(t, windowsNote)
+	withFakes(t, fineGrained)
 
 	var buf bytes.Buffer
 	if err := runPreflight(&buf); err != nil {
@@ -47,7 +53,7 @@ func TestRunPreflightDisplaysTheSkippedCheck(t *testing.T) {
 	}
 	out := buf.String()
 
-	noteAt := strings.Index(out, windowsNote)
+	noteAt := strings.Index(out, skippedNote)
 	if noteAt < 0 {
 		t.Fatalf("the notice never reached the operator:\n%s", out)
 	}
@@ -71,7 +77,7 @@ func TestRunPreflightDisplaysTheSkippedCheck(t *testing.T) {
 // ran, the verdict must NOT be hedged. A preflight that always warns is a
 // preflight nobody distinguishes -- the qualifier has to mean something.
 func TestRunPreflightFullPassIsUnqualified(t *testing.T) {
-	withFakes(t, "")
+	withFakes(t, nil)
 
 	var buf bytes.Buffer
 	if err := runPreflight(&buf); err != nil {
@@ -91,11 +97,11 @@ func TestRunPreflightFullPassIsUnqualified(t *testing.T) {
 // sound credential, and when it does it must still say which part of the
 // surface went unchecked.
 func TestWarnPreflightDisplaysTheSkippedCheck(t *testing.T) {
-	withFakes(t, windowsNote)
+	withFakes(t, fineGrained)
 
 	var buf bytes.Buffer
 	warnPreflight(&buf, "spawn")
-	if !strings.Contains(buf.String(), windowsNote) {
+	if !strings.Contains(buf.String(), skippedNote) {
 		t.Errorf("spawn proceeded without saying what went unchecked:\n%s", buf.String())
 	}
 }
@@ -123,13 +129,12 @@ func TestWarnPreflightWarnsAndProceeds(t *testing.T) {
 // A default `gh auth login` token is a gho_ token. `facet preflight` reports
 // it; spawn does not warn about it on every run, since it breaks nothing.
 func TestWarnPreflightDoesNotWarnAboutTheTokenType(t *testing.T) {
-	withFakes(t, "")
-	gh = &fakeGH{auth: &ghx.AuthStatus{
+	withFakes(t, &ghx.AuthStatus{
 		Host: "github.com", State: ghx.StateConfirmed,
 		Account: "someone", Active: true,
 		TokenType: "gho_", Scopes: []string{"read:org", "repo", "workflow"},
 		GitProtocol: "ssh", ConfigSource: "/dev/null",
-	}}
+	})
 
 	var buf bytes.Buffer
 	warnPreflight(&buf, "spawn")
@@ -144,7 +149,7 @@ func TestWarnPreflightDoesNotWarnAboutTheTokenType(t *testing.T) {
 
 // TestWarnPreflightSilentWhenSound: a sound credential costs no output.
 func TestWarnPreflightSilentWhenSound(t *testing.T) {
-	withFakes(t, "")
+	withFakes(t, nil)
 
 	var buf bytes.Buffer
 	warnPreflight(&buf, "spawn")
@@ -153,22 +158,15 @@ func TestWarnPreflightSilentWhenSound(t *testing.T) {
 	}
 }
 
-// TestPassLineNeverOverstatesItself is the assertion that keeps the Windows
-// carve-out from becoming a lie.
-//
-// The permission half of the SSH-key check cannot run on Windows (see
-// ghx.CheckSSHKey). That is acceptable only while the OUTPUT says so. A user
-// must never read a green preflight on Windows and believe their key
-// permissions were verified.
-//
-// This runs on every platform, because the reporting contract is what is being
-// asserted, not the platform.
+// TestPassLineNeverOverstatesItself: a check that did not run is acceptable
+// only while the OUTPUT says so. A user must never read a green preflight and
+// believe something was verified that was not.
 func TestPassLineNeverOverstatesItself(t *testing.T) {
 	if got := passLine(nil); got != "✓ credential preflight passed" {
 		t.Errorf("with every check applied, the pass line must be unqualified; got %q", got)
 	}
 
-	got := passLine([]string{"ssh key permissions were NOT checked on this platform. …"})
+	got := passLine([]string{skippedNote})
 	if !strings.Contains(got, "did NOT run") {
 		t.Errorf("a pass with a skipped check must say so on the pass line itself; got %q", got)
 	}
@@ -181,7 +179,7 @@ func TestPassLineNeverOverstatesItself(t *testing.T) {
 // nobody reads. It has to land above the line it qualifies.
 func TestNotesPrintBeforeTheVerdict(t *testing.T) {
 	var buf bytes.Buffer
-	writeNotes(&buf, []string{"ssh key permissions were NOT checked on this platform."})
+	writeNotes(&buf, []string{skippedNote})
 	out := buf.String()
 
 	if !strings.HasPrefix(out, "! ") {
@@ -201,7 +199,7 @@ func TestNotesPrintBeforeTheVerdict(t *testing.T) {
 // A fine-grained token passes, and the verdict says the scopes check did not
 // run for it rather than claiming the scopes were verified.
 func TestRunPreflightFineGrainedTokenPassesWithANote(t *testing.T) {
-	withFakes(t, "")
+	withFakes(t, nil)
 	gh = &fakeGH{auth: &ghx.AuthStatus{
 		Host: "github.com", State: ghx.StateConfirmed,
 		Account: "RiccardoCereghino", Active: true,

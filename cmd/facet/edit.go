@@ -38,7 +38,7 @@ func newNewCmd() *cobra.Command {
 		Short: "Scaffold a workspace and its entries",
 		Long: "Creates the directory and .workspace.json, then syncs.\n\n" +
 			"A --clone entry is a checkout the workspace owns outright. A --link entry is\n" +
-			"a junction into a shared repo under the projects root, whose working tree every\n" +
+			"a symlink into a shared repo under the projects root, whose working tree every\n" +
 			"linking workspace sees at once.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -127,7 +127,7 @@ func newAddLinkCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "link <dir> <ProjectFolder>",
-		Short: "Add a junction into a shared repo under the projects root",
+		Short: "Add a symlink into a shared repo under the projects root",
 		Long: "Every workspace linking a project sees one working tree: one branch, one\n" +
 			"dirty index. Use a clone when a workspace must not share.",
 		Args: cobra.ExactArgs(2),

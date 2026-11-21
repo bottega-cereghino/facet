@@ -18,7 +18,7 @@ func withUnsoundCredential(t *testing.T) {
 	t.Cleanup(func() { gh = prevGH })
 
 	prevCheck := checkSSHKey
-	checkSSHKey = func(string) ([]ghx.Problem, string) { return nil, "" }
+	checkSSHKey = func(string) []ghx.Problem { return nil }
 	t.Cleanup(func() { checkSSHKey = prevCheck })
 }
 

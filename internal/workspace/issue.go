@@ -830,10 +830,9 @@ func ListIssues(roots config.Roots, git gitx.Runner, pr PRLookup, mux LiveChecke
 // A clone that is a worktree of a checkout is removed through that checkout
 // first, so the checkout forgets it; its branch stays there.
 func Reap(st *IssueState, git gitx.Runner) error {
-	// Windows will not remove a directory that is some process's working
-	// directory -- and reap is meant to be run from inside the workspace it
-	// deletes. Step out first, or the tree is half-removed and the error blames
-	// "another process".
+	// reap is meant to be run from inside the workspace it deletes. Step out
+	// first, so no git this process runs afterwards starts in a directory that
+	// no longer exists.
 	if wd, err := os.Getwd(); err == nil && isUnder(st.Dir, wd) {
 		if err := os.Chdir(filepath.Dir(st.Dir)); err != nil {
 			return fmt.Errorf("step out of %s before deleting it: %w", st.Dir, err)
@@ -876,8 +875,6 @@ func isUnder(root, path string) bool {
 // WalkDir stats with Lstat, so a symlink to a directory arrives with IsDir() ==
 // false and is skipped; os.Chmod follows symlinks and would otherwise change the
 // target, outside the tree (facet#87).
-//
-// Windows, where a read-only file cannot be deleted, is not supported.
 func removeAllForce(root string) error {
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

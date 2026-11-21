@@ -194,13 +194,7 @@ func (s *Store) Update(raw string) (string, error) {
 			if err := os.RemoveAll(tmp); err != nil { // clear a prior crash's leftover
 				return err
 			}
-			// The second -c is not redundant: the first configures this command,
-			// the second persists into the new repo, so later fetches inside the
-			// mirror can also write paths past Windows' MAX_PATH.
-			if _, err := s.Git.Run("", nil,
-				"-c", "core.longpaths=true", "clone", "--mirror",
-				"-c", "core.longpaths=true", "--", raw, tmp, // `--`: raw is never an option
-			); err != nil {
+			if _, err := s.Git.Run("", nil, "clone", "--mirror", "--", raw, tmp); err != nil { // `--`: raw is never an option
 				_ = os.RemoveAll(tmp) // never leave a partial clone behind
 				return fmt.Errorf("mirror clone %s: %w", raw, err)
 			}
@@ -210,10 +204,6 @@ func (s *Store) Update(raw string) (string, error) {
 			}
 			s.stamp(path) // just fetched, by definition
 			return nil
-		}
-		// Repair mirrors created before core.longpaths was persisted.
-		if _, err := s.Git.Run(path, nil, "config", "core.longpaths", "true"); err != nil {
-			s.warn("could not set core.longpaths on %s: %v", path, err)
 		}
 		if s.fresh(path) {
 			return nil

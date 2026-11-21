@@ -57,9 +57,8 @@ func runPreflight(w io.Writer) error {
 	}
 
 	// Notes print on the pass path too, and before the verdict. A check that
-	// did not run on this platform must never be readable as a check that
-	// passed -- that is the difference between a documented carve-out and a
-	// lie, and the pass line below is exactly where someone would misread it.
+	// did not run must never be readable as a check that passed, and the pass
+	// line below is exactly where someone would misread it.
 	writeNotes(w, notes)
 
 	if len(probs) == 0 {
@@ -74,8 +73,8 @@ func runPreflight(w io.Writer) error {
 }
 
 // passLine states plainly how much of the preflight actually ran, so a green
-// tick cannot overstate itself. A check is skipped on a platform that cannot
-// run it, or for a credential it does not apply to.
+// tick cannot overstate itself. A check is skipped for a credential it does not
+// apply to.
 func passLine(notes []string) string {
 	if len(notes) == 0 {
 		return "✓ credential preflight passed"
@@ -93,17 +92,12 @@ func writeNotes(w io.Writer, notes []string) {
 	}
 }
 
-// checkSSHKey is a package var for the same reason `gh` is: so a test can drive
-// the reporting path with another platform's not-applicable notice.
-//
-// Without it the display rule -- a green tick must never imply a check that did
-// not run -- would be unguarded on every host except Windows, since that is the
-// only platform where the real check produces a notice. A rule about what the
-// operator sees has to be testable wherever the tests run.
+// checkSSHKey is a package var for the same reason `gh` is: so a test checks a
+// scripted key instead of the one in the home directory of whoever runs it.
 var checkSSHKey = ghx.CheckSSHKey
 
 // preflight runs every check and returns the problems, any checks that could
-// not be applied on this platform, and the status it read, so callers can
+// not be applied to this credential, and the status it read, so callers can
 // report all three.
 func preflight(req ghx.Requirements) (probs []ghx.Problem, notes []string, st *ghx.AuthStatus, err error) {
 	st, err = gh.Auth()
@@ -114,11 +108,7 @@ func preflight(req ghx.Requirements) (probs []ghx.Problem, notes []string, st *g
 	if note := ghx.ScopesNotApplicable(st); note != "" && st.State == ghx.StateConfirmed {
 		notes = append(notes, note)
 	}
-	keyProbs, notApplicable := checkSSHKey(req.SSHKey)
-	probs = append(probs, keyProbs...)
-	if notApplicable != "" {
-		notes = append(notes, notApplicable)
-	}
+	probs = append(probs, checkSSHKey(req.SSHKey)...)
 	return probs, notes, st, nil
 }
 
