@@ -60,7 +60,7 @@ func TestReapReapableDeletesOnlyWhatNothingHolds(t *testing.T) {
 	_, free, held := reapableRoot(t)
 	var out bytes.Buffer
 	var asked string
-	err := reapReapable(&out, []string{free, held}, false, func(q string) bool { asked = q; return true })
+	err := reapReapable(&out, []string{free, held}, false, false, func(q string) bool { asked = q; return true })
 	if err != nil {
 		t.Fatalf("reapReapable: %v\n%s", err, out.String())
 	}
@@ -83,7 +83,7 @@ func TestReapReapableDeletesOnlyWhatNothingHolds(t *testing.T) {
 func TestReapReapableDeletesNothingWhenTheAnswerIsNo(t *testing.T) {
 	_, free, held := reapableRoot(t)
 	var out bytes.Buffer
-	if err := reapReapable(&out, []string{free, held}, false, func(string) bool { return false }); err != nil {
+	if err := reapReapable(&out, []string{free, held}, false, false, func(string) bool { return false }); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(t, free) || !exists(t, held) {
@@ -105,7 +105,7 @@ func TestReapReapableChecksAgainBeforeDeleting(t *testing.T) {
 		}
 		return true
 	}
-	if err := reapReapable(&out, []string{free, held}, false, startWork); err != nil {
+	if err := reapReapable(&out, []string{free, held}, false, false, startWork); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(t, filepath.Join(free, "draft.md")) {
@@ -120,11 +120,33 @@ func TestReapReapableSaysSoWhenNothingIsReapable(t *testing.T) {
 	_, _, held := reapableRoot(t)
 	var out bytes.Buffer
 	ask := func(string) bool { t.Fatal("asked although there is nothing to delete"); return false }
-	if err := reapReapable(&out, []string{held}, false, ask); err != nil {
+	if err := reapReapable(&out, []string{held}, false, false, ask); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "nothing to reap: 1 held") {
 		t.Errorf("output:\n%s", out.String())
+	}
+}
+
+// --dry-run prints what --reapable would delete, asks nothing and deletes
+// nothing, even with --yes.
+func TestReapReapableDryRunDeletesNothing(t *testing.T) {
+	_, free, held := reapableRoot(t)
+	var out bytes.Buffer
+	ask := func(string) bool { t.Fatal("a dry run asked"); return true }
+	if err := reapReapable(&out, []string{free, held}, true, true, ask); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, free) {
+		t.Fatalf("a dry run deleted %s:\n%s", free, out.String())
+	}
+	for _, want := range []string{"facet-test-reapable-free ", "1 reapable", "1 held left alone", "dry run: nothing was deleted."} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "removed ") || strings.Contains(out.String(), "freed ") {
+		t.Errorf("a dry run reported a deletion:\n%s", out.String())
 	}
 }
 
@@ -134,6 +156,7 @@ func TestReapReapableRefusesForceAndAWorkspace(t *testing.T) {
 		{"--reapable", "--force"},
 		{"--reapable", "facet-test-reapable-free"},
 		{"--reapable", "--path", free},
+		{"--dry-run"},
 	} {
 		cmd := newReapCmd()
 		cmd.SetArgs(args)
@@ -189,7 +212,7 @@ func TestReapReapableLeavesAnOpenOrUnknownPullRequestAlone(t *testing.T) {
 		errs:   map[string]error{ub: errors.New("HTTP 502")},
 	}
 	var out bytes.Buffer
-	if err := reapReapable(&out, []string{merged, open, unknown}, false, func(string) bool { return true }); err != nil {
+	if err := reapReapable(&out, []string{merged, open, unknown}, false, false, func(string) bool { return true }); err != nil {
 		t.Fatalf("reapReapable: %v\n%s", err, out.String())
 	}
 	if exists(t, merged) {
@@ -223,7 +246,7 @@ func TestReapReapableChecksThePullRequestAgain(t *testing.T) {
 			gh = f
 			var out bytes.Buffer
 			ask := func(string) bool { tc.change(f, branch); return true }
-			if err := reapReapable(&out, []string{dir}, false, ask); err != nil {
+			if err := reapReapable(&out, []string{dir}, false, false, ask); err != nil {
 				t.Fatal(err)
 			}
 			if !exists(t, dir) {
@@ -246,7 +269,7 @@ func TestReapReapableSaysWhatItCouldNotCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := reapReapable(&out, []string{free, broken}, false, func(string) bool { return true }); err != nil {
+	if err := reapReapable(&out, []string{free, broken}, false, false, func(string) bool { return true }); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(t, broken) {
@@ -271,7 +294,7 @@ func TestReapReapableListsDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := reapReapable(&out, []string{free, copied}, false, func(string) bool { return false }); err != nil {
+	if err := reapReapable(&out, []string{free, copied}, false, false, func(string) bool { return false }); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"facet-test-reapable-free ", "facet-test-reapable-copy "} {
@@ -328,7 +351,7 @@ func TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom(t *testing.T) {
 	}}
 	var out bytes.Buffer
 	ask := func(string) bool { t.Fatal("asked although nothing is reapable"); return false }
-	if err := reapReapable(&out, []string{free, held}, false, ask); err != nil {
+	if err := reapReapable(&out, []string{free, held}, false, false, ask); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(t, free) {

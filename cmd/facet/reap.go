@@ -79,6 +79,7 @@ func newReapCmd() *cobra.Command {
 		force    bool
 		yes      bool
 		reapable bool
+		dryRun   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "reap",
@@ -101,9 +102,13 @@ func newReapCmd() *cobra.Command {
 			"--reapable deletes every workspace at the root that reap would delete now, and\n" +
 			"every such worktree of the checkouts under the projects root:\n" +
 			"it lists them with the disk each frees, asks once, and checks each again just\n" +
-			"before deleting it. It never forces; held workspaces are left alone.",
+			"before deleting it. It never forces; held workspaces are left alone. With\n" +
+			"--dry-run it prints the list and deletes nothing.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if dryRun && !reapable {
+				return fmt.Errorf("--dry-run lists what --reapable would delete; add --reapable")
+			}
 			if reapable {
 				if force {
 					return fmt.Errorf("--reapable never forces; to delete a held workspace, name it: facet reap <name> --force")
@@ -130,7 +135,7 @@ func newReapCmd() *cobra.Command {
 				for _, u := range unchecked {
 					fmt.Printf("could not list worktrees, left alone: %s\n", u)
 				}
-				return reapReapable(os.Stdout, append(dirs, wts...), yes, confirm)
+				return reapReapable(os.Stdout, append(dirs, wts...), yes, dryRun, confirm)
 			}
 			ws, err := reapTarget(path, args)
 			if err != nil {
@@ -202,6 +207,7 @@ func newReapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "delete even when work would be lost")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	cmd.Flags().BoolVar(&reapable, "reapable", false, "delete every workspace at the root that reap would delete now, after one confirmation")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --reapable: print the list, delete nothing")
 	return cmd
 }
 
