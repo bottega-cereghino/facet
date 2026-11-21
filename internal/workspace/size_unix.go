@@ -14,11 +14,16 @@ import (
 // hardlinks, so they outlive the workspace and are not counted; a symlink
 // counts as itself, never as its target. A tree that cannot be read counts
 // what could be.
+//
+// On APFS a file counts only the extents no clone of it shares (privateBytes),
+// so a node_modules cloned from a package store is not counted as a copy. Two
+// clones of one file that both sit inside root count nothing for it, which
+// makes the figure a lower bound there.
 func freedBytes(root string) int64 {
 	type inode struct{ dev, ino uint64 }
 	seen := map[inode]int{}
 	var total int64
-	_ = filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -32,6 +37,11 @@ func freedBytes(root string) int64 {
 			return nil
 		}
 		blocks := int64(st.Blocks) * 512
+		if d.Type().IsRegular() {
+			if p, ok := privateBytes(path); ok && p < blocks {
+				blocks = p
+			}
+		}
 		if d.IsDir() || st.Nlink <= 1 {
 			total += blocks
 			return nil
