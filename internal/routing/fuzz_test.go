@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 )
 
 // seedBodies are the issue bodies every body fuzzer starts from: the fixture

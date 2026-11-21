@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/RiccardoCereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // Roots are the directories facet works within.

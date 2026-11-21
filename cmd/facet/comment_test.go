@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 )
 
 // withRouting points roots at a routing file carrying extra top-level keys.

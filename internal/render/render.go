@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
-	"github.com/RiccardoCereghino/facet/internal/knowledge"
-	"github.com/RiccardoCereghino/facet/internal/routing"
+	"github.com/bottega-cereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/knowledge"
+	"github.com/bottega-cereghino/facet/internal/routing"
 )
 
 //go:embed templates/*.tmpl

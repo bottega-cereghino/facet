@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/mirror"
-	"github.com/RiccardoCereghino/facet/internal/workspace"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/mirror"
+	"github.com/bottega-cereghino/facet/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

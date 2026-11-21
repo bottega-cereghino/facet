@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
-	"github.com/RiccardoCereghino/facet/internal/gitx"
-	"github.com/RiccardoCereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // longLivedWorkspace builds a workspace the way `facet new` does: an origin

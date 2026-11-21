@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
-	"github.com/RiccardoCereghino/facet/internal/routing"
+	"github.com/bottega-cereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/routing"
 )
 
 // commentGH is the narrow surface these commands need.

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 )
 
 // withUnsoundCredential points gh at a logged-out status and stubs the

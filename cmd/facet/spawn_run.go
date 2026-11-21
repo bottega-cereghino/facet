@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/ghx"
-	"github.com/RiccardoCereghino/facet/internal/knowledge"
-	"github.com/RiccardoCereghino/facet/internal/manifest"
-	"github.com/RiccardoCereghino/facet/internal/render"
-	"github.com/RiccardoCereghino/facet/internal/routing"
-	"github.com/RiccardoCereghino/facet/internal/scope"
-	"github.com/RiccardoCereghino/facet/internal/workspace"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/knowledge"
+	"github.com/bottega-cereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/render"
+	"github.com/bottega-cereghino/facet/internal/routing"
+	"github.com/bottega-cereghino/facet/internal/scope"
+	"github.com/bottega-cereghino/facet/internal/workspace"
 )
 
 func runSpawn(o spawnOpts) error {

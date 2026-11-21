@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/RiccardoCereghino/facet/internal/gitx"
-	"github.com/RiccardoCereghino/facet/internal/lockfile"
+	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/lockfile"
 )
 
 // ErrNotRemote reports a URL that names a local path, which is never mirrored.

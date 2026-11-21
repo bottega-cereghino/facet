@@ -11,7 +11,7 @@ package gitxtest
 import (
 	"time"
 
-	"github.com/RiccardoCereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/gitx"
 )
 
 // timeoutRunner is gitx.Git's real RunTimeout, checked for at runtime so a

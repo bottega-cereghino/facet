@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/gitx"
-	"github.com/RiccardoCereghino/facet/internal/manifest"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // TestLsAtWorkspacesRootListsEveryWorkspace is the regression test for #31:

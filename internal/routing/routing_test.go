@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 )
 
 func load(t *testing.T) *Routing {

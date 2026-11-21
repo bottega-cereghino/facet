@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/RiccardoCereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 )
 
 // Repo describes one repository facet can put in a workspace.

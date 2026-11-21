@@ -7,9 +7,9 @@ import (
 	"os"
 	"runtime/debug"
 
-	"github.com/RiccardoCereghino/facet/internal/config"
-	"github.com/RiccardoCereghino/facet/internal/ghx"
-	"github.com/RiccardoCereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/ghx"
+	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/spf13/cobra"
 )
 
