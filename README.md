@@ -518,7 +518,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   writes is facet's own only while it hashes to what spawn recorded in the
   manifest; edited, or spawned before the hash was recorded, it holds: nothing
   rewrites it, so an agent's notes there are the only copy
-  (`TestIssueWorkspaceHoldsAnEditedClaudeMD`).
+  (`TestIssueWorkspaceHoldsAnEditedClaudeMD`). Only a symlink counts as a
+  link: a real directory at a name the manifest declares a link holds too
+  (`TestReapHoldsARealDirectoryAtALinkName`), and `facet add link` refuses a
+  name a directory already holds, before it writes the manifest
+  (`TestAddLinkRefusesARealDirectoryAtItsName`).
 - **`reap` refuses while a git repository sits in a directory a clone
   ignores**, such as a fork cloned into `vendor/` to patch: its commits are
   invisible to the checks above, and it goes with the clone
