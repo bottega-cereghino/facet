@@ -157,7 +157,7 @@ func inspectEach(dirs []string) ([]*workspace.IssueState, []error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			states[i], errs[i] = workspace.Inspect(dir, git, gh, live)
+			states[i], errs[i] = inspectTarget(dir, live)
 		}(i, dir)
 	}
 	wg.Wait()

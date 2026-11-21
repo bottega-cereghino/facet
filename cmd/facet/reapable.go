@@ -12,8 +12,8 @@ import (
 	"github.com/bottega-cereghino/facet/internal/workspace"
 )
 
-// reapReapable is `facet reap --reapable`: every workspace in dirs that reap
-// would delete now, after one confirmation.
+// reapReapable is `facet reap --reapable`: every workspace or plain worktree
+// in dirs that reap would delete now, after one confirmation.
 //
 // It never forces. A workspace something holds is counted and left alone, and
 // `facet ls --size` or `facet reap <name>` says what holds it. Each workspace is
@@ -52,7 +52,7 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "WORKSPACE\tFREES")
 	for _, st := range picked {
-		_, _ = fmt.Fprintf(w, "%s\t%s\n", filepath.Base(st.Dir), humanBytes(st.SizeBytes))
+		_, _ = fmt.Fprintf(w, "%s\t%s\n", reapName(st), humanBytes(st.SizeBytes))
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -72,21 +72,21 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 	var errs []error
 	enclosing := map[string]bool{}
 	for _, st := range picked {
-		again, err := workspace.Inspect(st.Dir, git, gh, live)
+		again, err := inspectTarget(st.Dir, live)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(st.Dir), err))
 			continue
 		}
 		if b := again.Blockers(); len(b) > 0 {
-			_, _ = fmt.Fprintf(out, "skipped %s: since the list was made it is held by %s\n", filepath.Base(again.Dir), b[0])
+			_, _ = fmt.Fprintf(out, "skipped %s: since the list was made it is held by %s\n", reapName(again), b[0])
 			continue
 		}
 		// As in reap: a live session holds file handles on the tree.
-		if l := mux.Pick(); l != nil {
+		if l := mux.Pick(); l != nil && !again.Worktree {
 			_ = l.Kill(filepath.Base(again.Dir))
 		}
 		if err := workspace.Reap(again, git); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(again.Dir), err))
+			errs = append(errs, fmt.Errorf("%s: %w", reapName(again), err))
 			continue
 		}
 		_, _ = fmt.Fprintf(out, "removed %s\n", again.Dir)
@@ -105,4 +105,13 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 		_, _ = fmt.Fprintf(out, "tracked files are now deletions in %s; commit them there.\n", e)
 	}
 	return errors.Join(errs...)
+}
+
+// reapName names a workspace by its directory, as `facet ls` does, and a
+// worktree by its path: worktrees of different checkouts often share a name.
+func reapName(st *workspace.IssueState) string {
+	if st.Worktree {
+		return st.Dir + " (worktree)"
+	}
+	return filepath.Base(st.Dir)
 }
