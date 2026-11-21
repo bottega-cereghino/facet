@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,10 +20,33 @@ type BlockedByRef struct {
 // bare ref "#5".
 var blockedByRefPattern = regexp.MustCompile(`([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#(\d+)`)
 
-// issueURL matches a link to a GitHub issue, "https://github.com/o/r/issues/12",
-// with or without a "#issuecomment-…" after it. The URL names its repository,
-// so it is a cross-repo reference however the text around it reads.
-var issueURL = regexp.MustCompile(`https?://github\.com/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/issues/(\d+)\b`)
+// anyURL finds a URL in prose. Every URL is blanked, so a fragment such as
+// "example.com/page#12" is never read as the ref "#12"; issueRef then decides
+// which of them name a GitHub issue. The host is checked on the parsed URL, not
+// by the pattern.
+var anyURL = regexp.MustCompile(`https?://[^\s<>()\[\]]+`)
+
+// repoPart is one segment of "owner/name".
+var repoPart = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// issueRef reads "https://github.com/o/r/issues/12", with or without a
+// "#issuecomment-…" after it, as o/r#12. The URL names its repository, so it
+// is a cross-repo reference however the text around it reads.
+func issueRef(raw string) (BlockedByRef, bool) {
+	u, err := url.Parse(strings.TrimRight(raw, ".,;:!?'\"*_"))
+	if err != nil || !strings.EqualFold(u.Host, "github.com") {
+		return BlockedByRef{}, false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 4 || parts[2] != "issues" || !repoPart.MatchString(parts[0]) || !repoPart.MatchString(parts[1]) {
+		return BlockedByRef{}, false
+	}
+	n, err := strconv.Atoi(parts[3])
+	if err != nil || n < 1 {
+		return BlockedByRef{}, false
+	}
+	return BlockedByRef{OwnerRepo: parts[0] + "/" + parts[1], Number: n}, true
+}
 
 // markdownLink matches "[text](target)". Its text is a label for the target,
 // and only the target says which repository an issue lives in: the label
@@ -30,7 +54,7 @@ var issueURL = regexp.MustCompile(`https?://github\.com/([A-Za-z0-9._-]+/[A-Za-z
 // not #12 in this issue's own repository.
 var markdownLink = regexp.MustCompile(`\[([^\[\]\n]*)\]\([^()\s]*\)`)
 
-// blankLinks returns section with every issue URL and every markdown link's
+// blankLinks returns section with every URL and every markdown link's
 // text replaced by spaces, so blockedByRefPattern reads neither, together with
 // the references the URLs name and where each one starts. Offsets are kept, so
 // the two kinds of reference can be put back in the order they were written.
@@ -43,16 +67,14 @@ func blankLinks(section string) (string, []int, []BlockedByRef) {
 	}
 	var at []int
 	var refs []BlockedByRef
-	for _, m := range issueURL.FindAllStringSubmatchIndex(section, -1) {
+	for _, m := range anyURL.FindAllStringIndex(section, -1) {
 		for i := m[0]; i < m[1]; i++ {
 			b[i] = ' '
 		}
-		n, err := strconv.Atoi(section[m[4]:m[5]])
-		if err != nil || n < 1 {
-			continue
+		if ref, ok := issueRef(section[m[0]:m[1]]); ok {
+			at = append(at, m[0])
+			refs = append(refs, ref)
 		}
-		at = append(at, m[0])
-		refs = append(refs, BlockedByRef{OwnerRepo: section[m[2]:m[3]], Number: n})
 	}
 	return string(b), at, refs
 }

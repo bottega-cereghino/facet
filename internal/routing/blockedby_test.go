@@ -264,3 +264,17 @@ func TestParseBlockedByReadsIssueLinksAndURLs(t *testing.T) {
 		})
 	}
 }
+
+// A URL is read as a reference only when its parsed host is github.com and its
+// path is an issue. Any other URL, a lookalike host among them, reads as
+// nothing, and its fragment is never a bare "#n".
+func TestParseBlockedByReadsOnlyGitHubIssueURLs(t *testing.T) {
+	body := "## Blocked by / waiting on\n\n" +
+		"https://github.com.evil.example/o/r/issues/3 and https://x.github.com/o/r/issues/4, " +
+		"https://example.com/page#12, https://github.com/o/r/pull/5, " +
+		"(https://github.com/o/r/issues/6).\n"
+	got := (*Routing)(nil).ParseBlockedBy(body)
+	if len(got) != 1 || got[0] != (BlockedByRef{OwnerRepo: "o/r", Number: 6}) {
+		t.Errorf("ParseBlockedBy = %+v, want only o/r#6", got)
+	}
+}
