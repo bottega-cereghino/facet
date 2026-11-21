@@ -313,9 +313,13 @@ hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
 commits only its HEAD reaches, an open pull request for its branch, or a
 process, tmux pane or launchd job inside it, then removes it with
 `git worktree remove`. Its branches stay in the checkout. `--reapable` adds
-every reapable worktree of the checkouts directly under `~/Projects`, named by
-its path; the worktree clones of a workspace go only with their workspace, and
-`reap` refuses one named on its own.
+every reapable worktree inside a checkout directly under `~/Projects`, such as
+`.claude/worktrees/`, named by its path. It leaves out a worktree outside its
+checkout, which may be a long-lived copy (a service run from a tag, with its
+data beside the code), and every worktree of a bare repository, where the
+everyday checkout is a worktree too; `facet reap <path>` still takes either.
+The worktree clones of a workspace go only with their workspace, and `reap`
+refuses one named on its own.
 
 `facet prune` frees the disk a workspace keeps without deleting it: the
 directories in its clones that one command rebuilds (`node_modules`, `.venv`
@@ -499,6 +503,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   was pushed there no longer reads as pushed; a remote it cannot fetch is named
   (`TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed`,
   `TestReapNamesTheRemoteItCouldNotFetch`).
+- **`reap` judges each initialised submodule as a clone of its own**,
+  recursively: its commits, branches and stash live in the clone's git
+  directory and go with it, while the superproject sees only the commit it
+  records (`TestReapHoldsAnUnpushedSubmoduleCommit`).
 - **`reap` sees every untracked and modified file whatever git's config says.**
   Its status check names `--untracked-files=all` and `--ignore-submodules=none`,
   so `status.showUntrackedFiles=no` cannot hide a new file from it
@@ -527,7 +535,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsARealDirectoryAtALinkName`), and `facet add link` refuses a
   name a directory already holds, before it writes the manifest
   (`TestAddLinkRefusesARealDirectoryAtItsName`).
-- **What `reap` does not protect:** files git ignores inside a clone (`.env`,
+- **`reap` refuses while a git repository sits in a directory a clone
+  ignores**, such as a fork cloned into `vendor/` to patch: its commits are
+  invisible to the checks above, and it goes with the clone
+  (`TestReapHoldsARepositoryInAnIgnoredDirectory`).
+- **What `reap` does not protect:** other files git ignores inside a clone (`.env`,
   `node_modules`, build output: holding on them would hold every workspace), and
   commits reachable only from a local tag (a clone carries every upstream tag,
   so a tag cannot tell your work from a release). Copy or push those first.
@@ -562,6 +574,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`, and with `--dry-run` it deletes nothing
   (`TestReapReapableDryRunDeletesNothing`).
+- **`reap --reapable` sweeps only worktrees inside their checkout**, never
+  one elsewhere and never a bare repository's, so an everyday checkout that is
+  a worktree, or a service run from one, keeps its ignored files
+  (`TestProjectWorktreesOffersOnlyWorktreesInsideTheirCheckout`,
+  `TestProjectWorktreesSkipsABareLayout`,
+  `TestReapReapableSweepsOnlyWorktreesInsideTheirCheckout`).
 - **`reap` judges a worktree clone by what removing it loses**: its
   uncommitted files and the commits only its HEAD reaches. The checkout's
   other branches, its stash and its other worktrees stay where they are, so
