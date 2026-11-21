@@ -6,6 +6,14 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.6.1](https://github.com/bottega-cereghino/facet/compare/v0.6.0...v0.6.1) (2026-11-21)
+
+
+### Fixed
+
+* **reap:** say so when a clone was judged against a stale fetch ([#260](https://github.com/bottega-cereghino/facet/issues/260)) ([cf6fd8a](https://github.com/bottega-cereghino/facet/commit/cf6fd8a08eb04ffa20c407987fe3cdd95d50c906))
+* **reap:** see a loaded launchd job whose plist is outside the LaunchAgents folders ([#258](https://github.com/bottega-cereghino/facet/issues/258)) ([7465138](https://github.com/bottega-cereghino/facet/commit/7465138c20ef1f8d034651e04b640249fa8ac362))
+
 ## [0.6.0](https://github.com/bottega-cereghino/facet/compare/v0.5.0...v0.6.0) (2026-11-21)
 
 
