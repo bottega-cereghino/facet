@@ -99,7 +99,13 @@ func newReapCmd() *cobra.Command {
 				if path != "" || len(args) > 0 {
 					return fmt.Errorf("--reapable takes no workspace: it reaps every reapable one under %s; drop the name, or drop --reapable", roots.Workspaces)
 				}
-				dirs, err := workspace.Dirs(roots.Workspaces, true)
+				// Absolute, as reap's own target is: the live-pane check compares
+				// against the absolute paths tmux reports.
+				root, err := filepath.Abs(roots.Workspaces)
+				if err != nil {
+					return err
+				}
+				dirs, err := workspace.Dirs(root, true)
 				if err != nil {
 					return err
 				}

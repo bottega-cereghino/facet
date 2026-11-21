@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/RiccardoCereghino/facet/internal/config"
+	"github.com/RiccardoCereghino/facet/internal/ghx"
 	"github.com/RiccardoCereghino/facet/internal/gitx"
 	"github.com/RiccardoCereghino/facet/internal/manifest"
 )
@@ -34,8 +37,8 @@ func reapableRoot(t *testing.T) (root, free, held string) {
 	if err := os.WriteFile(filepath.Join(held, "plan.md"), []byte("the only copy\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	savedRoots, savedGit := roots, git
-	t.Cleanup(func() { roots, git = savedRoots, savedGit })
+	savedRoots, savedGit, savedGH := roots, git, gh
+	t.Cleanup(func() { roots, git, gh = savedRoots, savedGit, savedGH })
 	roots = config.Roots{Workspaces: root}
 	git = gitx.Git{}
 	return root, free, held
@@ -136,5 +139,159 @@ func TestReapReapableRefusesForceAndAWorkspace(t *testing.T) {
 		if !exists(t, free) {
 			t.Fatalf("reap %v deleted %s", args, free)
 		}
+	}
+}
+
+// prGH answers the pull-request lookup per issue branch, from maps a test may
+// change while reap waits at the prompt. Everything else is fakeGH.
+type prGH struct {
+	*fakeGH
+	prs  map[string]*ghx.PR
+	errs map[string]error
+}
+
+func (f *prGH) ViewPR(_, branch string) (*ghx.PR, error) { return f.prs[branch], f.errs[branch] }
+
+// issueWorkspace adds an issue workspace with no clones to root, so the only
+// thing that can hold it is its pull request (or a session). Its branch is its
+// directory name.
+func issueWorkspace(t *testing.T, root string, n int) (dir, branch string) {
+	t.Helper()
+	branch = fmt.Sprintf("%d-reapable-test", n)
+	dir = filepath.Join(root, config.IssuePrefix+branch)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Name: filepath.Base(dir), Issue: &manifest.Issue{Repo: "o/r", Number: n, Branch: branch}}
+	if err := m.Write(dir); err != nil {
+		t.Fatal(err)
+	}
+	return dir, branch
+}
+
+// The batch decides with reap's own checks, so the pull-request guard holds in
+// it too: an open PR holds, and a lookup that fails holds, as it does for reap
+// <name>.
+func TestReapReapableLeavesAnOpenOrUnknownPullRequestAlone(t *testing.T) {
+	root, _, _ := reapableRoot(t)
+	merged, mb := issueWorkspace(t, root, 1)
+	open, ob := issueWorkspace(t, root, 2)
+	unknown, ub := issueWorkspace(t, root, 3)
+	gh = &prGH{
+		fakeGH: &fakeGH{},
+		prs:    map[string]*ghx.PR{mb: {Number: 10, State: "MERGED"}, ob: {Number: 11, State: "OPEN"}},
+		errs:   map[string]error{ub: errors.New("HTTP 502")},
+	}
+	var out bytes.Buffer
+	if err := reapReapable(&out, []string{merged, open, unknown}, false, func(string) bool { return true }); err != nil {
+		t.Fatalf("reapReapable: %v\n%s", err, out.String())
+	}
+	if exists(t, merged) {
+		t.Errorf("%s has a merged PR and nothing else and should be gone:\n%s", merged, out.String())
+	}
+	for _, dir := range []string{open, unknown} {
+		if !exists(t, dir) {
+			t.Errorf("%s was deleted although its pull request is open or unknown:\n%s", dir, out.String())
+		}
+	}
+	if !strings.Contains(out.String(), "2 held left alone") {
+		t.Errorf("output should count the two held workspaces:\n%s", out.String())
+	}
+}
+
+// The check before each deletion runs every guard again, not only the files: a
+// PR opened, or a lookup that starts failing, while the prompt waits holds the
+// workspace.
+func TestReapReapableChecksThePullRequestAgain(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(f *prGH, branch string)
+	}{
+		{"a PR opened", func(f *prGH, b string) { f.prs[b] = &ghx.PR{Number: 12, State: "OPEN"} }},
+		{"the lookup fails", func(f *prGH, b string) { f.errs[b] = errors.New("HTTP 401") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _, _ := reapableRoot(t)
+			dir, branch := issueWorkspace(t, root, 4)
+			f := &prGH{fakeGH: &fakeGH{}, prs: map[string]*ghx.PR{}, errs: map[string]error{}}
+			gh = f
+			var out bytes.Buffer
+			ask := func(string) bool { tc.change(f, branch); return true }
+			if err := reapReapable(&out, []string{dir}, false, ask); err != nil {
+				t.Fatal(err)
+			}
+			if !exists(t, dir) {
+				t.Fatalf("deleted although %s during the prompt:\n%s", tc.name, out.String())
+			}
+			if !strings.Contains(out.String(), "skipped "+filepath.Base(dir)) {
+				t.Errorf("output should say it skipped the workspace:\n%s", out.String())
+			}
+		})
+	}
+}
+
+func TestReapReapableSaysWhatItCouldNotCheck(t *testing.T) {
+	root, free, _ := reapableRoot(t)
+	broken := filepath.Join(root, "facet-test-reapable-broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest.Path(broken), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := reapReapable(&out, []string{free, broken}, false, func(string) bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, broken) {
+		t.Fatalf("a workspace that could not be checked was deleted:\n%s", out.String())
+	}
+	for _, want := range []string{"could not check facet-test-reapable-broken, left alone: ", "1 that could not be checked", "removed " + free} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// A copied workspace keeps its manifest's name. The list names directories, so
+// it says which ones go.
+func TestReapReapableListsDirectories(t *testing.T) {
+	root, free, _ := reapableRoot(t)
+	copied := filepath.Join(root, "facet-test-reapable-copy")
+	if err := os.MkdirAll(copied, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&manifest.Manifest{Name: filepath.Base(free)}).Write(copied); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := reapReapable(&out, []string{free, copied}, false, func(string) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"facet-test-reapable-free ", "facet-test-reapable-copy "} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the list lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// Through the command: the root comes from FACET_WORKSPACES, relative or not,
+// and --yes skips the prompt.
+func TestReapReapableCommandReadsTheRoot(t *testing.T) {
+	root, free, held := reapableRoot(t)
+	t.Chdir(filepath.Dir(root))
+	roots = config.Roots{Workspaces: filepath.Base(root)}
+	cmd := newReapCmd()
+	cmd.SetArgs([]string{"--reapable", "--yes"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if exists(t, free) {
+		t.Errorf("%s holds nothing and should be gone", free)
+	}
+	if !exists(t, filepath.Join(held, "plan.md")) {
+		t.Errorf("%s holds the only copy of a file and must be left alone", held)
 	}
 }

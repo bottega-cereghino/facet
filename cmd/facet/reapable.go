@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"text/tabwriter"
 
@@ -18,15 +19,20 @@ import (
 // `facet ls --size` or `facet reap <name>` says what holds it. Each workspace is
 // checked again just before it is deleted, because work can start in one while
 // the prompt waits; one that is held by then is skipped, not deleted.
+//
+// Workspaces are named by their directory, as `facet ls` names them: a copied
+// workspace keeps the manifest's name, and the list must say which directory
+// goes.
 func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool) error {
-	states := inspectAll(dirs)
+	states, inspectErrs := inspectEach(dirs)
 	var picked []*workspace.IssueState
 	var held, unchecked int
 	var total int64
-	for _, st := range states {
+	for i, st := range states {
 		switch {
 		case st == nil:
 			unchecked++
+			_, _ = fmt.Fprintf(out, "could not check %s, left alone: %v\n", filepath.Base(dirs[i]), inspectErrs[i])
 		case len(st.Blockers()) > 0:
 			held++
 		default:
@@ -39,14 +45,14 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 		left += fmt.Sprintf(" and %d that could not be checked", unchecked)
 	}
 	if len(picked) == 0 {
-		_, _ = fmt.Fprintf(out, "nothing to reap: %s. `facet ls --size` says which.\n", left)
+		_, _ = fmt.Fprintf(out, "nothing to reap: %s. `facet ls --size` says which are held.\n", left)
 		return nil
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "WORKSPACE\tFREES")
 	for _, st := range picked {
-		_, _ = fmt.Fprintf(w, "%s\t%s\n", st.Name, humanBytes(st.SizeBytes))
+		_, _ = fmt.Fprintf(w, "%s\t%s\n", filepath.Base(st.Dir), humanBytes(st.SizeBytes))
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -68,11 +74,11 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 	for _, st := range picked {
 		again, err := workspace.Inspect(st.Dir, git, gh, live)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", st.Name, err))
+			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(st.Dir), err))
 			continue
 		}
 		if b := again.Blockers(); len(b) > 0 {
-			_, _ = fmt.Fprintf(out, "skipped %s: since the list was made it is held by %s\n", again.Name, b[0])
+			_, _ = fmt.Fprintf(out, "skipped %s: since the list was made it is held by %s\n", filepath.Base(again.Dir), b[0])
 			continue
 		}
 		// As in reap: a live session holds file handles on the tree.
@@ -80,7 +86,7 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 			_ = l.Kill(again.Name)
 		}
 		if err := workspace.Reap(again); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", again.Name, err))
+			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(again.Dir), err))
 			continue
 		}
 		_, _ = fmt.Fprintf(out, "removed %s\n", again.Dir)
