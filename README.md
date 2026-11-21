@@ -101,7 +101,8 @@ facet spawn 67 --repo acme/platform
 
 `spawn` reads the issue, works out which repositories it needs, **prints why each
 one was chosen, and waits.** On confirmation it creates an issue-linked branch
-(`gh issue develop`), clones each repo, and writes a `CLAUDE.md` carrying the issue
+(`gh issue develop`, from the repository's default branch unless `--base` names
+another), clones each repo, and writes a `CLAUDE.md` carrying the issue
 body and the durable hazards recorded for its `area/*` labels. Then it stops and
 tells you where to work — opening an editor or starting an agent is yours.
 
@@ -322,6 +323,11 @@ word — `^#{1,6} +Plan\b`, not `^#+ .*plan` — because a loose one does not
 error, it silently returns an older comment as the latest. The match count is
 always printed so that is visible.
 
+`facet comment edit owner/repo#n --id <id> --body-file <path>` edits a comment
+only when it is on that issue. A comment id names a comment anywhere in the
+repository, so an id copied from the wrong thread is refused, with the issue it
+is really on.
+
 ## The credential preflight
 
 Everything facet does on the forge rides one `gh` credential, shared with
@@ -347,7 +353,9 @@ It checks that gh is logged in and the account is active (and, with
 `FACET_GH_ACCOUNT` set, the expected one);
 that the token is **not** a `gho_` OAuth-App token — GitHub issues one per (app,
 user) pair, so any other `gh auth login` anywhere silently invalidates it, which
-is what happened; that `repo`, `read:org` and `workflow` are all granted; that
+is what happened; that `repo`, `read:org` and `workflow` are all granted (a fine-grained
+`github_pat_` token has permissions rather than scopes, which gh cannot list, so
+for one the scopes check is reported as not run); that
 git's **host-level** protocol is `ssh` (`gh auth login --with-token` flips it to
 https silently, and `gh config get git_protocol` reports the *global* default, so
 it is the wrong thing to read); and that `~/.ssh/id_ed25519` exists and is not
@@ -431,6 +439,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` counts commits reachable from any local branch or HEAD and from no
   remote.** Unlike `@{u}..HEAD`, that also catches a branch which was never
   pushed at all — the branch most easily lost.
+- **`reap` refuses when it cannot tell whether a pull request is open.** Only
+  gh's "no pull requests found" counts as none; a repository gh cannot resolve
+  (renamed, transferred, unreadable) holds the workspace
+  (`TestViewPRRefusesWhenTheRepositoryCannotBeResolved`).
 - **`reap` refuses while a clone has a linked worktree** (`git worktree add`):
   its files and detached commits are invisible to the checks above, and deleting
   the clone deletes its repository (`TestLinkedWorktreeBlocksReap`).

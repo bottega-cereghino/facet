@@ -30,3 +30,15 @@ func TestParseComplexity(t *testing.T) {
 		})
 	}
 }
+
+// A heading quoted inside a code fence is an example, not the field.
+func TestParseComplexitySkipsFencedHeadings(t *testing.T) {
+	body := "How to fill the form:\n\n```\n### Complexity\n\n5\n```\n"
+	if n, found, err := ParseComplexity(body); found || n != "" || err != nil {
+		t.Errorf("ParseComplexity = (%q, %v, %v), want nothing found", n, found, err)
+	}
+	body += "\n### Complexity\n\n2\n"
+	if n, found, err := ParseComplexity(body); n != "2" || !found || err != nil {
+		t.Errorf("ParseComplexity = (%q, %v, %v), want the real section's 2", n, found, err)
+	}
+}

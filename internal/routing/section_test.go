@@ -170,3 +170,36 @@ func TestUnknownScopeNamesWhatTheFieldCouldNotResolve(t *testing.T) {
 		t.Errorf("UnknownScope = %v, want [oldowner/platform-ish]", got)
 	}
 }
+
+// The doc comment's promise, held for every heading that can follow the
+// section: what comes before it and what comes after it are returned byte for
+// byte. The section used to end only at a `##`-`######` heading, so an H1
+// after it was taken for scope content and deleted with it.
+func TestUpsertScopeKeepsNeighboursByteForByte(t *testing.T) {
+	before := "intro\n\n### Summary\n\nx\n\n"
+	for _, after := range []string{
+		"# Notes\n\nimportant prose",
+		"# Notes\n\nimportant prose\n",
+		"#\n\nan empty H1 is a heading too\n",
+		"## Acceptance\n\ny\n",
+		"###### Deep\n\nz",
+		"# Notes\r\n\r\nprose from the web editor\r\n",
+	} {
+		body := before + "## Repos in scope\n\nlegacy\n\n" + after
+		want := before + "## Repos in scope\n\nplatform\n\n" + after
+		got, changed := UpsertScope(body, []string{"platform"})
+		if got != want || !changed {
+			t.Errorf("UpsertScope(%q)\n= %q, %v\nwant %q, true", body, got, changed, want)
+		}
+	}
+}
+
+// What the next spawn reads is what this one wrote: prose under the H1 that
+// follows is not part of the scope field.
+func TestScopeFieldEndsAtAnH1(t *testing.T) {
+	r := load(t)
+	body := "## Repos in scope\n\nplatform\n\n# Notes\n\ngateway is mentioned here only in passing\n"
+	if got := r.scopeField(body); !reflect.DeepEqual(got, []string{"platform"}) {
+		t.Errorf("scopeField = %v, want [platform]", got)
+	}
+}

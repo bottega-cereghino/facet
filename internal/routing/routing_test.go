@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/bottega-cereghino/facet/internal/ghx"
@@ -674,5 +675,37 @@ func TestLoadIgnoresTheRemovedStructureKey(t *testing.T) {
 	}
 	if _, ok := r.Repos["api"]; !ok {
 		t.Errorf("repos were not read alongside the ignored structure block: %+v", r.Repos)
+	}
+}
+
+// GitHub's web editor saves bodies with \r\n line endings. A closing fence
+// is then "```\r", and a fence that never closes is not stripped: a quoted
+// cross-ref inside it was read as evidence.
+func TestFencedCrossRefsAreNotEvidenceInACRLFBody(t *testing.T) {
+	r := load(t)
+	iss := &ghx.Issue{Body: "the real work is here.\r\n\r\n" +
+		"```\r\n" +
+		"see acme/infra-core#3 as an EXAMPLE only\r\n" +
+		"```\r\n" +
+		"\r\nand it depends on acme/gateway#5.\r\n"}
+	sel, _ := r.Infer("acme/platform", iss)
+	if got := Keys(sel); !reflect.DeepEqual(got, []string{"platform", "gateway"}) {
+		t.Errorf("keys = %v, want platform and gateway: the fenced example must not resolve", got)
+	}
+}
+
+// stripFences blanks a CRLF fence like an LF one, and every offset stays put:
+// callers index the original body with the stripped body's offsets.
+func TestStripFencesKeepsOffsetsInACRLFBody(t *testing.T) {
+	body := "a\r\n```\r\nacme/infra-core#3\r\n```\r\nb\r\n"
+	got := stripFences(body)
+	if len(got) != len(body) {
+		t.Fatalf("length %d, want %d", len(got), len(body))
+	}
+	if strings.Contains(got, "acme") || strings.Contains(got, "```") {
+		t.Errorf("the fence was not blanked: %q", got)
+	}
+	if !strings.HasPrefix(got, "a\r\n") || !strings.HasSuffix(got, "\nb\r\n") {
+		t.Errorf("text outside the fence moved or changed: %q", got)
 	}
 }

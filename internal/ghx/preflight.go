@@ -138,7 +138,9 @@ func Check(st *AuthStatus, req Requirements) []Problem {
 				"rotation exposure -- cannot be established.")
 	}
 
-	if missing := missingScopes(st.Scopes, req.Scopes); len(missing) > 0 {
+	// A fine-grained token has permissions, not scopes, and gh cannot list
+	// them; the caller reports that as a note (ScopesNotApplicable).
+	if missing := missingScopes(st.Scopes, req.Scopes); len(missing) > 0 && ScopesNotApplicable(st) == "" {
 		add("token scopes", strings.Join(req.Scopes, ", "), scopesGot(st.Scopes),
 			"missing: "+strings.Join(missing, ", ")+". read:org is REQUIRED by "+
 				"`gh auth login --with-token` on a classic token, not an optional "+
@@ -160,6 +162,34 @@ func Check(st *AuthStatus, req Requirements) []Problem {
 	}
 
 	return probs
+}
+
+// fineGrainedPAT is the prefix of a fine-grained personal access token.
+const fineGrainedPAT = "github_pat_"
+
+// ScopesNotApplicable returns a note when the scopes check cannot apply to
+// st's credential, and "" when it can.
+//
+// A fine-grained token carries per-repository permissions instead of OAuth
+// scopes, so GitHub sends no X-OAuth-Scopes for it and gh reports none. Read as
+// scopes, every fine-grained token would fail for lacking all three -- the
+// token type the token-type check recommends. Its permissions are not visible
+// to `gh auth status`, so the check is reported as not run rather than passed.
+// A fine-grained token that does report scopes is checked as usual.
+func ScopesNotApplicable(st *AuthStatus) string {
+	if st == nil || st.TokenType != fineGrainedPAT || !noScopes(st.Scopes) {
+		return ""
+	}
+	return "token scopes were NOT checked: a fine-grained token (github_pat_) has " +
+		"permissions, not scopes, and gh cannot list them. Check them on GitHub " +
+		"(Settings > Developer settings > Fine-grained tokens): facet reads and " +
+		"files issues, edits comments, reads pull requests and creates branches"
+}
+
+// noScopes reports whether gh listed no scopes, either by leaving the line out
+// or by printing "none".
+func noScopes(scopes []string) bool {
+	return len(scopes) == 0 || (len(scopes) == 1 && strings.EqualFold(scopes[0], "none"))
 }
 
 // sshKeyWhy is the reason attached to every SSH-key problem.
