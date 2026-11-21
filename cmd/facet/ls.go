@@ -139,7 +139,15 @@ const inspectWorkers = 4
 // inspectAll runs reap's checks on every workspace, in parallel, keeping the
 // order of dirs. A workspace that cannot be inspected is nil.
 func inspectAll(dirs []string) []*workspace.IssueState {
+	states, _ := inspectEach(dirs)
+	return states
+}
+
+// inspectEach is inspectAll that also keeps why each nil state could not be
+// inspected, at the same index.
+func inspectEach(dirs []string) ([]*workspace.IssueState, []error) {
 	states := make([]*workspace.IssueState, len(dirs))
+	errs := make([]error, len(dirs))
 	live := muxLive()
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, inspectWorkers)
@@ -149,13 +157,11 @@ func inspectAll(dirs []string) []*workspace.IssueState {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if st, err := workspace.Inspect(dir, git, gh, live); err == nil {
-				states[i] = st
-			}
+			states[i], errs[i] = workspace.Inspect(dir, git, gh, live)
 		}(i, dir)
 	}
 	wg.Wait()
-	return states
+	return states, errs
 }
 
 // reapVerdict says whether reap would delete the workspace now, in the words
