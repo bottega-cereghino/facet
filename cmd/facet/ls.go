@@ -149,6 +149,9 @@ func inspectEach(dirs []string) ([]*workspace.IssueState, []error) {
 	states := make([]*workspace.IssueState, len(dirs))
 	errs := make([]error, len(dirs))
 	live := muxLive()
+	// One fetch per repository: worktree clones of one checkout would
+	// otherwise fetch into the same refs at once, and collide.
+	shared := workspace.NewSharedFetch(git)
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, inspectWorkers)
 	for i, dir := range dirs {
@@ -157,7 +160,7 @@ func inspectEach(dirs []string) ([]*workspace.IssueState, []error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			states[i], errs[i] = inspectTarget(dir, live)
+			states[i], errs[i] = inspectTarget(dir, shared, live)
 		}(i, dir)
 	}
 	wg.Wait()

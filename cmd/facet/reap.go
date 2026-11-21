@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/manifest"
 	"github.com/bottega-cereghino/facet/internal/mux"
@@ -103,7 +104,9 @@ func newReapCmd() *cobra.Command {
 			"every such worktree inside a checkout under the projects root (not one\n" +
 			"elsewhere, nor any of a bare repository's; name those to reap them):\n" +
 			"it lists them with the disk each frees, asks once, and checks each again just\n" +
-			"before deleting it. It never forces; held workspaces are left alone. With\n" +
+			"before deleting it. It never forces; held workspaces are left alone, and so\n" +
+			"is one with a remote it could not fetch, since its pushed work cannot be\n" +
+			"confirmed. With\n" +
 			"--dry-run it prints the list and deletes nothing.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -142,7 +145,7 @@ func newReapCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := inspectTarget(ws, muxLive())
+			st, err := inspectTarget(ws, git, muxLive())
 			if err != nil {
 				return err
 			}
@@ -180,7 +183,7 @@ func newReapCmd() *cobra.Command {
 				// Work can start while the prompt waits: a commit, a new file,
 				// an agent in a second pane. Check again, as --reapable does, and
 				// refuse on anything that was not on the list just shown.
-				again, err := inspectTarget(ws, muxLive())
+				again, err := inspectTarget(ws, git, muxLive())
 				if err != nil {
 					return err
 				}
@@ -287,7 +290,7 @@ func reapTarget(path string, args []string) (string, error) {
 // manifest, a plain linked worktree otherwise. A directory inside a workspace
 // (a clone, or a folder of one) is refused, since reaping it alone would leave
 // that workspace short of what its manifest declares.
-func inspectTarget(dir string, live workspace.LiveChecker) (*workspace.IssueState, error) {
+func inspectTarget(dir string, git gitx.Runner, live workspace.LiveChecker) (*workspace.IssueState, error) {
 	if _, err := os.Stat(manifest.Path(dir)); err == nil {
 		return workspace.Inspect(dir, git, gh, live)
 	}
