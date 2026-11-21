@@ -6,6 +6,13 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.0](https://github.com/bottega-cereghino/facet/compare/v0.6.1...v0.7.0) (2026-11-21)
+
+
+### Added
+
+* **reap:** --dry-run prints what --reapable would delete and stops ([#263](https://github.com/bottega-cereghino/facet/issues/263)) ([d8274de](https://github.com/bottega-cereghino/facet/commit/d8274dee10a905dd93d643d38d93ae56f5a20c85))
+
 ## [0.6.1](https://github.com/bottega-cereghino/facet/compare/v0.6.0...v0.6.1) (2026-11-21)
 
 
