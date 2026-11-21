@@ -25,6 +25,13 @@ func prunableWorkspace(t *testing.T) (ws, clone string) {
 	// A directory named like a cache but committed: it is source here.
 	writeMiB(t, filepath.Join(clone, ".terraform", "committed"))
 	mustGit(t, clone, "add", ".terraform")
+	// What rebuilds the two that prune may delete, tracked beside each.
+	writeTestFile(t, filepath.Join(clone, "package.json"), "{}\n")
+	if err := os.MkdirAll(filepath.Join(clone, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(clone, "api", "pyproject.toml"), "[project]\n")
+	mustGit(t, clone, "add", "package.json", "api/pyproject.toml")
 	mustGit(t, clone, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "tracked")
 
 	writeMiB(t, filepath.Join(clone, "node_modules", "pkg", "index.js"))
@@ -266,5 +273,82 @@ func TestPruneDoesNotFollowASwappedParent(t *testing.T) {
 	_ = Prune(st)
 	if _, err := os.Stat(filepath.Join(outside, ".venv", "precious")); err != nil {
 		t.Fatalf("prune followed a symlinked parent out of the clone: %v", err)
+	}
+}
+
+// rebuildClone makes a workspace whose one clone ignores dir and holds a MiB in
+// it, under parent. With tracked set, the file named tracked is committed in
+// parent; untracked is written beside it without being added.
+func rebuildClone(t *testing.T, dir, parent, tracked, untracked string) (ws, clone string) {
+	t.Helper()
+	ws, clone = longLivedWorkspace(t, t.TempDir())
+	writeTestFile(t, filepath.Join(clone, ".gitignore"), dir+"/\n")
+	mustGit(t, clone, "add", ".gitignore")
+	if err := os.MkdirAll(filepath.Join(clone, parent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if tracked != "" {
+		writeTestFile(t, filepath.Join(clone, parent, tracked), "{}\n")
+		mustGit(t, clone, "add", filepath.ToSlash(filepath.Join(parent, tracked)))
+	}
+	mustGit(t, clone, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "rebuild files")
+	if untracked != "" {
+		writeTestFile(t, filepath.Join(clone, parent, untracked), "{}\n")
+	}
+	writeMiB(t, filepath.Join(clone, parent, dir, "inside", "file"))
+	return ws, clone
+}
+
+// Each directory prune deletes is rebuilt from a file the clone tracks beside
+// it. Without one, "rebuild: uv sync" names a command that cannot bring the
+// directory back, so it is kept and the listing says why. A file that is there
+// but untracked, or tracked in another directory, rebuilds nothing here.
+func TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds(t *testing.T) {
+	for _, tc := range []struct {
+		name, dir, parent, tracked, untracked string
+		pruned                                bool
+	}{
+		{name: "venv alone", dir: ".venv", parent: "."},
+		{name: "venv beside an untracked pyproject", dir: ".venv", parent: ".", untracked: "pyproject.toml"},
+		{name: "venv below a tracked pyproject", dir: ".venv", parent: "api", tracked: "../pyproject.toml"},
+		{name: "venv beside a tracked pyproject", dir: ".venv", parent: ".", tracked: "pyproject.toml", pruned: true},
+		{name: "venv beside tracked requirements", dir: ".venv", parent: "api", tracked: "requirements-dev.txt", pruned: true},
+		{name: "node_modules alone", dir: "node_modules", parent: "."},
+		{name: "node_modules beside an untracked package.json", dir: "node_modules", parent: "web", untracked: "package.json"},
+		{name: "node_modules beside a tracked package.json", dir: "node_modules", parent: "web", tracked: "package.json", pruned: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws, clone := rebuildClone(t, tc.dir, tc.parent, tc.tracked, tc.untracked)
+			rel := filepath.ToSlash(filepath.Join(tc.parent, tc.dir))
+			st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(st.Held) != 0 {
+				t.Fatalf("held %v; want nothing held", st.Held)
+			}
+			if err := Prune(st); err != nil {
+				t.Fatal(err)
+			}
+			_, statErr := os.Stat(filepath.Join(clone, tc.parent, tc.dir, "inside", "file"))
+			if tc.pruned {
+				if got := strings.Join(foundRels(st), ","); got != "repo/"+rel {
+					t.Errorf("found %q; want repo/%s", got, rel)
+				}
+				if !os.IsNotExist(statErr) {
+					t.Errorf("%s survived prune with a tracked rebuild file beside it (stat err %v)", rel, statErr)
+				}
+				return
+			}
+			if len(st.Found) != 0 {
+				t.Errorf("found %v; want nothing with no tracked rebuild file", foundRels(st))
+			}
+			if statErr != nil {
+				t.Errorf("%s is gone though nothing tracked rebuilds it: %v", rel, statErr)
+			}
+			if len(st.Kept) != 1 || !strings.Contains(st.Kept[0], "repo/"+rel) || !strings.Contains(st.Kept[0], "nothing rebuilds it") {
+				t.Errorf("kept %v; want repo/%s named with why it was kept", st.Kept, rel)
+			}
+		})
 	}
 }
