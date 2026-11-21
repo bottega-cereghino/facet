@@ -175,3 +175,39 @@ func TestIsSystemService(t *testing.T) {
 	}
 	t.Skip("no process runs from /System here (not macOS)")
 }
+
+// `facet reap` run from inside the workspace is its documented form. Its own
+// process, the lsof it runs and its shell must not hold the workspace; any other
+// process there still does.
+func TestLsofProcessesUnderLeavesOutFacetItself(t *testing.T) {
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("lsof not installed")
+	}
+	dir := t.TempDir()
+	t.Chdir(dir)
+	self := strconv.Itoa(os.Getpid())
+	for _, l := range lsofProcessesUnder(dir) {
+		if strings.Contains(l, "(pid "+self+")") || strings.Contains(l, "process lsof ") {
+			t.Errorf("held by facet's own process or its probe: %q", l)
+		}
+	}
+}
+
+func TestWithoutSelf(t *testing.T) {
+	procs := []lsofProc{
+		{pid: "10", ppid: "9", cmd: "zsh"},     // the shell that ran facet
+		{pid: "11", ppid: "10", cmd: "facet"},  // facet
+		{pid: "12", ppid: "11", cmd: "lsof"},   // its probe
+		{pid: "13", ppid: "12", cmd: "lsof"},   // the probe's helper
+		{pid: "14", ppid: "11", cmd: "sleep"},  // something else facet started
+		{pid: "15", ppid: "10", cmd: "vim"},    // the user's editor in that shell
+		{pid: "16", ppid: "1", cmd: "watcher"}, // unrelated
+	}
+	var got []string
+	for _, p := range withoutSelf(procs, 11, 10) {
+		got = append(got, p.pid)
+	}
+	if strings.Join(got, ",") != "14,15,16" {
+		t.Errorf("withoutSelf kept %v, want 14,15,16", got)
+	}
+}
