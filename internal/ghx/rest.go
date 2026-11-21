@@ -27,17 +27,20 @@ func (CLI) ViewIssue(repo string, number int) (*Issue, error) {
 // address (https://api.github.com/repos/...) and the page a person opens is
 // `html_url`. Issue.URL means the page everywhere else in facet (gh's own
 // `--json url` is the page, and `gh project item-add --url` wants the page),
-// so the REST field is mapped onto it here.
+// so the REST field is mapped onto it here. The author is `user` there and
+// `author` in gh's JSON, and is mapped the same way.
 func parseRESTIssue(body []byte) (*Issue, error) {
 	var raw struct {
 		Issue
 		HTMLURL string `json:"html_url"`
+		User    User   `json:"user"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, err
 	}
 	iss := raw.Issue
 	iss.URL = raw.HTMLURL
+	iss.Author = raw.User
 	iss.State = strings.ToUpper(iss.State)
 	return &iss, nil
 }
