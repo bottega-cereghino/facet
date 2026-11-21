@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1307,32 +1308,148 @@ func TestInspectRefusesNonIssueWorkspace(t *testing.T) {
 	}
 }
 
-// Reap must delete a git repository despite git's read-only object files, which
-// defeat a plain os.RemoveAll on Windows.
-func TestReapDeletesReadOnlyGitObjects(t *testing.T) {
+// Reap deletes a tree holding a directory without write permission (a Go module
+// cache is one), and leaves the mirror exactly as it was: a clone's objects are
+// hardlinks to the mirror's, so any change to their mode is a change to the
+// mirror's. A chmod on every file once made each reap leave the mirror's packs
+// writable.
+func TestReapLeavesTheMirrorAloneAndDeletesReadOnlyDirs(t *testing.T) {
 	ws, clone := issueWorkspace(t)
-	// Confirm the fixture really has read-only objects to trip over.
-	var sawReadOnly bool
-	_ = filepath.Walk(filepath.Join(clone, ".git", "objects"), func(_ string, fi os.FileInfo, err error) error {
-		if err == nil && fi != nil && !fi.IsDir() && fi.Mode().Perm()&0o200 == 0 {
-			sawReadOnly = true
+	// The fixture clones from a local origin, which git hardlinks exactly as
+	// sync hardlinks from a mirror: origin's objects play the mirror's part.
+	mirror := filepath.Join(filepath.Dir(ws), "origin", ".git", "objects")
+	modes := map[string]os.FileMode{}
+	_ = filepath.WalkDir(mirror, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.Type().IsRegular() {
+			if fi, err := d.Info(); err == nil {
+				modes[p] = fi.Mode().Perm()
+			}
 		}
 		return nil
 	})
-	if !sawReadOnly {
-		t.Log("note: no read-only objects in this fixture; the test is weaker than intended")
+	var readOnly int
+	for _, m := range modes {
+		if m&0o222 == 0 {
+			readOnly++
+		}
 	}
-	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
-	if err != nil {
+	if readOnly == 0 {
+		t.Fatal("fixture: origin has no read-only object to protect")
+	}
+	locked := filepath.Join(clone, "pkg", "mod")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(locked, "x.go"), []byte("package x\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	st := &IssueState{Dir: ws, Name: filepath.Base(ws)}
 	if err := Reap(st); err != nil {
 		t.Fatalf("Reap: %v", err)
 	}
 	if _, err := os.Stat(ws); !os.IsNotExist(err) {
 		t.Error("workspace survived Reap")
 	}
+	for p, want := range modes {
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Errorf("mirror file %s is gone: %v", p, err)
+			continue
+		}
+		if got := fi.Mode().Perm(); got != want {
+			t.Errorf("mirror file %s: mode %04o, was %04o", p, got, want)
+		}
+	}
 }
+
+// An issue workspace holds what it was given beside its clones: a checkout
+// `facet rm` dropped from the manifest, a hand clone, a note. None is in the
+// manifest, so none is rebuilt, and reap must hold for it as it does in a
+// long-lived workspace. CLAUDE.md is spawn's own and does not hold.
+func TestIssueWorkspaceHoldsFilesBesideItsClones(t *testing.T) {
+	ws, _ := issueWorkspace(t)
+	if err := os.WriteFile(filepath.Join(ws, "CLAUDE.md"), []byte("written by spawn\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := st.Blockers(); len(b) != 0 {
+		t.Fatalf("spawn's CLAUDE.md must not hold: %v", b)
+	}
+	for _, name := range []string{"NOTES.md", "other"} {
+		if err := os.MkdirAll(filepath.Join(ws, "other"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if name == "NOTES.md" {
+			if err := os.WriteFile(filepath.Join(ws, name), []byte("only copy\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.WriteFile(filepath.Join(ws, "other", "work.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err = InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"NOTES.md", "other"} {
+		if !hasBlocker(st, want+" is ") {
+			t.Errorf("%s beside the clones must hold the workspace: %v", want, st.Blockers())
+		}
+	}
+}
+
+// A linked worktree's uncommitted files and detached commits are invisible to
+// the checks on the main worktree, and deleting the clone deletes their
+// repository.
+func TestLinkedWorktreeBlocksReap(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	g := gitx.Git{}
+	wt := filepath.Join(clone, ".worktrees", "spike")
+	if _, err := g.Run(clone, nil, "worktree", "add", "--detach", wt); err != nil {
+		t.Fatal(err)
+	}
+	st, err := InspectIssue(ws, g, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBlocker(st, "linked worktree at ") || !hasBlocker(st, "spike") {
+		t.Fatalf("a linked worktree must hold the workspace: %v", st.Blockers())
+	}
+}
+
+func TestLinkedWorktrees(t *testing.T) {
+	porcelain := "worktree /w/repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /w/repo/.worktrees/a\nHEAD def\ndetached\n\nworktree /elsewhere/b\nHEAD 123\nbranch refs/heads/b\n"
+	got := linkedWorktrees(porcelain)
+	if strings.Join(got, ",") != "/w/repo/.worktrees/a,/elsewhere/b" {
+		t.Errorf("linkedWorktrees = %q", got)
+	}
+	if got := linkedWorktrees("worktree /w/repo\nHEAD abc\n"); len(got) != 0 {
+		t.Errorf("the main worktree alone = %q, want none", got)
+	}
+}
+
+// The session reap checks is the one named after the directory, which is what
+// the user sees; a copied workspace keeps the original's manifest name.
+func TestLiveSessionIsMatchedByDirectory(t *testing.T) {
+	ws, _ := issueWorkspace(t)
+	rec := &recordLive{}
+	if _, err := InspectIssue(ws, gitx.Git{}, nil, rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.asked != filepath.Base(ws) {
+		t.Errorf("asked about session %q, want %q", rec.asked, filepath.Base(ws))
+	}
+}
+
+type recordLive struct{ asked string }
+
+func (r *recordLive) Live(s string) bool { r.asked = s; return false }
 
 func hasBlocker(st *IssueState, substr string) bool {
 	for _, b := range st.Blockers() {
