@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/bottega-cereghino/facet/internal/manifest"
 )
@@ -260,6 +261,135 @@ func TestRepoName(t *testing.T) {
 	} {
 		if got := repoName(in); got != want {
 			t.Errorf("repoName(%q) = %q; want %q", in, got, want)
+		}
+	}
+}
+
+// plainWorktree adds a linked worktree of checkout outside any workspace, on a
+// new branch, as `git worktree add` or an agent makes one.
+func plainWorktree(t *testing.T, checkout, branch string) string {
+	t.Helper()
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitOut(t, checkout, "worktree", "add", "-q", "-b", branch, wt, "origin/main")
+	return wt
+}
+
+// githubOrigin makes checkout's origin a GitHub URL, so a pull request is
+// looked up for its worktrees, with a proxy on a closed local port so the
+// fetch reap runs fails at once instead of leaving the machine.
+func githubOrigin(t *testing.T, checkout string) {
+	t.Helper()
+	gitOut(t, checkout, "remote", "set-url", "origin", "https://github.com/o/r.git")
+	gitOut(t, checkout, "config", "http.proxy", "http://127.0.0.1:9")
+}
+
+func TestInspectWorktreeRefusesACheckout(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	_, err := InspectWorktree(checkout, gitx.Git{}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "fix:") {
+		t.Fatalf("InspectWorktree(checkout) = %v; want a refusal that prints the fix", err)
+	}
+}
+
+func TestPlainWorktreeIsJudgedByItsOwnWork(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	wt := plainWorktree(t, checkout, "topic")
+	st, err := InspectWorktree(wt, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := st.Blockers(); len(b) > 0 {
+		t.Fatalf("a clean worktree is held: %v", b)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "README"), []byte("changed\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	gitOut(t, wt, "commit", "-qam", "unpushed on topic")
+	st, err = InspectWorktree(wt, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Clone[0].Unpushed != 1 {
+		t.Fatalf("Unpushed = %d; want 1 (blockers %v)", st.Clone[0].Unpushed, st.Blockers())
+	}
+}
+
+func TestPlainWorktreeIsHeldByItsBranchsPullRequest(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	wt := plainWorktree(t, checkout, "topic")
+	githubOrigin(t, checkout)
+
+	st, err := InspectWorktree(wt, gitx.Git{}, fakePR{pr: &ghx.PR{Number: 7, State: "OPEN"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBlocker(st, "pull request #7 is still open") {
+		t.Errorf("an open pull request does not hold: %v", st.Blockers())
+	}
+	st, err = InspectWorktree(wt, gitx.Git{}, fakePRErr{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.PRUnknown {
+		t.Errorf("a failed lookup is read as no pull request: %v", st.Blockers())
+	}
+	st, err = InspectWorktree(wt, gitx.Git{}, fakePR{pr: &ghx.PR{Number: 7, State: "MERGED"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := st.Blockers(); len(b) > 0 {
+		t.Errorf("a merged pull request holds: %v", b)
+	}
+}
+
+func TestReapRemovesAPlainWorktreeAndKeepsItsBranch(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	wt := plainWorktree(t, checkout, "topic")
+	st, err := InspectWorktree(wt, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Reap(st, gitx.Git{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(wt); !os.IsNotExist(err) {
+		t.Fatalf("worktree still there: %v", err)
+	}
+	if got := gitOut(t, checkout, "worktree", "list", "--porcelain"); strings.Count(got, "worktree ") != 1 {
+		t.Errorf("checkout still lists the worktree:\n%s", got)
+	}
+	gitOut(t, checkout, "rev-parse", "--verify", "refs/heads/topic")
+}
+
+func TestProjectWorktreesListsEachOnceAndSkipsWorkspaces(t *testing.T) {
+	roots, ws, _, checkout := worktreeSetup(t)
+	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
+		t.Fatal(err)
+	}
+	keep := plainWorktree(t, checkout, "topic")
+	// A worktree checked out beside the checkout lists the same set again.
+	beside := filepath.Join(roots.Projects, "repo-wt")
+	gitOut(t, checkout, "worktree", "add", "-q", "-b", "beside", beside, "origin/main")
+	gone := filepath.Join(t.TempDir(), "gone")
+	gitOut(t, checkout, "worktree", "add", "-q", "-b", "gone", gone, "origin/main")
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(roots.Projects, ".mirrors"), 0o777); err != nil {
+		t.Fatal(err)
+	}
+
+	got, unchecked, err := ProjectWorktrees(gitx.Git{}, roots.Projects, roots.Workspaces)
+	if err != nil || len(unchecked) > 0 {
+		t.Fatalf("ProjectWorktrees: %v %v", err, unchecked)
+	}
+	want := map[string]bool{realPath(keep): true, realPath(beside): true}
+	if len(got) != len(want) {
+		t.Fatalf("ProjectWorktrees = %v; want %v", got, want)
+	}
+	for _, g := range got {
+		if !want[realPath(g)] {
+			t.Errorf("unexpected %s in %v", g, got)
 		}
 	}
 }

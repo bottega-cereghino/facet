@@ -9,6 +9,7 @@ import (
 
 	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/launchd"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 	"github.com/bottega-cereghino/facet/internal/mux"
 	"github.com/bottega-cereghino/facet/internal/workspace"
 	"github.com/spf13/cobra"
@@ -82,7 +83,8 @@ func newReapCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reap",
 		Short: "Delete a workspace once its work has landed",
-		Long: "Deletes an issue workspace or a long-lived one. Refuses while there are\n" +
+		Long: "Deletes an issue workspace or a long-lived one, or a plain git worktree. Refuses\n" +
+			"while there are\n" +
 			"unpushed commits, uncommitted changes, stashes, an open pull request, a live\n" +
 			"multiplexer session, a tmux pane or process still rooted in the workspace, or\n" +
 			"a loaded launchd job whose program or working directory is in it.\n\n" +
@@ -92,7 +94,12 @@ func newReapCmd() *cobra.Command {
 			"never followed: their targets are untouched.\n\n" +
 			"The shared mirror is never touched: a clone's objects are hardlinks, so\n" +
 			"deleting the workspace drops those names and leaves the mirror's own intact.\n\n" +
-			"--reapable deletes every workspace at the root that reap would delete now:\n" +
+			"Given a linked worktree that is not a workspace (`git worktree add`, Claude\n" +
+			"Code's .claude/worktrees), it checks its uncommitted files, the commits only\n" +
+			"its HEAD reaches, its branch's pull request and what runs in it, then removes\n" +
+			"it with git. Its branches stay in the checkout.\n\n" +
+			"--reapable deletes every workspace at the root that reap would delete now, and\n" +
+			"every such worktree of the checkouts under the projects root:\n" +
 			"it lists them with the disk each frees, asks once, and checks each again just\n" +
 			"before deleting it. It never forces; held workspaces are left alone.",
 		Args: cobra.MaximumNArgs(1),
@@ -114,19 +121,31 @@ func newReapCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return reapReapable(os.Stdout, dirs, yes, confirm)
+				// The worktrees of the checkouts under the projects root, Claude
+				// Code's among them; a workspace's own are reaped with it.
+				wts, unchecked, err := workspace.ProjectWorktrees(git, roots.Projects, root)
+				if err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				for _, u := range unchecked {
+					fmt.Printf("could not list worktrees, left alone: %s\n", u)
+				}
+				return reapReapable(os.Stdout, append(dirs, wts...), yes, confirm)
 			}
 			ws, err := reapTarget(path, args)
 			if err != nil {
 				return err
 			}
-			st, err := workspace.Inspect(ws, git, gh, muxLive())
+			st, err := inspectTarget(ws, muxLive())
 			if err != nil {
 				return err
 			}
-			if st.Issue != nil {
+			switch {
+			case st.Worktree:
+				fmt.Printf("%s  (worktree of %s, %s)\n", st.Dir, st.Clone[0].WorktreeOf, humanBytes(st.SizeBytes))
+			case st.Issue != nil:
 				fmt.Printf("%s  (%s#%d, %s)\n", st.Name, st.Issue.Repo, st.Issue.Number, humanBytes(st.SizeBytes))
-			} else {
+			default:
 				fmt.Printf("%s  (long-lived, %s)\n", st.Name, humanBytes(st.SizeBytes))
 			}
 			for _, n := range st.Notes() {
@@ -154,13 +173,19 @@ func newReapCmd() *cobra.Command {
 			// Kill any lingering session first. A live session holds file
 			// handles on the working tree, which on some platforms would
 			// refuse the removeAll below.
-			if l := mux.Pick(); l != nil {
+			// A worktree has no session of its own: one of its name belongs to
+			// something else.
+			if l := mux.Pick(); l != nil && !st.Worktree {
 				_ = l.Kill(filepath.Base(st.Dir))
 			}
 			if err := workspace.Reap(st, git); err != nil {
 				return err
 			}
 			fmt.Printf("removed %s\n", st.Dir)
+			if st.Worktree {
+				fmt.Printf("its branches stay in %s.\n", st.Clone[0].WorktreeOf)
+				return nil
+			}
 			fmt.Println("the shared mirror was not touched.")
 			for _, c := range st.Clone {
 				if c.WorktreeOf != "" {
@@ -213,6 +238,22 @@ func reapTarget(path string, args []string) (string, error) {
 		}
 	}
 	return config.ResolveWorkspace(name)
+}
+
+// inspectTarget inspects what reap was pointed at: a workspace when dir holds a
+// manifest, a plain linked worktree otherwise. A worktree that is a clone of a
+// workspace is refused, since reaping it alone would leave that workspace
+// short of a clone its manifest declares.
+func inspectTarget(dir string, live workspace.LiveChecker) (*workspace.IssueState, error) {
+	if _, err := os.Stat(manifest.Path(dir)); err == nil {
+		return workspace.Inspect(dir, git, gh, live)
+	}
+	if parent := filepath.Dir(dir); parent != dir {
+		if _, err := os.Stat(manifest.Path(parent)); err == nil {
+			return nil, fmt.Errorf("%s is a clone of the workspace %s; reap the workspace instead\nfix: facet reap %s", dir, parent, parent)
+		}
+	}
+	return workspace.InspectWorktree(dir, git, gh, live)
 }
 
 // muxLive returns a session checker, or nil when tmux is not installed.

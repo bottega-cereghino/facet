@@ -302,6 +302,16 @@ and leaves every held workspace alone. It never forces, and it checks each
 workspace again just before deleting it, so work started while the prompt
 waited is not lost. `facet ls --size` shows the same list without deleting.
 
+`reap` also takes a plain git worktree: one made with `git worktree add`, by
+hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
+`facet reap <path>` refuses while it has uncommitted or untracked files,
+commits only its HEAD reaches, an open pull request for its branch, or a
+process, tmux pane or launchd job inside it, then removes it with
+`git worktree remove`. Its branches stay in the checkout. `--reapable` adds
+every reapable worktree of the checkouts directly under `~/Projects`, named by
+its path; the worktree clones of a workspace go only with their workspace, and
+`reap` refuses one named on its own.
+
 ## The issue graph was removed
 
 `facet-graph` (`tree` and `deps`, for sub-issue hierarchies and blocked-by
@@ -488,6 +498,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   forgets it, and never touches the checkout's own files or branches
   (`TestWorktreeCloneIsNotHeldByWhatTheCheckoutKeeps`,
   `TestReapRemovesTheWorktreeAndLeavesTheCheckout`).
+- **`reap` never deletes a checkout.** Given a directory with no manifest, it
+  acts only when that is a linked worktree, and removes it through git, which
+  keeps the repository and every branch (`TestInspectWorktreeRefusesACheckout`,
+  `TestReapRemovesAPlainWorktreeAndKeepsItsBranch`).
 - **`reap` never touches the mirror.** Deleting a hardlinked object drops that
   name; the mirror keeps its own, with its mode: reap changes no file's mode,
   only a directory's, to empty a read-only one
