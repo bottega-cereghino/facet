@@ -393,3 +393,38 @@ func TestProjectWorktreesListsEachOnceAndSkipsWorkspaces(t *testing.T) {
 		}
 	}
 }
+
+// A folder inside a plain worktree is not a worktree: reaping it would delete
+// that folder alone and leave the worktree (facet#274).
+func TestInspectWorktreeRefusesAFolderInsideOne(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	wt := plainWorktree(t, checkout, "topic")
+	src := filepath.Join(wt, "src")
+	if err := os.MkdirAll(src, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	_, err := InspectWorktree(src, gitx.Git{}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "folder inside the worktree") || !strings.Contains(err.Error(), "fix: facet reap ") {
+		t.Fatalf("InspectWorktree(%s) = %v; want a refusal naming the worktree", src, err)
+	}
+}
+
+// removeWorktree deletes by hand only a directory its checkout lists as a
+// worktree, so a folder inside one is never deleted on its own (facet#274).
+func TestRemoveWorktreeLeavesAFolderItDoesNotList(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	wt := plainWorktree(t, checkout, "topic")
+	src := filepath.Join(wt, "src")
+	if err := os.MkdirAll(src, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "settings.local"), []byte("ignored, only copy\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeWorktree(gitx.Git{}, checkout, src); err == nil {
+		t.Error("removeWorktree returned no error for a folder that is not a worktree")
+	}
+	if _, err := os.Stat(filepath.Join(src, "settings.local")); err != nil {
+		t.Fatalf("removeWorktree deleted a folder inside a worktree: %v", err)
+	}
+}

@@ -247,16 +247,16 @@ func reapTarget(path string, args []string) (string, error) {
 }
 
 // inspectTarget inspects what reap was pointed at: a workspace when dir holds a
-// manifest, a plain linked worktree otherwise. A worktree that is a clone of a
-// workspace is refused, since reaping it alone would leave that workspace
-// short of a clone its manifest declares.
+// manifest, a plain linked worktree otherwise. A directory inside a workspace
+// (a clone, or a folder of one) is refused, since reaping it alone would leave
+// that workspace short of what its manifest declares.
 func inspectTarget(dir string, live workspace.LiveChecker) (*workspace.IssueState, error) {
 	if _, err := os.Stat(manifest.Path(dir)); err == nil {
 		return workspace.Inspect(dir, git, gh, live)
 	}
 	if parent := filepath.Dir(dir); parent != dir {
-		if _, err := os.Stat(manifest.Path(parent)); err == nil {
-			return nil, fmt.Errorf("%s is a clone of the workspace %s; reap the workspace instead\nfix: facet reap %s", dir, parent, parent)
+		if ws, err := config.FindWorkspace(parent); err == nil {
+			return nil, fmt.Errorf("%s is inside the workspace %s; reap the workspace instead\nfix: facet reap %s", dir, ws, ws)
 		}
 	}
 	return workspace.InspectWorktree(dir, git, gh, live)

@@ -140,6 +140,15 @@ func removeWorktree(git gitx.Runner, checkout, dir string) error {
 	if _, err := git.Run(checkout, nil, "worktree", "remove", "--force", "--force", "--", dir); err == nil {
 		return nil
 	}
+	// Delete by hand only what the checkout names as one of its worktrees,
+	// never a folder that merely sits inside one.
+	list, err := git.Run(checkout, nil, "worktree", "list", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("could not remove the worktree %s, and could not list %s's worktrees to check it: %w", dir, checkout, err)
+	}
+	if !listed(linkedWorktrees(list), dir) {
+		return fmt.Errorf("%s is not a worktree %s lists; left alone\nfix: `git -C %s worktree list` shows its worktrees", dir, checkout, checkout)
+	}
 	if err := removeAllForce(dir); err != nil {
 		return err
 	}
@@ -167,6 +176,15 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 	if of == "" {
 		return nil, fmt.Errorf("%s is neither a workspace nor a linked worktree: it has a repository of its own, and reap never deletes a checkout\n"+
 			"fix: name a workspace, or a worktree that `git worktree list` shows", dir)
+	}
+	// A folder inside a worktree resolves to the same repository; reaping it
+	// would delete that folder alone and leave the worktree.
+	top, err := git.Run(dir, nil, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, fmt.Errorf("%s: cannot find the worktree's top level: %w", dir, err)
+	}
+	if top = strings.TrimSpace(top); realPath(top) != realPath(dir) {
+		return nil, fmt.Errorf("%s is a folder inside the worktree %s, not a worktree\nfix: facet reap %s", dir, top, top)
 	}
 	repo, clonePR := githubRepo(gitx.Origin(git, dir)), pr
 	if repo == "" {
@@ -222,6 +240,17 @@ func ProjectWorktrees(git gitx.Runner, projects, skip string) (out, unchecked []
 		}
 	}
 	return out, unchecked, nil
+}
+
+// listed reports whether dir is one of worktrees, comparing resolved paths.
+func listed(worktrees []string, dir string) bool {
+	want := realPath(dir)
+	for _, w := range worktrees {
+		if realPath(w) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // realPath resolves symlinks in p, so two spellings of one directory compare
