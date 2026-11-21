@@ -218,7 +218,24 @@ func TestValidate(t *testing.T) {
 			Remotes: map[string]map[string]string{"x": {"upstream": "u"}}}, "remotes declared for non-clone"},
 		{"orphan lfs", Manifest{Name: "w",
 			LFS: map[string]bool{"x": false}}, "lfs declared for non-clone"},
+		{"clone key climbs out", Manifest{Name: "w",
+			Clones: map[string]string{"../x": "u"}}, `clone "../x" would reach outside`},
+		{"clone key is absolute", Manifest{Name: "w",
+			Clones: map[string]string{"/abs": "u"}}, `clone "/abs" would reach outside`},
+		{"clone key is nested", Manifest{Name: "w",
+			Clones: map[string]string{"a/b": "u"}}, `clone "a/b" would reach outside`},
+		{"clone key is the workspace", Manifest{Name: "w",
+			Clones: map[string]string{".": "u"}}, `clone "." would reach outside`},
+		{"link key climbs out", Manifest{Name: "w",
+			Links: map[string]string{"..": "X"}}, `link ".." would reach outside`},
+		{"link target climbs out", Manifest{Name: "w",
+			Links: map[string]string{"x": "../X"}}, `link "x" target "../X" would reach outside`},
+		{"link target is absolute", Manifest{Name: "w",
+			Links: map[string]string{"x": "/X"}}, `link "x" target "/X" would reach outside`},
+		{"bad key names the fix", Manifest{Name: "w",
+			Clones: map[string]string{"../x": "u"}}, "fix: in .workspace.json"},
 		{"valid", Manifest{Name: "w",
+			Links:   map[string]string{"y": "Y"},
 			Clones:  map[string]string{"x": "u"},
 			Remotes: map[string]map[string]string{"x": {"upstream": "u"}},
 			LFS:     map[string]bool{"x": false}}, ""},
@@ -237,6 +254,19 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("want error containing %q, got %v", tt.want, err)
 			}
 		})
+	}
+}
+
+// A manifest is read before sync touches the disk, so a key that would make
+// sync write outside the workspace is refused at Read, not after a clone.
+func TestReadRefusesAnEscapingKey(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"name":"w","description":"","links":{},"clones":{"../escaped":"u"},"remotes":{},"origins":{},"transient":[]}`
+	if err := os.WriteFile(Path(dir), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(dir); err == nil || !strings.Contains(err.Error(), `clone "../escaped"`) {
+		t.Fatalf("Read accepted a clone key outside the workspace: %v", err)
 	}
 }
 

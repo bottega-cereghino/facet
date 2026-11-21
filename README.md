@@ -399,6 +399,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 
 - **An existing clone is never touched** by `sync` — no pull, no reset, no clean.
   It may hold the only copy of unpushed work.
+- **`sync` writes only inside the workspace.** A clone or link key must be one
+  directory name and a link target a folder under the projects root; a manifest
+  naming `../x`, `a/b` or `/abs` is refused when it is read, before anything is
+  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`).
 - **A manifest URL is never read as a git option.** Every git call that takes a
   URL, path or remote name from the manifest puts `--` before it, so a URL such
   as `--upload-pack=<command>` is looked up as a repository and fails
