@@ -210,11 +210,11 @@ func ProjectWorktrees(git gitx.Runner, projects, skip string) (out, unchecked []
 			continue
 		}
 		for _, wt := range linkedWorktrees(list) {
-			real := realPath(wt)
-			if seen[real] || (skipReal != "" && isUnder(skipReal, real)) {
+			key := realPath(wt)
+			if seen[key] || (skipReal != "" && isUnder(skipReal, key)) {
 				continue
 			}
-			seen[real] = true
+			seen[key] = true
 			if fi, err := os.Stat(wt); err != nil || !fi.IsDir() {
 				continue
 			}

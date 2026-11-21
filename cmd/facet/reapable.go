@@ -59,8 +59,13 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 	}
 	_, _ = fmt.Fprintf(out, "\n%d reapable, freeing %s; %s left alone.\n", len(picked), humanBytes(total), left)
 	question := fmt.Sprintf("Delete these %d workspaces?", len(picked))
-	if len(picked) == 1 {
+	switch {
+	case len(picked) == 1 && picked[0].Worktree:
+		question = "Delete this worktree?"
+	case len(picked) == 1:
 		question = "Delete this workspace?"
+	case hasWorktree(picked):
+		question = fmt.Sprintf("Delete these %d workspaces and worktrees?", len(picked))
 	}
 	if !yes && !ask(question) {
 		_, _ = fmt.Fprintln(out, "aborted.")
@@ -114,4 +119,13 @@ func reapName(st *workspace.IssueState) string {
 		return st.Dir + " (worktree)"
 	}
 	return filepath.Base(st.Dir)
+}
+
+func hasWorktree(sts []*workspace.IssueState) bool {
+	for _, st := range sts {
+		if st.Worktree {
+			return true
+		}
+	}
+	return false
 }
