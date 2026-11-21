@@ -28,11 +28,10 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "A version pin with a `# renovate:` comment on the line above it: the Go tool pins in the Makefile, the security tools in security.yml and release-please in scripts/release.sh.",
+      "description": "A version pin with a `# renovate:` comment on the line above it: the Go tool pins in the Makefile and the security tools in security.yml. release-please is not here: the npm manager moves it in scripts/release/package.json, with its lockfile.",
       "managerFilePatterns": [
         "/^Makefile$/",
-        "/^\\.github/workflows/security\\.yml$/",
-        "/^scripts/release\\.sh$/"
+        "/^\\.github/workflows/security\\.yml$/"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( extractVersion=(?<extractVersion>\\S+))?\\n\\s*[A-Z_]+(: | := |=)(?<currentValue>\\S+)"

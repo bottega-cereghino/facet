@@ -19,6 +19,7 @@ reasons. Read the section of CODE.md you are about to touch.
 | `docs/CODE.md` | the house style, numbered so a rule can be cited |
 | `docs/design/` | design notes for single behaviours (reap's refusal) |
 | `scripts/release.sh` | cuts a release with release-please (section Releases) |
+| `scripts/release/` | `package.json` and `package-lock.json` pinning the release-please the script runs |
 
 Code moves to `internal/` when a second caller needs it, not before.
 
@@ -119,7 +120,12 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
 
 release-please, run from a machine logged in with `gh`, not from a workflow:
 the org does not let Actions open pull requests, and a PR opened with
-`GITHUB_TOKEN` would never run its required checks (#219).
+`GITHUB_TOKEN` would never run its required checks (#219). The script needs
+`node` and `npm`: each run installs release-please and its dependencies from
+`scripts/release/package-lock.json` with `npm ci --ignore-scripts` into a
+temporary directory, so every package the gh token is handed to is pinned by
+version and checksum. Never replace that with `npx`, which resolves the tree
+afresh.
 
 1. `scripts/release.sh pr` opens or updates the release PR from the commits
    on `main` since the last tag. Below 1.0 a breaking change bumps the minor.
@@ -140,8 +146,10 @@ Tags up to v0.3.0 declare the module's old name, so for those it is
 
 Renovate (`renovate.json`) on `config:best-practices`, weekly between
 00:00 and 06:00 on Monday (Europe/Rome), and only releases at least 14 days old. It covers Go modules (then
-`go mod tidy`), action SHAs, the Renovate validator image in `ci.yml`, the Makefile tool pins
-and the gitleaks and zizmor versions in `security.yml`; the last two are
+`go mod tidy`), action SHAs, the Renovate validator image in `ci.yml`, the Makefile tool pins,
+the gitleaks and zizmor versions in `security.yml`, and release-please in
+`scripts/release/package.json` with its lockfile (the npm manager). The
+Makefile and `security.yml` pins are
 found through a `# renovate: datasource=… depName=…` comment on the line
 above the pin. Patch and digest updates merge themselves once every check is
 green; minors and majors
