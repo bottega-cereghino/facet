@@ -112,6 +112,9 @@ type IssueState struct {
 	// is itself a blocker: deleting a directory out from under a running
 	// process is silent corruption, not a merely premature reap.
 	LiveRoots []string
+	// LiveRootsUnknown is why the panes and processes rooted here could not be
+	// listed, or nil. Set, one cannot be ruled out, so it holds the workspace.
+	LiveRootsUnknown error
 	// Jobs names the loaded background jobs (launchd on macOS) whose program or
 	// working directory is here. A job that is not running holds nothing open,
 	// so LiveRoots misses it, but deleting the directory breaks its next run.
@@ -181,6 +184,9 @@ func (s *IssueState) Blockers() []string {
 	}
 	for _, r := range s.LiveRoots {
 		out = append(out, fmt.Sprintf("%s -- kill it before reaping", r))
+	}
+	if s.LiveRootsUnknown != nil {
+		out = append(out, fmt.Sprintf("could not list the panes and processes running from here (%v) -- one cannot be ruled out; check that tmux and lsof run, then reap again", s.LiveRootsUnknown))
 	}
 	for _, j := range s.Jobs {
 		out = append(out, fmt.Sprintf("%s -- unload the job, or move it out, before reaping", j))
@@ -346,9 +352,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 // asked through mux's optional interfaces.
 func (s *IssueState) checkRunning(dir string, mux LiveChecker) {
 	if lr, ok := mux.(LiveRootChecker); ok {
-		if roots, err := lr.LiveRoots(dir); err == nil {
-			s.LiveRoots = roots
-		}
+		s.LiveRoots, s.LiveRootsUnknown = lr.LiveRoots(dir)
 	}
 	if jc, ok := mux.(JobChecker); ok {
 		s.Jobs, s.JobsUnknown = jc.JobsUnder(dir)
