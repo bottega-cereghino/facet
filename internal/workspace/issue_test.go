@@ -1375,9 +1375,7 @@ func TestReapLeavesTheMirrorAloneAndDeletesReadOnlyDirs(t *testing.T) {
 // long-lived workspace. CLAUDE.md is spawn's own and does not hold.
 func TestIssueWorkspaceHoldsFilesBesideItsClones(t *testing.T) {
 	ws, _ := issueWorkspace(t)
-	if err := os.WriteFile(filepath.Join(ws, "CLAUDE.md"), []byte("written by spawn\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSpawnsClaudeMD(t, ws)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1623,5 +1621,57 @@ func TestReapHoldsAnUntrackedFileTheConfigHides(t *testing.T) {
 	}
 	if b := st.Blockers(); len(b) == 0 {
 		t.Fatal("reap would delete the untracked new.go that status.showUntrackedFiles=no hides")
+	}
+}
+
+// writeSpawnsClaudeMD writes CLAUDE.md the way spawn does, hash and all.
+func writeSpawnsClaudeMD(t *testing.T, ws string) {
+	t.Helper()
+	m, err := manifest.Read(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteIssueClaudeMD(ws, m, []byte("# written by spawn\n")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Spawn refuses a workspace that exists, so nothing rewrites its CLAUDE.md: an
+// agent's notes kept there are the only copy. The file is facet's own only
+// while it hashes to what spawn recorded; edited, or with no hash recorded (a
+// workspace spawned before the hash was), it holds like a note beside it.
+func TestIssueWorkspaceHoldsAnEditedClaudeMD(t *testing.T) {
+	ws, _ := issueWorkspace(t)
+	writeSpawnsClaudeMD(t, ws)
+	path := filepath.Join(ws, "CLAUDE.md")
+	if err := os.WriteFile(path, []byte("# written by spawn\n\n## Findings (only copy)\n- the race is in the cache\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBlocker(st, "CLAUDE.md") {
+		t.Errorf("an edited CLAUDE.md does not hold: %v", st.Blockers())
+	}
+
+	// No hash recorded: what spawn wrote cannot be told from an edit.
+	m, err := manifest.Read(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Issue.ClaudeMD = ""
+	if err := m.Write(ws); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# written by spawn\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err = InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBlocker(st, "CLAUDE.md") {
+		t.Errorf("a CLAUDE.md with no recorded hash does not hold: %v", st.Blockers())
 	}
 }
