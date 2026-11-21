@@ -85,7 +85,7 @@ func reapReapable(out io.Writer, dirs []string, yes bool, ask func(string) bool)
 		if l := mux.Pick(); l != nil {
 			_ = l.Kill(filepath.Base(again.Dir))
 		}
-		if err := workspace.Reap(again); err != nil {
+		if err := workspace.Reap(again, git); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(again.Dir), err))
 			continue
 		}

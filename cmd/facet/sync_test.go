@@ -31,7 +31,7 @@ func withUnsoundCredential(t *testing.T) {
 func TestSyncIgnoresTheCredential(t *testing.T) {
 	withUnsoundCredential(t)
 
-	err := runSync(t.TempDir()+"/does-not-exist", false, false, false)
+	err := runSync(t.TempDir()+"/does-not-exist", false, false, false, false)
 	if err == nil {
 		t.Fatal("sync succeeded against a path that does not exist")
 	}
@@ -46,7 +46,7 @@ func TestRestoreIgnoresTheCredential(t *testing.T) {
 	roots = config.Roots{Workspaces: t.TempDir()}
 	t.Cleanup(func() { roots = prev })
 
-	if err := runRestore(); err != nil {
+	if err := runRestore(false); err != nil {
 		t.Fatalf("restore over an empty root must succeed whatever the credential: %v", err)
 	}
 }

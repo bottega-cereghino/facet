@@ -157,7 +157,7 @@ func newReapCmd() *cobra.Command {
 			if l := mux.Pick(); l != nil {
 				_ = l.Kill(filepath.Base(st.Dir))
 			}
-			if err := workspace.Reap(st); err != nil {
+			if err := workspace.Reap(st, git); err != nil {
 				return err
 			}
 			fmt.Printf("removed %s\n", st.Dir)

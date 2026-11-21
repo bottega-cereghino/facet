@@ -1348,7 +1348,7 @@ func TestReapLeavesTheMirrorAloneAndDeletesReadOnlyDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := &IssueState{Dir: ws, Name: filepath.Base(ws)}
-	if err := Reap(st); err != nil {
+	if err := Reap(st, gitx.Git{}); err != nil {
 		t.Fatalf("Reap: %v", err)
 	}
 	if _, err := os.Stat(ws); !os.IsNotExist(err) {
@@ -1480,7 +1480,7 @@ func TestReapFromInsideTheWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Reap(st); err != nil {
+	if err := Reap(st, gitx.Git{}); err != nil {
 		t.Fatalf("Reap from inside the workspace: %v", err)
 	}
 	if _, err := os.Stat(ws); !os.IsNotExist(err) {
@@ -1500,7 +1500,7 @@ func TestReapFromInsideAClone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Reap(st); err != nil {
+	if err := Reap(st, gitx.Git{}); err != nil {
 		t.Fatalf("Reap from inside a clone: %v", err)
 	}
 	if _, err := os.Stat(ws); !os.IsNotExist(err) {

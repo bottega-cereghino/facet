@@ -90,6 +90,10 @@ type SyncOptions struct {
 	Bootstrap bool
 	// Source decides where clones are fetched from. Nil means DirectSource.
 	Source SourceResolver
+	// Worktrees makes a missing clone a linked worktree of the checkout of the
+	// same repository under the projects root, when there is one (see
+	// projectCheckout). Without one, the clone is made from Source.
+	Worktrees bool
 }
 
 // Sync makes the workspace directory match its manifest, idempotently.
@@ -126,7 +130,7 @@ func syncLocked(roots config.Roots, ws string, git gitx.Runner, rep Reporter, op
 		dirty = dirty || changed
 	}
 	for _, name := range sortedKeys(m.Clones) {
-		if err := syncClone(ws, m, name, git, rep, opt); err != nil {
+		if err := syncClone(roots, ws, m, name, git, rep, opt); err != nil {
 			return err
 		}
 	}
@@ -197,9 +201,8 @@ func syncLink(roots config.Roots, ws string, m *manifest.Manifest, name string, 
 	return dirty, nil
 }
 
-func syncClone(ws string, m *manifest.Manifest, name string, git gitx.Runner, rep Reporter, opt SyncOptions) error {
+func syncClone(roots config.Roots, ws string, m *manifest.Manifest, name string, git gitx.Runner, rep Reporter, opt SyncOptions) error {
 	dir := filepath.Join(ws, name)
-	url := m.Clones[name]
 
 	if _, err := os.Lstat(dir); err == nil {
 		isLink, err := fslink.IsLink(dir)
@@ -212,25 +215,8 @@ func syncClone(ws string, m *manifest.Manifest, name string, git gitx.Runner, re
 		}
 		// Present. Never touch it: it may hold the only copy of unpushed work.
 		rep.Unchanged("%s (clone)", name)
-	} else {
-		src, setOrigin, err := opt.Source.Resolve(url)
-		if err != nil {
-			return err
-		}
-		skipLFS := false
-		if v, ok := m.LFS[name]; ok && !v {
-			skipLFS = true
-		}
-		note := ""
-		if skipLFS {
-			note = " (LFS pointers only)"
-		}
-		rep.Working("%s : cloning %s%s", name, src, note)
-		if err := gitx.Clone(git, src, dir, gitx.CloneOptions{SkipLFS: skipLFS, SetOriginTo: setOrigin}); err != nil {
-			rep.Warn("%s (clone failed: %v)", name, err)
-			return nil
-		}
-		rep.Created("%s (cloned)", name)
+	} else if made, err := createClone(roots, dir, m, name, git, rep, opt); err != nil || !made {
+		return err
 	}
 
 	// Extra remotes (a fork's `upstream`, say). Added when missing; a URL that
@@ -249,6 +235,50 @@ func syncClone(ws string, m *manifest.Manifest, name string, git gitx.Runner, re
 		}
 	}
 	return nil
+}
+
+// createClone brings a missing clone into existence: a worktree of the
+// checkout under the projects root when opt.Worktrees and there is one, a clone
+// from opt.Source otherwise. made is false when it could not, which has been
+// reported as a warning, so the rest of the workspace still syncs.
+func createClone(roots config.Roots, dir string, m *manifest.Manifest, name string, git gitx.Runner, rep Reporter, opt SyncOptions) (made bool, err error) {
+	url := m.Clones[name]
+	skipLFS := false
+	if v, ok := m.LFS[name]; ok && !v {
+		skipLFS = true
+	}
+	note := ""
+	if skipLFS {
+		note = " (LFS pointers only)"
+	}
+	if opt.Worktrees {
+		if checkout := projectCheckout(git, roots.Projects, name, url); checkout != "" {
+			rep.Working("%s : adding a worktree of %s%s", name, checkout, note)
+			ok, err := addWorktree(git, checkout, dir, skipLFS, rep)
+			switch {
+			case ok:
+				rep.Created("%s (worktree of %s)", name, checkout)
+				return true, nil
+			case err != nil:
+				rep.Warn("%s (worktree failed: %v)", name, err)
+				if _, statErr := os.Lstat(dir); statErr == nil {
+					return false, nil
+				}
+				rep.Note("%s : cloning instead", name)
+			}
+		}
+	}
+	src, setOrigin, err := opt.Source.Resolve(url)
+	if err != nil {
+		return false, err
+	}
+	rep.Working("%s : cloning %s%s", name, src, note)
+	if err := gitx.Clone(git, src, dir, gitx.CloneOptions{SkipLFS: skipLFS, SetOriginTo: setOrigin}); err != nil {
+		rep.Warn("%s (clone failed: %v)", name, err)
+		return false, nil
+	}
+	rep.Created("%s (cloned)", name)
+	return true, nil
 }
 
 // prune deletes links on disk that the manifest no longer declares. It only ever
