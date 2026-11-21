@@ -181,6 +181,16 @@ func (s *IssueState) Blockers() []string {
 func (s *IssueState) Notes() []string {
 	var out []string
 	for _, c := range s.Clone {
+		// With unpushed commits the disclaimer rides on that blocker; with none,
+		// "nothing unpushed" was still judged against the last fetch, and a
+		// branch deleted upstream since then would read as pushed.
+		if c.FetchStale && c.Unpushed == 0 {
+			out = append(out, fmt.Sprintf(
+				"%s: could not fetch origin, so it was judged against the last fetch -- a branch deleted upstream since then reads as pushed; reap again online to be sure",
+				c.Dir))
+		}
+	}
+	for _, c := range s.Clone {
 		if c.SquashLanded > 0 {
 			out = append(out, fmt.Sprintf(
 				"%s: %d local commit(s) already landed upstream under a different sha (squash-merged) -- not held",

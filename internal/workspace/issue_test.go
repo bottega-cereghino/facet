@@ -1103,6 +1103,9 @@ func TestFetchFailureIsStalenessDisclaimerNotBlocker(t *testing.T) {
 	if b := st.Blockers(); len(b) != 0 {
 		t.Errorf("a failed fetch on an otherwise clean clone must not block, got %v", b)
 	}
+	if n := st.Notes(); len(n) != 1 || !strings.Contains(n[0], "last fetch") {
+		t.Errorf("Notes() = %v; want one saying it was judged against the last fetch", n)
+	}
 }
 
 // Genuinely unpushed work must still refuse even when the fetch itself
