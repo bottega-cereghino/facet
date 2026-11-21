@@ -35,6 +35,9 @@ type Issue struct {
 	State     string  `json:"state"`
 	Labels    []Label `json:"labels"`
 	Assignees []User  `json:"assignees"`
+	// Author opened the issue. gh's `--json author` fills it; the REST API
+	// calls the field `user`, mapped in parseRESTIssue.
+	Author User `json:"author"`
 }
 
 // LabelNames returns the issue's labels as plain strings.

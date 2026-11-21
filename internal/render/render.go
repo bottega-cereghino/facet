@@ -43,8 +43,11 @@ type IssueData struct {
 	// into the single-line H1. Issue.Title itself is left untouched for callers
 	// that want the raw value.
 	Title string
-	// Body is the issue body with its headings demoted, so they nest under the
-	// generated document's own structure instead of colliding with it.
+	// Author is the login of whoever opened the issue, with control characters
+	// stripped, or "" when the forge did not say.
+	Author string
+	// Body is the issue body as a blockquote (QuoteBody), its headings demoted
+	// first. It is untrusted text, and the template frames it as data.
 	Body           string
 	Labels         []string
 	Assignees      []string
@@ -128,6 +131,33 @@ func DemoteHeadings(md string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
+// lineBreaks turns every sequence a renderer or a reader might take for a line
+// break into "\n". CommonMark ends a line at "\r" alone as well as "\r\n", and
+// U+0085, U+2028 and U+2029 are line breaks to Unicode; QuoteBody must see every
+// one of them, or the text after it would start a line without the quote marker.
+var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\u0085", "\n", "\u2028", "\n", "\u2029", "\n")
+
+// QuoteBody turns md into a markdown blockquote: every line, blank ones too,
+// starts with ">". The issue body is someone else's text, and CLAUDE.md is read
+// by an agent as instructions. Quoting is the framing that cannot be closed from
+// inside: there is no end marker for the body to forge, a fence or a heading in
+// it stays inside the quote, and the quote ends only at the template's own next
+// line. Trailing blank lines are dropped, and a body with no text gives "".
+func QuoteBody(md string) string {
+	lines := strings.Split(lineBreaks.Replace(md), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			lines[i] = ">"
+			continue
+		}
+		lines[i] = "> " + l
+	}
+	return strings.Join(lines, "\n")
+}
+
 // IssueClaudeMD renders the workspace's CLAUDE.md.
 func IssueClaudeMD(d IssueData) ([]byte, error) {
 	t, err := template.ParseFS(templates, "templates/issue.md.tmpl")
@@ -168,9 +198,12 @@ func BuildIssueData(workspace, repo, branch, homeDir string, iss *ghx.Issue,
 
 	d := IssueData{
 		Workspace: workspace, Repo: repo, Issue: iss,
-		Title: sanitizeInline(iss.Title),
+		Title:  sanitizeInline(iss.Title),
+		Author: sanitizeInline(iss.Author.Login),
 		// The body lands under an h2; demote by two so its own h2s become h4s.
-		Body:   DemoteHeadings(iss.Body, 2),
+		// Line breaks are made uniform first, so the demotion sees the same lines
+		// the quote does.
+		Body:   QuoteBody(DemoteHeadings(lineBreaks.Replace(iss.Body), 2)),
 		Labels: iss.LabelNames(), Branch: branch, HomeDir: homeDir,
 		Hints: hints,
 	}

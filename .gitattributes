@@ -4,3 +4,6 @@
 # The golden manifests are byte-exact fixtures: TestGolden compares them to what
 # facet writes. Never let git rewrite their line endings on checkout.
 testdata/manifests/*.json -text
+
+# The generated CLAUDE.md is pinned the same way: TestIssueClaudeMDGolden.
+testdata/render/*.md -text

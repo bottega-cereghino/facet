@@ -9,6 +9,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -42,7 +43,7 @@ func runSpawn(o spawnOpts) error {
 	// Before routing and before the issue lookup, so a credential problem is
 	// named up front. It warns rather than refuses; a credential that cannot
 	// reach GitHub at all fails at the issue lookup, before anything is created.
-	warnPreflight(os.Stderr, "spawn")
+	auth := warnPreflight(os.Stderr, "spawn")
 	route, err := routing.Load(roots.Routing)
 	if err != nil {
 		return err
@@ -96,6 +97,9 @@ func runSpawn(o spawnOpts) error {
 	frags, fragErrs := knowledge.LoadAll(roots.Knowledge, fragNames)
 
 	printPlan(ws, o.Repo, iss, sel, hints, route, branch, scopeRefs, frags, fragErrs)
+	// After the plan and before the prompt, so it is the last thing read before
+	// the answer -- and before --claude starts an agent on the issue's text.
+	writeAuthorWarning(os.Stdout, o.Repo, iss, auth)
 
 	if o.DryRun {
 		fmt.Println("\n--dry-run: nothing was created.")
@@ -234,6 +238,34 @@ func runSpawn(o spawnOpts) error {
 		rep.Warn("%v (the workspace is ready; open it yourself in %s)", err, workDir)
 	}
 	return nil
+}
+
+// writeAuthorWarning warns when the issue was not opened by the signed-in
+// account. Anyone can file an issue on a public repository, and its body goes
+// into CLAUDE.md, where an agent started with --claude reads it. The template
+// frames the body as data; this makes sure the person also knows whose data it
+// is. Not knowing the author or the account counts as a stranger: "I could not
+// tell" must not read as "it is yours".
+func writeAuthorWarning(w io.Writer, repo string, iss *ghx.Issue, st *ghx.AuthStatus) {
+	author := iss.Author.Login
+	me := ""
+	if st != nil {
+		me = st.Account
+	}
+	var who string
+	switch {
+	case author == "":
+		who = "GitHub did not say who wrote it"
+	case me == "":
+		who = fmt.Sprintf("it was written by @%s, and the signed-in account is unknown", author)
+	case strings.EqualFold(author, me):
+		return
+	default:
+		who = fmt.Sprintf("it was written by @%s, not by you (@%s)", author, me)
+	}
+	_, _ = fmt.Fprintf(w, "\n! %s#%d: %s.\n"+
+		"  Its text goes into CLAUDE.md as quoted data, and an agent there reads it.\n"+
+		"  Read the issue before you start one: %s\n", repo, iss.Number, who, iss.URL)
 }
 
 // staleNote is the plan's remark on a fragment overdue for review, or "". A
