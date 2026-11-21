@@ -86,7 +86,9 @@ platform   1        ok      812M   reapable
 It runs reap's own checks, so it fetches every clone and asks GitHub about
 open pull requests, and it is slower than a plain `ls`. The size counts disk
 blocks, and leaves out objects a clone shares with the mirror: deleting the
-workspace does not free those.
+workspace does not free those. On APFS it also leaves out the extents a file
+shares with a clone of it outside the workspace, such as a `node_modules` that
+pnpm cloned from its store, so it can be far below what `du` reports.
 
 ## Working from GitHub issues
 
