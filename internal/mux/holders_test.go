@@ -42,7 +42,9 @@ func startHolder(t *testing.T, cwd, file string, argv0 string) int {
 			if argv0 == "" {
 				return pid
 			}
-			if comm, _ := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(pid)).Output(); strings.TrimSpace(string(comm)) == argv0 {
+			// args, not comm: Linux cuts comm to 15 bytes.
+			args, _ := exec.Command("ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+			if f := strings.Fields(string(args)); len(f) > 0 && f[0] == argv0 {
 				return pid
 			}
 		}
