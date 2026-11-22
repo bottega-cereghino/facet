@@ -483,6 +483,11 @@ and a command that never started, are retried after `wait`. Remove the queue
 label when the work is done; the next run of `facet queue` starts an agent
 for whatever still carries it.
 
+An issue whose branch (`feature/<number>-…`, as spawn names it) has an
+open pull request is not started, by this process or the next: its agent
+opened the pull request, and the label stays until the merge. When the
+open pull requests cannot be listed, the queue starts nothing and waits.
+
 At most 1000 open issues per repository are considered. When a repository
 returns exactly that many, the queue says so: any beyond the cap are unseen.
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -17,11 +18,14 @@ import (
 // queueEnv is the seams the loop needs. list and spawn are the only fakes a
 // test has to supply: the agent and the gate are commands, run by runArgv.
 type queueEnv struct {
-	list  func(repo, label string) ([]ghx.Issue, error)
-	spawn func(repo string, number int) (string, error)
-	run   func(ctx context.Context, dir string, argv []string) error
-	now   func() time.Time
-	out   io.Writer
+	list func(repo, label string) ([]ghx.Issue, error)
+	// prBranches lists the head branches of a repository's open pull
+	// requests. Nil skips the check.
+	prBranches func(repo string) ([]string, error)
+	spawn      func(repo string, number int) (string, error)
+	run        func(ctx context.Context, dir string, argv []string) error
+	now        func() time.Time
+	out        io.Writer
 }
 
 func realQueueEnv() queueEnv {
@@ -29,8 +33,9 @@ func realQueueEnv() queueEnv {
 		list: func(repo, label string) ([]ghx.Issue, error) {
 			return gh.OpenIssues(repo, label)
 		},
-		spawn: prepareWorkspace,
-		run:   runArgv,
+		prBranches: ghx.CLI{}.OpenPRBranches,
+		spawn:      prepareWorkspace,
+		run:        runArgv,
 	}
 }
 
@@ -207,6 +212,11 @@ func (r *queueRunner) full() bool {
 // candidate returns the issues one run takes, or none when no queued issue
 // is free to start. The priority file is read here, so an edit applies to
 // the next pick.
+//
+// An issue with an open pull request from its branch is not started: its
+// agent opened the pull request and exited, and the label stays until the
+// merge. This process may not remember handing it out, after a restart
+// (#421). Such an issue counts as not free, like one already running.
 func (r *queueRunner) candidate() ([]queuedIssue, error) {
 	issues, err := r.collect()
 	if err != nil {
@@ -216,14 +226,69 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	now := r.env.now()
 	ranked := orderQueued(issues, projects)
-	run := bundleFor(r.cfg, ranked, func(iss queuedIssue) bool {
-		return r.blocked(iss, now)
-	})
-	return run, nil
+	prs := map[string][]string{}
+	skip := map[string]bool{}
+	for {
+		r.mu.Lock()
+		now := r.env.now()
+		run := bundleFor(r.cfg, ranked, func(iss queuedIssue) bool {
+			return skip[iss.key()] || r.blocked(iss, now)
+		})
+		r.mu.Unlock()
+		if len(run) == 0 {
+			return nil, nil
+		}
+		hit, err := r.withOpenPR(run, prs)
+		if err != nil {
+			return nil, err
+		}
+		if len(hit) == 0 {
+			return run, nil
+		}
+		for _, iss := range hit {
+			skip[iss.key()] = true
+			r.logf("queue: %s#%d has an open pull request from %s; not starting it again", iss.Repo, iss.Issue.Number, hitBranch(iss, prs[iss.Repo]))
+		}
+	}
+}
+
+// withOpenPR returns the issues of run whose branch has an open pull
+// request. prs caches each repository's open branches for this pick. A
+// listing that fails fails the pick: starting while it is unknown could run
+// an issue twice.
+func (r *queueRunner) withOpenPR(run []queuedIssue, prs map[string][]string) ([]queuedIssue, error) {
+	if r.env.prBranches == nil {
+		return nil, nil
+	}
+	var hit []queuedIssue
+	for _, iss := range run {
+		branches, ok := prs[iss.Repo]
+		if !ok {
+			got, err := r.env.prBranches(iss.Repo)
+			if err != nil {
+				return nil, fmt.Errorf("list open pull requests in %s: %w\nfix: the queue will not start an issue while it cannot tell whether a pull request is open for it", iss.Repo, err)
+			}
+			prs[iss.Repo] = got
+			branches = got
+		}
+		if hitBranch(iss, branches) != "" {
+			hit = append(hit, iss)
+		}
+	}
+	return hit, nil
+}
+
+// hitBranch is the first of branches that is iss's branch, as spawn names
+// it (feature/<number>-<slug>), or "".
+func hitBranch(iss queuedIssue, branches []string) string {
+	prefix := issueBranchName(iss.Issue.Number, "")
+	for _, b := range branches {
+		if strings.HasPrefix(b, prefix) {
+			return b
+		}
+	}
+	return ""
 }
 
 func (r *queueRunner) projectOrder() ([]string, error) {
