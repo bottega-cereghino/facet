@@ -8,13 +8,16 @@ import (
 	"path/filepath"
 )
 
-// Fingerprint digests every entry under dir by its path, type, size and
-// modification time, without following links. reap --force takes one when it
+// Fingerprint digests every entry under dir by its path, type, size,
+// modification time and status change time, without following links. reap --force takes one when it
 // shows the holders it will override and another just before it checks again:
 // the holders' sentences ("app has uncommitted changes") read the same
 // however much work lands while the prompt waits, but a new file, an edit, a
-// commit, an amend or a stash writes something under dir and changes this. A
-// tree that cannot be walked in full is an error.
+// commit, an amend or a stash writes something under dir and changes this.
+// The change time is there because the modification time can be put back
+// (`touch -r`, a tool that keeps times), and a same-size edit with it would
+// otherwise pass unseen (#387); no call sets the change time back. A tree that
+// cannot be walked in full is an error.
 func Fingerprint(dir string) (string, error) {
 	h := sha256.New()
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -29,7 +32,7 @@ func Fingerprint(dir string) (string, error) {
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(h, "%q %v %d %d\n", rel, fi.Mode(), fi.Size(), fi.ModTime().UnixNano())
+		_, err = fmt.Fprintf(h, "%q %v %d %d %d\n", rel, fi.Mode(), fi.Size(), fi.ModTime().UnixNano(), changeTime(fi))
 		return err
 	})
 	if err != nil {
