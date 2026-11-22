@@ -20,6 +20,7 @@ reasons. Read the section of CODE.md you are about to touch.
 | `docs/design/` | design notes for single behaviours (reap's refusal) |
 | `scripts/release.sh` | cuts a release with release-please (section Releases) |
 | `scripts/release/` | `package.json` and `package-lock.json` pinning the release-please the script runs |
+| `scripts/test-change.sh` | the `test-change` check: does a PR weaken the tests |
 
 Code moves to `internal/` when a second caller needs it, not before.
 
@@ -49,13 +50,16 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
   weekly) and zizmor on the workflows. A separate workflow, so its two jobs
   ("Committed secrets", "Workflow audit") are required by the ruleset by
   name rather than through `ci`.
-- `pr-title.yml`: the PR title is a Conventional Commit.
+- `pr-title.yml`, rerun when the PR's title or body is edited: `pr-title`,
+  the title is a Conventional Commit; `test-change`, a PR that weakens the
+  tests (`scripts/test-change.sh` says what counts) has a line
+  `Test-change: <why>` in its body.
 - `codeql.yml`: CodeQL on the Go code (`security-and-quality`), on PRs and
   main. The job only uploads; code scanning's own "CodeQL" check on the PR
   fails on a new alert of error severity or of high security severity and
   above. It was seen red on a planted command injection (#223). It is not a
   required check, so read it before merging.
-- The `main` ruleset requires `linux`, `macos`, `ci`, `pr-title`,
+- The `main` ruleset requires `linux`, `macos`, `ci`, `pr-title`, `test-change`,
   "Committed secrets" and "Workflow audit", a PR,
   linear history and an up-to-date branch. Squash is the only merge method,
   and the squash commit takes the PR title.

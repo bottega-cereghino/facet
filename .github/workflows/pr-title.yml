@@ -1,9 +1,14 @@
 name: pr-title
 
-# A squash merge uses the pull request title as the commit message on main, so
-# the title must be a Conventional Commit, for example
-# "fix(spawn): fail when the home clone is missing". CONTRIBUTING.md lists the types.
-# Scopes are optional and not checked.
+# Checks of the pull request itself, rerun when its title or body is edited.
+#
+# pr-title: a squash merge uses the pull request title as the commit message
+# on main, so the title must be a Conventional Commit, for example
+# "fix(spawn): fail when the home clone is missing". CONTRIBUTING.md lists the
+# types. Scopes are optional and not checked.
+#
+# test-change: a pull request that weakens the tests (scripts/test-change.sh
+# says what counts) fails unless its body has a line "Test-change: <why>".
 
 on:
   pull_request:
@@ -12,7 +17,7 @@ on:
 permissions:
   pull-requests: read
 
-# A new push or a new title cancels the check of the old one.
+# A new push, title or body cancels the check of the old one.
 concurrency:
   group: pr-title-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -38,3 +43,24 @@ jobs:
             ci
             chore
             revert
+
+  test-change:
+    name: test-change
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Both ends of the pull request, to compare their tests.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail a pull request that weakens the tests without saying why
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Through the environment, never into the script: the body is
+          # anyone's text.
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: scripts/test-change.sh "$BASE_SHA" "$HEAD_SHA"
