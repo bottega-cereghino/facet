@@ -442,7 +442,8 @@ const maxLoose = 10
 // Inside an enclosing repository, a path git reports in any way -- modified,
 // untracked or ignored -- has no committed copy. Outside one, every loose
 // entry is the only copy. A status that fails blocks: a state that could not
-// be read is never assumed clean.
+// be read is never assumed clean. Only a repository above the workspace
+// counts as enclosing: one at its root goes with it (ownRepository).
 func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing string, loose []string) {
 	entries, err := os.ReadDir(ws)
 	if err != nil {
@@ -462,11 +463,13 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		}
 		names = append(names, n)
 	}
-	if len(names) == 0 {
-		return enclosingRepo(git, ws), nil
-	}
-
 	enclosing = enclosingRepo(git, ws)
+	if held := ownRepository(ws, enclosing); held != "" {
+		return "", []string{held}
+	}
+	if len(names) == 0 {
+		return enclosing, nil
+	}
 	if enclosing == "" {
 		for _, n := range names {
 			loose = append(loose, fmt.Sprintf("%s is in no repository -- this workspace is its only copy", n))
@@ -559,6 +562,25 @@ func enclosingRepo(git gitx.Runner, ws string) string {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// ownRepository returns a blocker when the workspace is itself a repository: a
+// .git of any kind at its root, or git placing the top level there. Its
+// commits, branches, stashes and config live in what reap deletes, so a file
+// committed there has no other copy, and nothing judges the rest; it holds
+// whatever it holds. A .git git cannot read holds too, since git looks past it
+// to the repository above, whose status never reports a .git. top is what
+// enclosingRepo found.
+func ownRepository(ws, top string) string {
+	_, err := os.Lstat(filepath.Join(ws, ".git"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Sprintf("could not look for a .git in %s: %v -- cannot confirm it is safe to delete", ws, err)
+	}
+	if err != nil && (top == "" || realPath(top) != realPath(ws)) {
+		return ""
+	}
+	return fmt.Sprintf("%s is itself a git repository -- its .git, with every commit, branch and stash in it, would go with the workspace; "+
+		"push what you need, move .git out of the workspace, then reap again", ws)
 }
 
 // capList keeps the first maxLoose entries of list and counts the rest as

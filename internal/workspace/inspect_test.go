@@ -151,6 +151,79 @@ func TestLooseFilesInAnEnclosingRepository(t *testing.T) {
 	}
 }
 
+// A long-lived workspace someone ran `git init` in is its own repository, not
+// one it sits inside: what is committed there lives in the .git that reap
+// deletes, so it is no other copy. Here two branches no remote has would go
+// with it (#312).
+func TestReapHoldsAWorkspaceThatIsItsOwnRepository(t *testing.T) {
+	ws, _ := longLivedWorkspace(t, t.TempDir())
+	gitOut(t, ws, "init", "-q", "-b", "notes")
+	commitFile(t, ws, ".gitignore", "repo/\n", "ignore the clone")
+	commitFile(t, ws, "notes.md", "a week of notes\n", "notes, on no remote")
+	gitOut(t, ws, "switch", "-q", "-c", "ideas")
+	commitFile(t, ws, "ideas.md", "only here\n", "ideas, on no remote")
+	gitOut(t, ws, "switch", "-q", "notes")
+
+	st, err := Inspect(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if !blockersMention(st.Blockers(), "is itself a git repository") {
+		t.Errorf("the workspace's own repository has branches no remote has, yet it does not hold the workspace: %v", st.Blockers())
+	}
+	if st.Enclosing != "" {
+		t.Errorf("the workspace's own repository is not one it sits inside, and reap would tell the user to commit there: Enclosing = %q", st.Enclosing)
+	}
+}
+
+// A repository at the workspace root holds the workspace whatever it holds:
+// reap judges files against a repository that survives the delete, and this
+// one does not. It holds when everything in it is pushed too, since its .git
+// keeps what no remote has (stashes, hooks, config, the reflog), and when git
+// cannot read it at all, where git would look past it to the repository
+// above (#312).
+func TestReapHoldsARepositoryAtTheWorkspaceRoot(t *testing.T) {
+	cases := map[string]func(t *testing.T, root, ws string){
+		"a note committed there": func(t *testing.T, _, ws string) {
+			gitOut(t, ws, "init", "-q", "-b", "main")
+			commitFile(t, ws, "notes.md", "findings, committed only here\n", "notes")
+		},
+		"everything pushed": func(t *testing.T, root, ws string) {
+			remote := filepath.Join(root, "notes.git")
+			gitOut(t, "", "init", "-q", "--bare", "-b", "main", remote)
+			gitOut(t, ws, "init", "-q", "-b", "main")
+			commitFile(t, ws, ".gitignore", "repo/\n", "ignore the clone")
+			commitFile(t, ws, "notes.md", "findings\n", "notes")
+			gitOut(t, ws, "remote", "add", "origin", remote)
+			gitOut(t, ws, "push", "-q", "origin", "main")
+		},
+		"a .git git cannot read, inside an enclosing repository": func(t *testing.T, root, ws string) {
+			enclosing := filepath.Join(root, "Workspaces")
+			gitOut(t, enclosing, "init", "-q", "-b", "main")
+			commitFile(t, enclosing, ".gitignore", "delivery/repo/\n", "track the workspaces")
+			if err := os.MkdirAll(filepath.Join(ws, ".git", "objects"), 0o777); err != nil {
+				t.Fatal(err)
+			}
+			writeTestFile(t, filepath.Join(ws, ".git", "objects", "pack-history"), "the only copy of a history whose HEAD was lost\n")
+		},
+	}
+	for name, setUp := range cases {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			ws, _ := longLivedWorkspace(t, root)
+			setUp(t, root, ws)
+
+			st, err := Inspect(ws, gitx.Git{}, nil, nil)
+			if err != nil {
+				t.Fatalf("Inspect: %v", err)
+			}
+			if !blockersMention(st.Blockers(), "is itself a git repository") {
+				t.Errorf("reap would delete the repository at the workspace root: Blockers() = %v", st.Blockers())
+			}
+		})
+	}
+}
+
 // A link is a window into a shared checkout, not something the workspace owns:
 // it is neither loose nor inspected, and reaping removes the link and leaves
 // its target intact.
