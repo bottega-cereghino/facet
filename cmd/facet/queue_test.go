@@ -1544,3 +1544,41 @@ func sameDir(a, b string) bool {
 	}
 	return aa == bb
 }
+
+func TestQueueDoesNotStartAnIssueWithAnOpenPullRequest(t *testing.T) {
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.Max = 3
+	issues := []ghx.Issue{
+		openIssue(1, "2026-01-01T00:00:00Z"),
+		openIssue(2, "2026-01-02T00:00:00Z"),
+		openIssue(3, "2026-01-03T00:00:00Z"),
+	}
+	var buf bytes.Buffer
+	err := dryQueue(context.Background(), cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) { return issues, nil },
+		prBranches: func(string) ([]string, error) {
+			// feature/20-... is another issue's branch, not #2's.
+			return []string{"feature/2-fix-the-bell", "feature/20-other", "renovate/go"}, nil
+		},
+		out: &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "would start acme/widgets#1") || !strings.Contains(got, "would start acme/widgets#3") ||
+		strings.Contains(got, "would start acme/widgets#2") ||
+		!strings.Contains(got, "acme/widgets#2 has an open pull request from feature/2-fix-the-bell") {
+		t.Fatalf("dry-run =\n%s", got)
+	}
+
+	buf.Reset()
+	err = dryQueue(context.Background(), cfg, queueEnv{
+		list:       func(string, string) ([]ghx.Issue, error) { return issues, nil },
+		prBranches: func(string) ([]string, error) { return nil, errors.New("HTTP 502") },
+		out:        &buf,
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot tell whether a pull request is open") || strings.Contains(buf.String(), "would start") {
+		t.Fatalf("listing failed: err %v, dry-run =\n%s", err, buf.String())
+	}
+}
