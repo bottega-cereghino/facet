@@ -24,6 +24,9 @@ type CloneState struct {
 	Branch string
 	// Dirty means uncommitted changes or untracked files.
 	Dirty bool
+	// InProgress names the git operations stopped partway (a rebase, a merge),
+	// whose state, an autostash among it, is only in the git directory.
+	InProgress []string
 	// Hidden names the tracked files that differ from what is committed while
 	// git status calls them unchanged: an index mark or a clean filter hides
 	// them (see hiddenEdits). Each entry says what hides it and how to show
@@ -194,6 +197,11 @@ func (s *IssueState) Blockers() []string {
 	for _, c := range s.Clone {
 		if c.Dirty {
 			out = append(out, fmt.Sprintf("%s has uncommitted changes", c.Dir))
+		}
+	}
+	for _, c := range s.Clone {
+		for _, op := range c.InProgress {
+			out = append(out, fmt.Sprintf("%s has %s in progress -- its state, an autostash of uncommitted edits among it, is only in the git directory; finish or abort it, then reap again", c.Dir, op))
 		}
 	}
 	for _, c := range s.Clone {
@@ -754,6 +762,11 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 	} else {
 		c.Dirty = strings.TrimSpace(out) != ""
 	}
+	if ops, err := opsInProgress(git, p); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell whether a rebase or merge is in progress: %v", err))
+	} else {
+		c.InProgress = ops
+	}
 	if hidden, err := hiddenEdits(git, p, nil); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for edits git status does not show: %v", err))
 	} else {
@@ -861,10 +874,10 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 	if !own {
 		return c
 	}
-	if out, err := git.Run(p, nil, "stash", "list"); err != nil {
-		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git stash list failed: %v", err))
+	if count, err := gitDirStash(git, p); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not count its stash: %v", err))
 	} else {
-		c.Stashed = countLines(strings.TrimSpace(out))
+		c.Stashed = count
 	}
 
 	return c
@@ -1076,14 +1089,6 @@ func remoteDefaultBranch(git gitx.Runner, dir string) string {
 	return ""
 }
 
-// countLines counts newline-separated entries in already-trimmed output.
-func countLines(s string) int {
-	if s == "" {
-		return 0
-	}
-	return strings.Count(s, "\n") + 1
-}
-
 // ListIssues inspects every issue workspace under the workspaces root. One that
 // cannot be inspected (a broken manifest) is not listed, but named in unchecked
 // with the reason, so a listing never reads as complete when it is not.
@@ -1157,7 +1162,9 @@ func isUnder(root, path string) bool {
 	if err != nil {
 		return false
 	}
-	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
+	// A name that only starts with ".." (`..wt`) is inside: only ".." itself,
+	// or a path through it, leads out.
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // removeAllForce deletes a tree that may hold directories without write
