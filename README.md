@@ -650,7 +650,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   file is read as it is on disk, never through a filter; a file the `ident`
   attribute expanded matches only when every keyword names its own pushed
   blob, so a note written into one holds
-  (`TestCensusReadsTheIdentKeywordExactly`).
+  (`TestCensusReadsTheIdentKeywordExactly`). A tracked file with no filter
+  attribute also matches when git, asked to write its index entry elsewhere,
+  writes the same bytes from a pushed blob, as with `text eol=crlf` or
+  `working-tree-encoding`; a copy checkout would not write, such as one line
+  ending changed, holds
+  (`TestCensusAccountsForWhatCheckoutWritesFromAPushedBlob`).
 - **`reap` refuses while anything beside the clones exists nowhere else**, in an
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. It deletes only what it can
