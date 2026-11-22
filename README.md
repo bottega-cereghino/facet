@@ -531,7 +531,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). The repository is
   resolved as git reads it: a directory outside whose `.git` is a gitfile or a
   symlink into the clone is the clone
-  (`TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone`), and a backup that
+  (`TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone`); a URL that names a
+  file counts only when the file is a bundle, since git follows a gitfile
+  there too (`TestReapHoldsWorkWhoseRemoteURLIsAGitfileIntoTheClone`,
+  `TestReapCountsWorkInABundleOutsideTheWorkspaceAsPushed`); and a backup that
   borrows the clone's objects through its alternates (`git clone --shared`)
   holds none of them
   (`TestReapHoldsWorkPushedToABackupThatBorrowsTheClonesObjects`). In a worktree
