@@ -6,6 +6,35 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.9.0](https://github.com/bottega-cereghino/facet/compare/v0.8.0...v0.9.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* **reap:** hold every file no pushed commit or rebuildable directory accounts for ([#393](https://github.com/bottega-cereghino/facet/issues/393))
+
+### Added
+
+* **reap:** hold every file no pushed commit or rebuildable directory accounts for ([#393](https://github.com/bottega-cereghino/facet/issues/393)) ([a62efa3](https://github.com/bottega-cereghino/facet/commit/a62efa30d7338f13c6ff0edb97c1b7904b847893))
+* **reap:** list the workspaces --reapable leaves alone, grouped by what holds them ([#377](https://github.com/bottega-cereghino/facet/issues/377)) ([bf56fb5](https://github.com/bottega-cereghino/facet/commit/bf56fb5cc2907cdedd955de1abddcf371bcdc2ff))
+
+
+### Fixed
+
+* **reap:** a backup whose objects directory links into the clone is no copy ([#391](https://github.com/bottega-cereghino/facet/issues/391)) ([3300269](https://github.com/bottega-cereghino/facet/commit/33002690988c6928550b1f524319b67af1a04dd6)), refs [#382](https://github.com/bottega-cereghino/facet/issues/382)
+* **reap:** count a remote that names a file only when the file is a bundle ([#390](https://github.com/bottega-cereghino/facet/issues/390)) ([b8f516c](https://github.com/bottega-cereghino/facet/commit/b8f516c318c1212f80871bf64c542142cf57807a)), refs [#380](https://github.com/bottega-cereghino/facet/issues/380)
+* **reap:** count a same-named tmux session only while one of its panes runs in the workspace ([#373](https://github.com/bottega-cereghino/facet/issues/373)) ([8083567](https://github.com/bottega-cereghino/facet/commit/80835673db17bd89fae211daff9014991ab6a9fe))
+* **reap:** count a session of the workspace's name only while a pane of it runs there ([8083567](https://github.com/bottega-cereghino/facet/commit/80835673db17bd89fae211daff9014991ab6a9fe)), refs [#330](https://github.com/bottega-cereghino/facet/issues/330)
+* **reap:** count a stash whose reflog was expired ([#388](https://github.com/bottega-cereghino/facet/issues/388)) ([17153c6](https://github.com/bottega-cereghino/facet/commit/17153c6bc6d16c04f88360dd9705f5fe9263b1c4)), refs [#378](https://github.com/bottega-cereghino/facet/issues/378)
+* **reap:** finish a worktree git half-removed, and drop only its own entry ([#376](https://github.com/bottega-cereghino/facet/issues/376)) ([48407e4](https://github.com/bottega-cereghino/facet/commit/48407e4c99f36b228c1ef59b0478b28f3601f831))
+* **reap:** hold while a rebase, merge, cherry-pick or revert is stopped partway ([#389](https://github.com/bottega-cereghino/facet/issues/389)) ([edd9898](https://github.com/bottega-cereghino/facet/commit/edd9898887e8f15721ffdb630ce1ee914e0ddf27))
+* **reap:** judge a system service by its executable, and skip git objects another link keeps ([#375](https://github.com/bottega-cereghino/facet/issues/375)) ([7e0c9de](https://github.com/bottega-cereghino/facet/commit/7e0c9de8a20f8b6d5412256da696b2b063d87224))
+* **reap:** judge and delete a target where its path leads ([#394](https://github.com/bottega-cereghino/facet/issues/394)) ([d308d3f](https://github.com/bottega-cereghino/facet/commit/d308d3f46e89f30689df0dab5812173956cb8650))
+* **reap:** notice a same-size edit whose modification time was put back ([#395](https://github.com/bottega-cereghino/facet/issues/395)) ([d68bf26](https://github.com/bottega-cereghino/facet/commit/d68bf2644cc2941ea812a7a211b867a896038a3c))
+* **reap:** read a name starting with .. as inside its directory ([#374](https://github.com/bottega-cereghino/facet/issues/374)) ([362dc9e](https://github.com/bottega-cereghino/facet/commit/362dc9e93a30fa065effea91f394d29d90c6f8fc)), refs [#317](https://github.com/bottega-cereghino/facet/issues/317)
+* **reap:** unlink a clone entry that is a symlink instead of removing the worktree it points at ([c330bfd](https://github.com/bottega-cereghino/facet/commit/c330bfdf95225c3b5391e196798166107f2f2780)), refs [#323](https://github.com/bottega-cereghino/facet/issues/323)
+* **reap:** unlink a symlinked clone instead of removing the worktree it points at ([#372](https://github.com/bottega-cereghino/facet/issues/372)) ([c330bfd](https://github.com/bottega-cereghino/facet/commit/c330bfdf95225c3b5391e196798166107f2f2780))
+
 ## [0.8.0](https://github.com/bottega-cereghino/facet/compare/v0.7.7...v0.8.0) (2026-11-22)
 
 
