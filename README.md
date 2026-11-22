@@ -578,7 +578,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. Inside an enclosing repository
   (`~/Workspaces` usually is one), a file committed there does not hold
-  (`TestIssueWorkspaceHoldsFilesBesideItsClones`). Only a repository above
+  (`TestIssueWorkspaceHoldsFilesBesideItsClones`), matched by name without
+  case, so a note renamed in case only on macOS's disk is still seen
+  (`TestReapHoldsAnEditedNoteRenamedInCaseOnly`). Only a repository above
   the workspace counts: a workspace that is itself a repository (someone ran
   `git init` in it) keeps its history in the `.git` that reap deletes, so it
   holds, pushed or not, and so does a `.git` git cannot read

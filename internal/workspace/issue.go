@@ -486,8 +486,18 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 	}
 	// --ignore-submodules=none: diff.ignoreSubmodules in the enclosing
 	// repository's config must not hide a gitlinked entry that moved on.
-	args := append(append([]string{}, honestStatus...), "status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=all", "--ignore-submodules=none", "--")
-	args = append(args, names...)
+	//
+	// The status covers the whole workspace (".") and keeps the entries under
+	// a loose name, folding case, rather than passing the names as pathspecs:
+	// on a case-insensitive disk a note committed as Notes.md and renamed to
+	// notes.md matches neither the index entry nor an untracked file as the
+	// pathspec notes.md, so its later edits went unseen. Pathspecs are
+	// literal (gitx), and git refuses icase beside literal.
+	prefix, err := git.Run(ws, nil, "rev-parse", "--show-prefix")
+	if err != nil {
+		return enclosing, []string{fmt.Sprintf("git rev-parse in %s failed: %v -- cannot confirm the files beside the clones are safe to delete", enclosing, err)}
+	}
+	args := append(append([]string{}, honestStatus...), "status", "--porcelain=v1", "-z", "--no-renames", "--ignored=matching", "--untracked-files=all", "--ignore-submodules=none", "--", ".")
 	out, err := git.Run(ws, nil, args...)
 	if err != nil {
 		return enclosing, []string{fmt.Sprintf("git status in %s failed: %v -- cannot confirm the files beside the clones are safe to delete", enclosing, err)}
@@ -497,6 +507,9 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 			continue
 		}
 		path := rec[3:]
+		if !underName(path, strings.TrimSpace(prefix), names) {
+			continue
+		}
 		loose = append(loose, fmt.Sprintf("%s is not committed in %s -- this workspace is its only copy", path, enclosing))
 	}
 	hidden, err := hiddenEdits(git, ws, names)
@@ -562,6 +575,23 @@ func githubRepo(url string) string {
 		return ""
 	}
 	return owner + "/" + name
+}
+
+// underName reports whether path, relative to the enclosing repository's top
+// level, lies under one of names in the workspace prefix points at, folding
+// case: the disk may not tell Notes.md from notes.md, and the index keeps the
+// name a file was committed under.
+func underName(path, prefix string, names []string) bool {
+	if len(path) < len(prefix) || !strings.EqualFold(path[:len(prefix)], prefix) {
+		return false
+	}
+	first, _, _ := strings.Cut(path[len(prefix):], "/")
+	for _, n := range names {
+		if strings.EqualFold(first, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // splitRepositories separates the names in ws that are a repository or a
