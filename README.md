@@ -609,20 +609,33 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `TestPlainWorktreeIsHeldByAWorktreeNestedInIt`).
 - **`reap` refuses while anything beside the clones exists nowhere else**, in an
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
-  manifest, a hand clone, a note at the root. Inside an enclosing repository
-  (`~/Workspaces` usually is one), a file committed there does not hold
-  (`TestIssueWorkspaceHoldsFilesBesideItsClones`), matched by name without
-  case, so a note renamed in case only on macOS's disk is still seen
-  (`TestReapHoldsAnEditedNoteRenamedInCaseOnly`). Only a repository above
+  manifest, a hand clone, a note at the root. It deletes only what it can
+  account for: every entry at the top level is a declared clone, a declared
+  link, facet's own file, the `CLAUDE.md` spawn wrote, or a directory whose
+  every file an enclosing repository (`~/Workspaces` usually is one) has
+  committed at that exact path with the same bytes
+  (`TestIssueWorkspaceHoldsFilesBesideItsClones`,
+  `TestReapAccountsOnlyForCommittedBytes`). Committed means in its HEAD: a file
+  that repository ignores, even when it ignores the whole workspace, or has
+  only staged, holds
+  (`TestReapHoldsANoteInAWorkspaceTheEnclosingRepoIgnores`). A name matches
+  byte for byte, never across case or Unicode forms, so a note renamed in case
+  only on macOS's disk, or whose name the disk keeps decomposed, holds
+  (`TestReapHoldsAnEditedNoteRenamedInCaseOnly`,
+  `TestReapHoldsANoteWhoseNameIsDecomposed`); a symlink the manifest does not
+  declare holds (`TestReapHoldsAnUndeclaredSymlink`). Only a repository above
   the workspace counts: a workspace that is itself a repository (someone ran
   `git init` in it) keeps its history in the `.git` that reap deletes, so it
   holds, pushed or not, and so does a `.git` git cannot read
   (`TestReapHoldsAWorkspaceThatIsItsOwnRepository`,
   `TestReapHoldsARepositoryAtTheWorkspaceRoot`). A repository beside the
-  clones (git or another VCS) holds whatever the enclosing repository records
-  of it: `git add -A` keeps a hand clone as a gitlink, its HEAD's sha and none
-  of its commits (`TestReapHoldsAHandCloneTheEnclosingRepoHasAsAGitlink`,
-  `TestReapHoldsAGitlinkedHandCloneThatMovedOn`). The `CLAUDE.md` spawn
+  clones, at any depth (git or another VCS, bare included), holds whatever the
+  enclosing repository records of it: `git add -A` keeps a hand clone as a
+  gitlink, its HEAD's sha and none of its commits
+  (`TestReapHoldsAHandCloneTheEnclosingRepoHasAsAGitlink`,
+  `TestReapHoldsAGitlinkedHandCloneThatMovedOn`,
+  `TestReapHoldsAGitlinkedHandCloneOneLevelDown`,
+  `TestReapHoldsARepositoryDeepInALooseDirectory`). The `CLAUDE.md` spawn
   writes is facet's own only while it hashes to what spawn recorded in the
   manifest; edited, or spawned before the hash was recorded, it holds: nothing
   rewrites it, so an agent's notes there are the only copy
@@ -631,13 +644,24 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsARealDirectoryAtALinkName`), and `facet add link` refuses a
   name a directory already holds, before it writes the manifest
   (`TestAddLinkRefusesARealDirectoryAtItsName`).
-- **`reap` refuses while a repository sits in a directory a clone
-  ignores**, such as a fork cloned into `vendor/` to patch: its commits are
-  invisible to the checks above, and it goes with the clone
-  (`TestReapHoldsARepositoryInAnIgnoredDirectory`). Any VCS counts, and so
-  does a bare repository, which has no `.git` (a backup the clone pushes to
-  there would make its commits read as pushed)
-  (`TestReapHoldsAnyRepositoryInAnIgnoredDirectory`).
+- **`reap` refuses while a repository it does not judge sits anywhere in a
+  clone's work tree**, such as a fork cloned into an ignored `vendor/` to
+  patch: its commits are invisible to the checks above, and it goes with the
+  clone (`TestReapHoldsARepositoryInAnIgnoredDirectory`). One walk reads the
+  whole tree, ignored directories included, never following a symlink; only a
+  git repository at a gitlink or in a tracked directory is judged, as a clone
+  (above). Any VCS counts, and so does a bare repository, which has no `.git`
+  (a backup the clone pushes to there would make its commits read as pushed)
+  (`TestReapHoldsAnyRepositoryInAnIgnoredDirectory`), an ignored directory
+  that is itself the marker, such as a hidden `.hg/` or Jujutsu colocated at
+  the clone's root (`TestReapHoldsARepositoryWhoseMarkerIsTheIgnoredDirectory`),
+  and another VCS beside a judged repository's `.git`
+  (`TestReapHoldsAnotherVCSBesideASubmodulesGit`). A marker git tracks, such as
+  a test fixture, is committed content and does not hold. A submodule's
+  directory that is not checked out holds when it is not empty: git status
+  never looks there, so its files are in no repository
+  (`TestReapHoldsFilesInASubmoduleDirectoryThatIsNotInitialised`,
+  `TestReapDoesNotHoldOnAnEmptySubmoduleOrATrackedMarker`).
 - **What `reap` does not protect:** other files git ignores inside a clone (`.env`,
   `node_modules`, build output: holding on them would hold every workspace);
   commits reachable only from a local tag (a clone carries every upstream tag,
