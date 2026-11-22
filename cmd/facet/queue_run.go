@@ -118,18 +118,14 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		r.pause(ctx)
 		return false, nil
 	}
-	run, held, err := r.candidate()
+	run, err := r.candidate()
 	if err != nil {
 		r.logf("queue: %s", err.Error())
 		r.pause(ctx)
 		return false, nil
 	}
 	if len(run) == 0 {
-		if held != "" {
-			r.logf("queue: %s still has an open issue labelled %s; not starting a lower project", held, r.cfg.Label)
-		} else {
-			r.logf("queue: no open issue labelled %s; waiting %s", r.cfg.Label, r.cfg.Wait)
-		}
+		r.logf("queue: no open issue labelled %s to start; waiting %s", r.cfg.Label, r.cfg.Wait)
 		r.pause(ctx)
 		return false, nil
 	}
@@ -196,23 +192,22 @@ func (r *queueRunner) full() bool {
 	return r.running >= r.cfg.Max
 }
 
-// candidate returns the issues one run takes. held is a repository whose
-// open issue is keeping a lower project from starting, when there is no
-// issue to start. The priority file is read here, so an edit applies to
+// candidate returns the issues one run takes, or none when no queued issue
+// is free to start. The priority file is read here, so an edit applies to
 // the next pick.
 //
 // An issue with an open pull request from its branch is not started: its
 // agent opened the pull request and exited, and the label stays until the
 // merge. This process may not remember handing it out, after a restart
 // (#421). Such an issue counts as not free, like one already running.
-func (r *queueRunner) candidate() ([]queuedIssue, string, error) {
+func (r *queueRunner) candidate() ([]queuedIssue, error) {
 	issues, err := r.collect()
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	projects, err := r.projectOrder()
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	ranked := orderQueued(issues, projects)
 	prs := map[string][]string{}
@@ -220,19 +215,19 @@ func (r *queueRunner) candidate() ([]queuedIssue, string, error) {
 	for {
 		r.mu.Lock()
 		now := r.env.now()
-		run, held := bundleFor(r.cfg, ranked, projects, func(iss queuedIssue) bool {
+		run := bundleFor(r.cfg, ranked, func(iss queuedIssue) bool {
 			return skip[iss.key()] || r.blocked(iss, now)
 		})
 		r.mu.Unlock()
 		if len(run) == 0 {
-			return nil, held, nil
+			return nil, nil
 		}
 		hit, err := r.withOpenPR(run, prs)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		if len(hit) == 0 {
-			return run, "", nil
+			return run, nil
 		}
 		for _, iss := range hit {
 			skip[iss.key()] = true

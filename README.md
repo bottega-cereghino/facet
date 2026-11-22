@@ -431,9 +431,11 @@ never passed through a shell.
 The order is fixed. When `priorities` is set, the queue reads that file
 again before each start. A line is a repository name (`widgets` for
 `acme/widgets`), highest first, and a `#` starts a comment. It starts work
-only in the highest named project that still has an open issue with the
-queue label. A lower project waits, even for a free slot, and even when its
-issue is older or labelled `p1`. A repository the file does not name comes
+in the highest named project that has an open issue with the queue label
+free to start. A slot that project cannot fill, because its issues are
+running, done or waiting to retry, goes to the next project down, in order,
+one start per pick. A lower project's issue never starts ahead of a free
+one above it, even when it is older or labelled `p1`. A repository the file does not name comes
 after every named one. An edit to the file applies to the next start.
 
 Within that project, an issue labelled `p1` is taken before `p2`, `p2`
@@ -493,16 +495,16 @@ The stop is the hold file, or an interrupt. Remove the file and start
 `max`, and does not spawn a workspace or start an agent. It runs the gate.
 A gate that fails is printed as a start that would not happen, and later
 issues are not listed behind it: the queue would wait on that issue. A
-lower project is not listed while a higher one still has an open issue
-with the queue label. The hold file prints that nothing would start, and
-the issues are not listed.
+slot the higher projects cannot fill is listed for the next project down,
+as the queue would start it. The hold file prints that nothing would
+start, and the issues are not listed.
 
 `TestQueueStopsWhenTheHoldFileExists`, `TestQueueWaitsWhenTheGateFails`,
 `TestQueueGateSeesTheIssue`, `TestQueueGateDoesNotRunWhenEffortLabelsDisagree`,
 `TestQueueDryRunPrintsTheNextRunsAndDoesNotSpawn`,
 `TestQueueDryRunStopsWhenTheGateFails`,
 `TestQueueDryRunStopsOnTheHoldFileWithoutListing`,
-`TestQueueDryRunStaysWithTheHighestProject`,
+`TestQueueDryRunGivesAFreeSlotToTheNextProjectDown`,
 `TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
 `TestQueueTakesTheOldestIssueFirst`,
 `TestQueueTakesP1BeforeAnOlderIssue`,
@@ -511,7 +513,7 @@ the issues are not listed.
 `TestQueueBundlesSmallIssuesFromOneRepo`,
 `TestQueueStopsABundleAtAFeature`,
 `TestQueueCountsABundleAsOneAgent`,
-`TestQueueStaysWithTheHighestProject`,
+`TestQueueGivesAFreeSlotToTheNextProjectDown`,
 `TestQueueMovesOnWhenTheHighestProjectHasNoNextIssue`,
 `TestQueueDoesNotHandTheSameIssueOutTwice`,
 `TestQueueRetriesASpawnThatFailed`,
