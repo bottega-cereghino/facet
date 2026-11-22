@@ -28,10 +28,11 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "A version pin with a `# renovate:` comment on the line above it: the Go tool pins in the Makefile and the security tools in security.yml. release-please is not here: the npm manager moves it in scripts/release/package.json, with its lockfile.",
+      "description": "A version pin with a `# renovate:` comment on the line above it: the Go tool pins in the Makefile, the security tools in security.yml and shellcheck in ci.yml. release-please is not here: the npm manager moves it in scripts/release/package.json, with its lockfile.",
       "managerFilePatterns": [
         "/^Makefile$/",
-        "/^\\.github/workflows/security\\.yml$/"
+        "/^\\.github/workflows/security\\.yml$/",
+        "/^\\.github/workflows/ci\\.yml$/"
       ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)( extractVersion=(?<extractVersion>\\S+))?\\n\\s*[A-Z_]+(: | := |=)(?<currentValue>\\S+)"
@@ -114,14 +115,15 @@
     {
       "description": "The checksum next to each version must change with it, and Renovate cannot fetch it. The PR goes red at the checksum step until a person or a session updates it.",
       "matchFileNames": [
-        ".github/workflows/security.yml"
+        ".github/workflows/security.yml",
+        ".github/workflows/ci.yml"
       ],
       "matchManagers": [
         "custom.regex"
       ],
       "automerge": false,
       "prBodyNotes": [
-        "Update the matching `*_SHA256` in `security.yml` in this PR. The checksums are on the release page (gitleaks: `gitleaks_<v>_checksums.txt`, Linux x64; zizmor: the `zizmor-x86_64-unknown-linux-gnu.tar.gz` asset digest)."
+        "Update the matching `*_SHA256` in this PR. The checksums are on the release page (gitleaks: `gitleaks_<v>_checksums.txt`, Linux x64; zizmor: the `zizmor-x86_64-unknown-linux-gnu.tar.gz` asset digest; shellcheck: the `shellcheck-v<v>.linux.x86_64.tar.gz` asset digest)."
       ]
     },
     {
