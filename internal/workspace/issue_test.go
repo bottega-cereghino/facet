@@ -1232,6 +1232,29 @@ func TestStashedWorkBlocksReap(t *testing.T) {
 	}
 }
 
+// `git reflog expire --expire=now --all` (the usual step before `git gc
+// --prune=now`) empties the stash's reflog but leaves refs/stash naming the
+// stash: `git stash list` prints nothing, yet the stash is there (#378).
+func TestReapHoldsAStashWhoseReflogWasExpired(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	writeTestFile(t, filepath.Join(clone, "README"), "work in progress, only here\n")
+	gitOut(t, clone, "-c", "user.name=t", "-c", "user.email=t@example.com", "stash", "-q")
+	gitOut(t, clone, "reflog", "expire", "--expire=now", "--expire-unreachable=now", "--all")
+	if show := gitOut(t, clone, "stash", "show", "-p", "refs/stash"); show == "" {
+		t.Fatal("setup: the stash should still be readable through refs/stash")
+	}
+	if list := gitOut(t, clone, "stash", "list"); list != "" {
+		t.Fatalf("setup: git stash list should be empty, got %q", list)
+	}
+	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBlocker(st, "stash") {
+		t.Fatalf("refs/stash holds the only copy of the stashed edit; blockers = %v", st.Blockers())
+	}
+}
+
 // A pull-request lookup that errors is not proof there is no open PR; it must
 // block reap, distinctly from a lookup that ran and found none (which does not).
 func TestFailedPRLookupBlocksReap(t *testing.T) {

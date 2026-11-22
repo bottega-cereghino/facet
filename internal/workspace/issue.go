@@ -861,10 +861,10 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 	if !own {
 		return c
 	}
-	if out, err := git.Run(p, nil, "stash", "list"); err != nil {
-		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git stash list failed: %v", err))
+	if count, err := gitDirStash(git, p); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not count its stash: %v", err))
 	} else {
-		c.Stashed = countLines(strings.TrimSpace(out))
+		c.Stashed = count
 	}
 
 	return c
@@ -1074,14 +1074,6 @@ func remoteDefaultBranch(git gitx.Runner, dir string) string {
 		return "refs/remotes/origin/main"
 	}
 	return ""
-}
-
-// countLines counts newline-separated entries in already-trimmed output.
-func countLines(s string) int {
-	if s == "" {
-		return 0
-	}
-	return strings.Count(s, "\n") + 1
 }
 
 // ListIssues inspects every issue workspace under the workspaces root. One that
