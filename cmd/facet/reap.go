@@ -344,7 +344,7 @@ func (c liveChecks) LiveRoots(dir string) ([]string, error) {
 		return lr.LiveRoots(dir)
 	}
 	// No multiplexer: a process rooted in the workspace still holds it.
-	return mux.ProcessesUnder(dir), nil
+	return mux.ProcessesUnder(dir)
 }
 
 func (c liveChecks) JobsUnder(dir string) ([]string, error) {

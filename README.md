@@ -48,8 +48,8 @@ go install github.com/bottega-cereghino/facet/cmd/facet@latest
 ```
 
 macOS. Requires `git`. The issue features additionally use the
-[`gh`](https://cli.github.com) CLI; `reap` also asks `tmux` and `lsof`, when they
-are installed, what is still running in a workspace. `facet` shells out to both, so it inherits your existing credentials, SSH agent
+[`gh`](https://cli.github.com) CLI; `reap` and `prune` also ask `lsof` (part of
+macOS) and `tmux`, when it is installed, what is still running in a workspace. `facet` shells out to both, so it inherits your existing credentials, SSH agent
 and `gh` accounts, and never handles a token itself.
 
 ## The core: workspaces
@@ -700,9 +700,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   or the virtualization service sharing it with a VM, would otherwise hold every
   workspace. What runs inside such a VM is not visible from the host. `lsof`
   sees only your own processes.
-  `tmux list-panes -a` and `lsof +D` are both a convenience layered on the
-  git-based checks: a missing tool degrades to "nothing found", never a false
-  refusal.
+  tmux missing, or no tmux server, means no panes. `lsof` missing, or failing
+  (a warning on stderr, an exit other than 1), holds the workspace, since a
+  directory it could not read looks like one nothing runs from
+  (`TestLsofProcessesUnderFailsWhenLsofFails`,
+  `TestPruneHoldsWhenTheProcessProbeFails`).
 - **`reap` refuses while a loaded launchd job runs from the workspace**, running
   or not: a scheduled job between runs holds nothing open, so `lsof` misses it,
   and its next run would fail. A job counts when its `Program`, an absolute path
