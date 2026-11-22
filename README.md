@@ -699,7 +699,14 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   remove is deleted by hand only when its checkout lists it
   (`TestReapRefusesAFolderInsideAWorkspace`,
   `TestInspectWorktreeRefusesAFolderInsideOne`,
-  `TestRemoveWorktreeLeavesAFolderItDoesNotList`).
+  `TestRemoveWorktreeLeavesAFolderItDoesNotList`). A manifest a repository
+  commits makes nothing a workspace: the enclosing workspace and the worktree
+  are checked first, and the top level of a repository is never a workspace,
+  so a clone or a worktree whose repository tracks a `.workspace.json`, or a
+  folder of such a clone, is refused or judged as what it is
+  (`TestReapRefusesACloneWhoseRepositoryCommitsAManifest`,
+  `TestReapInspectsAWorktreeWithACommittedManifestAsAWorktree`,
+  `TestReapRefusesAFolderOfACloneThatTracksAManifest`).
 - **`reap` checks again after its prompt**, so work that started while it
   waited holds the workspace, with `--force` too: force covers the holders it
   showed, never new ones (`TestReapChecksAgainAfterThePrompt`,
@@ -707,7 +714,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   ("app has uncommitted changes") reads the same however much work lands
   under it, so with holders shown, any change to the workspace's files during
   the prompt refuses too: a new file in a clone already dirty, an amend
-  (`TestReapForceRefusesWorkThatLandsDuringThePrompt`). The launchd jobs are
+  (`TestReapForceRefusesWorkThatLandsDuringThePrompt`). It refuses, in
+  `--reapable` too, when the target's path leads to another real directory
+  than before the prompt, or a step of it became or stopped being a symlink,
+  so a parent swapped while it waited cannot point the delete elsewhere
+  (`TestReapDoesNotFollowASwappedTargetParent`). The launchd jobs are
   read again for that check, so a job loaded while the prompt waited holds too
   (`TestReapRecheckSeesALaunchdJobLoadedDuringThePrompt`), in `--reapable`
   and `prune` alike

@@ -145,6 +145,10 @@ func newReapCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			pinned, err := pathOf(ws)
+			if err != nil {
+				return err
+			}
 			st, err := inspectTarget(ws, git, muxLive())
 			if err != nil {
 				return err
@@ -195,6 +199,9 @@ func newReapCmd() *cobra.Command {
 					if err != nil || after != before {
 						return fmt.Errorf("%s changed while the prompt waited; --force covers only what it showed -- refusing to reap; run reap again to see what is there now", st.Dir)
 					}
+				}
+				if err := samePath(ws, pinned); err != nil {
+					return err
 				}
 				// Work can start while the prompt waits: a commit, a new file,
 				// an agent in a second pane. Check again, as --reapable does, and
@@ -305,17 +312,87 @@ func reapTarget(path string, args []string) (string, error) {
 // inspectTarget inspects what reap was pointed at: a workspace when dir holds a
 // manifest, a plain linked worktree otherwise. A directory inside a workspace
 // (a clone, or a folder of one) is refused, since reaping it alone would leave
-// that workspace short of what its manifest declares.
+// that workspace short of what its manifest declares; so is the top level of a
+// repository with a manifest, which is a clone that commits one, or a
+// workspace someone ran `git init` in, never a workspace reap may delete. The
+// enclosing workspace and the worktree are checked first, so a manifest a
+// repository commits does not make its clone or worktree a workspace (#313).
 func inspectTarget(dir string, git gitx.Runner, live workspace.LiveChecker) (*workspace.IssueState, error) {
+	if ws := enclosingWorkspace(git, dir); ws != "" {
+		return nil, fmt.Errorf("%s is inside the workspace %s; reap the workspace instead\nfix: facet reap %s", dir, ws, ws)
+	}
+	top, linked := workspace.TopLevel(git, dir)
+	if linked {
+		return workspace.InspectWorktree(dir, git, gh, live)
+	}
 	if _, err := os.Stat(manifest.Path(dir)); err == nil {
+		if top {
+			return nil, fmt.Errorf("%s is the top level of a git repository, so it is not a workspace: its .git, with every commit, branch and stash, would go with it\n"+
+				"fix: if it is a workspace someone ran `git init` in, push what that repository holds and move its .git out, then reap again", dir)
+		}
 		return workspace.Inspect(dir, git, gh, live)
 	}
-	if parent := filepath.Dir(dir); parent != dir {
-		if ws, err := config.FindWorkspace(parent); err == nil {
-			return nil, fmt.Errorf("%s is inside the workspace %s; reap the workspace instead\nfix: facet reap %s", dir, ws, ws)
+	return workspace.InspectWorktree(dir, git, gh, live)
+}
+
+// enclosingWorkspace returns the nearest workspace above dir, or "". A
+// directory with a manifest that is a repository's top level (a checkout that
+// commits one) is no workspace, so the search goes on above it.
+func enclosingWorkspace(git gitx.Runner, dir string) string {
+	for start := filepath.Dir(dir); start != dir; {
+		ws, err := config.FindWorkspace(start)
+		if err != nil {
+			return ""
+		}
+		if top, _ := workspace.TopLevel(git, ws); !top {
+			return ws
+		}
+		dir, start = ws, filepath.Dir(ws)
+	}
+	return ""
+}
+
+// targetPath is where a reap target's path leads: its real path, and the
+// steps of the path that are symlinks. The check after the prompt compares it
+// with the first, so a parent swapped for a symlink while the prompt waited
+// cannot point the delete at another directory (#363).
+type targetPath struct {
+	real  string
+	links []string
+}
+
+// pathOf reads where dir leads now.
+func pathOf(dir string) (targetPath, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return targetPath{}, err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return targetPath{}, err
+	}
+	t := targetPath{real: resolved}
+	for p := abs; ; p = filepath.Dir(p) {
+		if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			t.links = append(t.links, p)
+		}
+		if filepath.Dir(p) == p {
+			break
 		}
 	}
-	return workspace.InspectWorktree(dir, git, gh, live)
+	return t, nil
+}
+
+// samePath refuses when dir no longer leads where it did when before was read.
+func samePath(dir string, before targetPath) error {
+	now, err := pathOf(dir)
+	if err != nil {
+		return fmt.Errorf("could not resolve %s again after the prompt: %w -- refusing to reap", dir, err)
+	}
+	if now.real != before.real || strings.Join(now.links, "\x00") != strings.Join(before.links, "\x00") {
+		return fmt.Errorf("%s led to %s before the prompt and leads to %s now, or a step of its path became or stopped being a symlink -- refusing to reap; run reap again", dir, before.real, now.real)
+	}
+	return nil
 }
 
 // muxLive returns a session checker, or nil when tmux is not installed.
