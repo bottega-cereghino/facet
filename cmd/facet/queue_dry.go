@@ -24,8 +24,8 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 	if err != nil {
 		return err
 	}
-	if held {
-		r.logf("dry-run: hold file %s exists; would start nothing", cfg.Hold)
+	if held != "" {
+		r.logf("dry-run: hold file %s exists; would start nothing", held)
 		return nil
 	}
 	started := 0

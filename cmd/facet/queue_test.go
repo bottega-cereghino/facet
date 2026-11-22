@@ -48,7 +48,7 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	if cfg.Max != 6 || cfg.Label != "next" || cfg.Wait != 30*time.Second {
 		t.Fatalf("defaults from the example: %+v", cfg)
 	}
-	if cfg.Hold == "" || len(cfg.Gate) == 0 || len(cfg.Repos) != 2 || len(cfg.Agents) != 3 || cfg.Priorities == "" {
+	if len(cfg.Hold) == 0 || len(cfg.Gate) == 0 || len(cfg.Repos) != 2 || len(cfg.Agents) != 3 || cfg.Priorities == "" {
 		t.Fatalf("example is missing a field: %+v", cfg)
 	}
 	names, err := readPriorities(cfg.Priorities)
@@ -450,7 +450,7 @@ func TestQueueCommandStopsOnTheHoldFileWithoutListing(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, err := json.Marshal(queueFile{
-		Hold:   hold,
+		Hold:   queueHolds{hold},
 		Wait:   "20ms",
 		Repos:  []string{"acme/widgets"},
 		Agents: []queueAgentFile{{Command: []string{"agent", "{prompt}"}}},
@@ -495,7 +495,7 @@ func TestQueueStopsWhenTheHoldFileExists(t *testing.T) {
 	var listed atomic.Int32
 	var buf bytes.Buffer
 	cfg := oneAgentConfig(nil)
-	cfg.Hold = hold
+	cfg.Hold = []string{filepath.Join(dir, "absent"), hold}
 	err := runQueue(context.Background(), cfg, queueEnv{
 		out: &buf,
 		list: func(string, string) ([]ghx.Issue, error) {
@@ -1118,8 +1118,8 @@ func TestQueueDryRunStopsWhenTheGateFails(t *testing.T) {
 
 func TestQueueDryRunStopsOnTheHoldFileWithoutListing(t *testing.T) {
 	cfg := oneAgentConfig(nil)
-	cfg.Hold = filepath.Join(t.TempDir(), "hold")
-	if err := os.WriteFile(cfg.Hold, nil, 0o644); err != nil {
+	cfg.Hold = []string{filepath.Join(t.TempDir(), "hold")}
+	if err := os.WriteFile(cfg.Hold[0], nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var listed atomic.Int32
@@ -1648,5 +1648,28 @@ func TestQueueDoesNotStartAnIssueWithAnOpenPullRequest(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot tell whether a pull request is open") || strings.Contains(buf.String(), "would start") {
 		t.Fatalf("listing failed: err %v, dry-run =\n%s", err, buf.String())
+	}
+}
+
+func TestQueueConfigTakesOneHoldFileOrAList(t *testing.T) {
+	base := `"repos": ["acme/widgets"], "agents": [{"command": ["agent", "{prompt}"]}]`
+	for _, tc := range []struct {
+		hold string
+		want string
+	}{
+		{`"/a/stop"`, "/a/stop"},
+		{`["/a/stop", " ", "/b/queue.hold"]`, "/a/stop,/b/queue.hold"},
+		{`""`, ""},
+	} {
+		cfg, err := loadTempConfig(t, `{"hold": `+tc.hold+`, `+base+`}`)
+		if err != nil {
+			t.Fatalf("hold %s: %v", tc.hold, err)
+		}
+		if got := strings.Join(cfg.Hold, ","); got != tc.want {
+			t.Errorf("hold %s = %q, want %q", tc.hold, got, tc.want)
+		}
+	}
+	if _, err := loadTempConfig(t, `{"hold": 3, `+base+`}`); err == nil || !strings.Contains(err.Error(), "list of paths") {
+		t.Fatalf("hold 3: %v", err)
 	}
 }

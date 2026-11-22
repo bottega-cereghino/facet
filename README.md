@@ -418,7 +418,7 @@ never passed through a shell.
 | field | |
 | --- | --- |
 | `max` | how many agents run at once. Omitted means 6. |
-| `hold` | a file path. When it exists, the queue starts nothing and stops. An agent already running is left to finish. |
+| `hold` | a file path, or a list of them. When one exists, the queue starts nothing and stops. An agent already running is left to finish. |
 | `gate` | a command run before each start. Its arguments are expanded with the issue about to start (`{repo}` `{number}` `{title}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`). `{workspace}` is empty, because the gate runs before a workspace is spawned, and `{prompt}` is not substituted. A non-zero exit waits `wait` and tries later. Omitted means there is no gate. |
 | `wait` | how long to wait before looking again. Omitted means 30s. |
 | `label` | which label marks an issue as queued. Omitted means `next`. |
