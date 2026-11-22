@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -367,6 +369,52 @@ func TestQueueOrdersIssues(t *testing.T) {
 	}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("tie break = %v, want %v", got, want)
 	}
+}
+
+func TestRunArgvRunsTheCommandInItsOwnProcessGroup(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "pgid")
+	script := writeExe(t, "pgid", "#!/bin/sh\nps -o pgid= -p $$ | tr -d ' ' > \"$1\"\n")
+	if err := runArgv(context.Background(), "", []string{script, out}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatalf("pgid %q: %v", b, err)
+	}
+	if got == syscall.Getpgrp() {
+		t.Fatalf("the command shares the queue's process group %d: a signal to its group would stop the queue", got)
+	}
+}
+
+func TestRunArgvStopsTheWholeGroupWhenTheQueueStops(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child")
+	// The child is what an agent starts, such as a land attempt.
+	script := writeExe(t, "parent", "#!/bin/sh\nsleep 60 &\necho $! > \"$1.tmp\"\nmv \"$1.tmp\" \"$1\"\nwait\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runArgv(ctx, "", []string{script, pidFile}) }()
+	waitFor(t, "the child", func() bool { _, err := os.Stat(pidFile); return err == nil })
+	b, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatalf("pid %q: %v", b, err)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(queueStopGrace + 5*time.Second):
+		t.Fatal("runArgv did not return after the stop")
+	}
+	waitFor(t, "the child to end", func() bool { return syscall.Kill(pid, 0) != nil })
 }
 
 func TestRunArgvDoesNotPassThePromptThroughAShell(t *testing.T) {
