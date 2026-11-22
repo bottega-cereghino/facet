@@ -296,7 +296,9 @@ clearing what it names and re-running should not turn up more.
 A long-lived workspace can also hold files of its own beside its clones: notes,
 a `CLAUDE.md`. Any that are not committed in an enclosing repository (a
 versioned `~/Workspaces`, say) hold it as well, because the workspace is their
-only copy. An issue workspace holds the same way, except for the `CLAUDE.md`
+only copy. A workspace that is itself a repository holds too, whatever is
+committed or pushed there: its `.git` goes with it. An issue workspace holds
+the same way, except for the `CLAUDE.md`
 spawn wrote, as long as it is unchanged. Links are removed, never followed, so
 their targets are untouched.
 
@@ -548,7 +550,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. Inside an enclosing repository
   (`~/Workspaces` usually is one), a file committed there does not hold
-  (`TestIssueWorkspaceHoldsFilesBesideItsClones`). The `CLAUDE.md` spawn
+  (`TestIssueWorkspaceHoldsFilesBesideItsClones`). Only a repository above
+  the workspace counts: a workspace that is itself a repository (someone ran
+  `git init` in it) keeps its history in the `.git` that reap deletes, so it
+  holds, pushed or not, and so does a `.git` git cannot read
+  (`TestReapHoldsAWorkspaceThatIsItsOwnRepository`,
+  `TestReapHoldsARepositoryAtTheWorkspaceRoot`). The `CLAUDE.md` spawn
   writes is facet's own only while it hashes to what spawn recorded in the
   manifest; edited, or spawned before the hash was recorded, it holds: nothing
   rewrites it, so an agent's notes there are the only copy
