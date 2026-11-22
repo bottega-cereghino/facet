@@ -863,11 +863,14 @@ func currentRef(git gitx.Runner, dir string) (branch string, detached bool, err 
 	return strings.TrimSpace(out), false, nil
 }
 
-// remoteDefaultBranch resolves origin's default branch as "origin/<name>", or
-// "" if it cannot be determined -- in which case callers must not guess.
+// remoteDefaultBranch resolves origin's default branch as its full ref,
+// "refs/remotes/origin/<name>", or "" if it cannot be determined -- in which
+// case callers must not guess. Never the short "origin/main": git resolves
+// that to a local branch or tag of that name first, and a local branch named
+// origin/main would then pass the landing proof with commits no remote has.
 func remoteDefaultBranch(git gitx.Runner, dir string) string {
-	if out, err := git.Run(dir, nil, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
-		if s := strings.TrimSpace(out); s != "" {
+	if out, err := git.Run(dir, nil, "symbolic-ref", "refs/remotes/origin/HEAD"); err == nil {
+		if s := strings.TrimSpace(out); strings.HasPrefix(s, "refs/remotes/origin/") {
 			return s
 		}
 	}
@@ -876,7 +879,7 @@ func remoteDefaultBranch(git gitx.Runner, dir string) string {
 	// default branch of every repository facet has been used on, not a bare
 	// guess, so fall back to it if it exists.
 	if _, err := git.Run(dir, nil, "rev-parse", "--verify", "refs/remotes/origin/main"); err == nil {
-		return "origin/main"
+		return "refs/remotes/origin/main"
 	}
 	return ""
 }

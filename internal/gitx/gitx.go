@@ -77,9 +77,7 @@ func run(ctx context.Context, dir string, env []string, args ...string) (string,
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	cmd.Env = environ(os.Environ(), env)
 	if _, ok := ctx.Deadline(); ok {
 		cmd.WaitDelay = waitDelay
 	}
@@ -95,6 +93,62 @@ func run(ctx context.Context, dir string, env []string, args ...string) (string,
 		return trimOutput(stdout.String()), &Error{Args: args, ExitCode: code, Stderr: stderr.String()}
 	}
 	return trimOutput(stdout.String()), nil
+}
+
+// repositoryEnv names the variables that point git at a repository, index,
+// object store, config or pathspec mode other than the one facet names: the
+// list `git rev-parse --local-env-vars` prints, plus the namespace, the
+// discovery ceiling and the pathspec modes. git sets GIT_DIR for a `!` alias
+// (`alias.reap = !facet reap`), so a probe inheriting it reads that
+// repository's refs and index with the clone as its work tree, and a clone
+// with an unpushed branch reads clean. facet always says which repository it
+// means, by running git in it, so none of these is ever wanted.
+var repositoryEnv = map[string]bool{
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES": true,
+	"GIT_CEILING_DIRECTORIES":          true,
+	"GIT_COMMON_DIR":                   true,
+	"GIT_CONFIG":                       true,
+	"GIT_CONFIG_COUNT":                 true,
+	"GIT_CONFIG_PARAMETERS":            true,
+	"GIT_DIR":                          true,
+	"GIT_GLOB_PATHSPECS":               true,
+	"GIT_GRAFT_FILE":                   true,
+	"GIT_ICASE_PATHSPECS":              true,
+	"GIT_IMPLICIT_WORK_TREE":           true,
+	"GIT_INDEX_FILE":                   true,
+	"GIT_LITERAL_PATHSPECS":            true,
+	"GIT_NAMESPACE":                    true,
+	"GIT_NOGLOB_PATHSPECS":             true,
+	"GIT_NO_REPLACE_OBJECTS":           true,
+	"GIT_OBJECT_DIRECTORY":             true,
+	"GIT_PREFIX":                       true,
+	"GIT_REPLACE_REF_BASE":             true,
+	"GIT_SHALLOW_FILE":                 true,
+	"GIT_WORK_TREE":                    true,
+}
+
+// fixedEnv is set on every call, so git reads what is on disk:
+//   - GIT_NO_REPLACE_OBJECTS: replace refs are local and never fetched or
+//     pushed, and `git replace --graft origin/main <local commit>` would make
+//     that commit read as reachable from a remote.
+//   - GIT_LITERAL_PATHSPECS: every path facet hands git is a file name, never
+//     a pattern; a file named ":todo.md" or ":(exclude)*" is pathspec magic
+//     otherwise, and hides itself (and its neighbours) from status and diff.
+var fixedEnv = []string{"GIT_NO_REPLACE_OBJECTS=1", "GIT_LITERAL_PATHSPECS=1"}
+
+// environ is base without repositoryEnv and GIT_CONFIG_KEY_n/VALUE_n, then
+// fixedEnv, then extra. Credentials, SSH, LFS and the rest pass through.
+func environ(base, extra []string) []string {
+	out := make([]string, 0, len(base)+len(fixedEnv)+len(extra))
+	for _, kv := range base {
+		name, _, _ := strings.Cut(kv, "=")
+		if repositoryEnv[name] || strings.HasPrefix(name, "GIT_CONFIG_KEY_") || strings.HasPrefix(name, "GIT_CONFIG_VALUE_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	out = append(out, fixedEnv...)
+	return append(out, extra...)
 }
 
 // trimOutput drops the trailing newline git ends its output with. Leading

@@ -523,6 +523,16 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   Its status check names `--untracked-files=all` and `--ignore-submodules=none`,
   so `status.showUntrackedFiles=no` cannot hide a new file from it
   (`TestReapHoldsAnUntrackedFileTheConfigHides`).
+- **`reap` reads the repository on disk, not what the environment tells git.**
+  Every git call drops `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the
+  other variables that point git at another repository, index or config (git
+  sets `GIT_DIR` for a `!facet reap` alias), ignores replace refs, which are
+  local and never pushed, and reads every path as a file name, never as
+  pathspec magic (`TestReapIgnoresAnInheritedGitDir`,
+  `TestReapIgnoresAReplaceRefThatGraftsALocalCommitOntoTheRemote`,
+  `TestReapHoldsAFileWhoseNameIsPathspecMagic`). The landing proof names the
+  default branch by its full ref, so a local branch called `origin/main` is not
+  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
   gh's "no pull requests found" counts as none; a repository gh cannot resolve
   (renamed, transferred, unreadable) holds the workspace
