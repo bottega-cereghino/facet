@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // LiveRoots reports tmux panes, in any session, and processes -- via lsof --
@@ -93,8 +94,9 @@ func tmuxPanesUnder(dir, socket, session string) []string {
 // A macOS system service with files open but its working directory elsewhere
 // is left out: Spotlight indexing the tree, or the virtualization service
 // sharing it with a VM, would otherwise hold every workspace on the machine.
-// What runs inside such a VM is not visible from here either way. lsof sees
-// only processes this user may inspect.
+// What runs inside such a VM is not visible from here either way. A git object
+// file with another hard link is left out too (withoutSharedObjects). lsof
+// sees only processes this user may inspect.
 //
 // lsof exits 1 with nothing on stderr when nothing matches, and at times
 // when something does; its stdout is read either way. Any other exit, a
@@ -118,7 +120,8 @@ func lsofProcessesUnder(dir string) ([]string, error) {
 	// What lsof did report is named even when it failed.
 	var live []string
 	for _, p := range withoutSelf(parseLsof(string(raw)), os.Getpid(), os.Getppid()) {
-		if p.cwd == "" && isSystemService(p.pid) {
+		p.files = withoutSharedObjects(p.files)
+		if p.cwd == "" && (len(p.files) == 0 || isSystemService(p.pid)) {
 			continue
 		}
 		live = append(live, p.describe())
@@ -213,12 +216,53 @@ func (p lsofProc) describe() string {
 	}
 }
 
+// withoutSharedObjects drops the git object files that have another hard link.
+// lsof +D matches by device and inode, and a clone's objects are hardlinks
+// shared with the mirror and sibling clones, so a process in another
+// workspace holding its own pack is reported under this one's path (#331).
+// Deleting one name of such a file breaks no process that has it open, so it
+// holds nothing here, whoever has it open.
+func withoutSharedObjects(files []string) []string {
+	out := files[:0]
+	for _, f := range files {
+		if !sharedObject(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// sharedObject reports whether path is a regular file under a git directory's
+// objects with more than one hard link.
+func sharedObject(path string) bool {
+	slash := filepath.ToSlash(path)
+	i := strings.Index(slash, "/.git/")
+	if i < 0 || !strings.Contains(slash[i:], "/objects/") {
+		return false
+	}
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	return ok && uint64(st.Nlink) > 1
+}
+
 // isSystemService reports whether the process runs an executable the
-// operating system ships, under /System. A process that cannot be looked up
-// is not one: when in doubt, it holds the workspace.
+// operating system ships (systemExecutable), read from the kernel, never from
+// the argv[0] a process may set to anything. A process that cannot be looked
+// up is not one: when in doubt, it holds the workspace.
 var isSystemService = func(pid string) bool {
-	out, err := exec.Command("ps", "-o", "comm=", "-p", pid).Output()
-	return err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "/System/")
+	return systemExecutable(execPath(pid))
+}
+
+// systemExecutable reports whether path is a service macOS ships under
+// /System. The apps under /System/Applications are the user's (TextEdit,
+// Preview), and /System/Volumes/Data is the user's own disk.
+func systemExecutable(path string) bool {
+	return strings.HasPrefix(path, "/System/") &&
+		!strings.HasPrefix(path, "/System/Applications/") &&
+		!strings.HasPrefix(path, "/System/Volumes/")
 }
 
 // underRoot reports whether path is root itself or lies beneath it.
