@@ -84,10 +84,11 @@ func TestReapSeesContentACleanFilterHides(t *testing.T) {
 }
 
 // Git LFS is a clean filter too: the blob committed is a pointer, never the
-// file. A file whose content is the object its pointer names is on the LFS
-// side, so it does not hold the workspace; one edited since does, even when
-// the filter (a stand-in that always prints the same pointer here) maps both
-// to the same blob.
+// file. A file whose content is the object its pointer names holds nothing
+// the pointer does not name, so it is no hidden edit; it still holds the
+// workspace, as LFS content no store is seen to have (#397). One edited since
+// is a hidden edit, even when the filter (a stand-in that always prints the
+// same pointer here) maps both to the same blob.
 func TestReapJudgesAnLFSFileByThePointerItsBlobHolds(t *testing.T) {
 	ws, clone := longLivedWorkspace(t, t.TempDir())
 	content := "a large binary, stored on the LFS server\n"
@@ -103,8 +104,8 @@ func TestReapJudgesAnLFSFileByThePointerItsBlobHolds(t *testing.T) {
 	if blob := gitOut(t, clone, "cat-file", "blob", ":asset.bin"); blob+"\n" != pointer {
 		t.Fatalf("the committed blob should be the pointer, got %q", blob)
 	}
-	if b := blockersOf(t, ws); len(b) != 0 {
-		t.Fatalf("a file that is the object its pointer names must not hold the workspace: %v", b)
+	if b := blockersOf(t, ws); len(b) != 1 || !blockersMention(b, "Git LFS content") {
+		t.Fatalf("a file that is the object its pointer names should hold only as LFS content no store is seen to have: %v", b)
 	}
 
 	// The same size: git status takes a change of size as a change without
@@ -113,7 +114,7 @@ func TestReapJudgesAnLFSFileByThePointerItsBlobHolds(t *testing.T) {
 	if got := gitOut(t, clone, "status", "--porcelain"); got != "" {
 		t.Fatalf("the edit should read clean to git status, got %q", got)
 	}
-	if b := blockersOf(t, ws); !blockersMention(b, "asset.bin") {
+	if b := blockersOf(t, ws); !blockersMention(b, "asset.bin differs from what is committed") {
 		t.Fatalf("reap would delete an edit to asset.bin its pointer does not name: %v", b)
 	}
 }

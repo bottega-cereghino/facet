@@ -29,9 +29,8 @@ import (
 //
 //   - its content is a blob in a commit a counted remote has (countedRemotes:
 //     the remotes the unpushed count trusts), in the repository whose work
-//     tree holds it, or the Git LFS pointer of its content is; a file outside
-//     every work tree inside the directory counts against the repository
-//     enclosing it;
+//     tree holds it; a file outside every work tree inside the directory
+//     counts against the repository enclosing it;
 //   - it lies in a directory something rebuilds (rebuilt), named from the
 //     top of the work tree under the deleted root that holds it, never
 //     across a repository's boundary;
@@ -42,7 +41,10 @@ import (
 //
 // Everything else holds: a file in no pushed commit, one that cannot be read,
 // a socket or a fifo, the files of a repository nothing judges and its git
-// directory. The census only adds holds; every other check still runs.
+// directory. So does a file whose pushed blob is only the Git LFS pointer to
+// its content: a pushed pointer does not show that any LFS store has the
+// object, and facet reads no store (#397). The census only adds holds; every
+// other check still runs.
 //
 // A file is compared as it is on disk, never through a filter: an edit that a
 // clean filter or the ident attribute would hide from git still differs here.
@@ -238,8 +240,9 @@ func (w *censusWalk) file(p string, repo *censusRepo) {
 }
 
 // check holds p unless its content, size bytes read from r, is a pushed blob
-// of repo, or its Git LFS pointer is, or it is a pushed blob as checkout
-// writes it with the ident attribute (identExpanded).
+// of repo, or it is a pushed blob as checkout writes it with the ident
+// attribute (identExpanded). Content whose Git LFS pointer is a pushed blob
+// holds with its own reason, which names the push that sends the object.
 func (w *censusWalk) check(p string, repo *censusRepo, r io.Reader, size int64) {
 	if repo == nil {
 		w.hold(p, "is in no repository")
@@ -273,10 +276,12 @@ func (w *censusWalk) check(p string, repo *censusRepo, r io.Reader, size int64) 
 	pointer := fmt.Sprintf("version https://git-lfs.github.com/spec/v1\noid sha256:%x\nsize %d\n", lfs.Sum(nil), size)
 	ptr := repo.newH()
 	_, _ = fmt.Fprintf(ptr, "blob %d\x00%s", len(pointer), pointer)
-	if repo.pushed[hex.EncodeToString(ptr.Sum(nil))] {
+	if small != nil && identExpanded(repo, small.Bytes()) {
 		return
 	}
-	if small != nil && identExpanded(repo, small.Bytes()) {
+	if repo.pushed[hex.EncodeToString(ptr.Sum(nil))] {
+		w.hold(p, "is Git LFS content whose pointer is pushed, but facet cannot see that any LFS store has it "+
+			"(run git lfs push --all <remote> in its clone, then reap the workspace by name with --force)")
 		return
 	}
 	w.hold(p, "is in no commit a remote has")
