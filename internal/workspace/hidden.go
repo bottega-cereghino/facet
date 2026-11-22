@@ -59,7 +59,8 @@ type indexEntry struct {
 //
 // Each such file is hashed as it is on disk and compared with its blob. A
 // blob that is the canonical Git LFS pointer to the file's content matches
-// too: the committed copy names that content, and the LFS store holds it.
+// too: the file holds nothing the pointer does not name. Whether any LFS
+// store has that content is the census's question, and it holds such a file.
 // Any other filter that changes what it stores (git-crypt) holds the file,
 // since the blob alone cannot prove the file holds nothing more. A marked
 // file absent from the disk (a sparse checkout) loses nothing.
