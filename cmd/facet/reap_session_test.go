@@ -5,9 +5,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+// realPathOf is p with its symlinks resolved, as tmux reports a path.
+func realPathOf(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
 
 // shortTmux points tmux at a server of its own under /tmp: macOS caps a
 // socket's path near 104 bytes, which t.TempDir() can pass.
@@ -90,13 +101,23 @@ func TestReapForceEndsTheWorkspacesSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	alive := tmuxSession(t, "api", ws)
-	// tmux reports a new pane's path only once its process has started.
+	// tmux reports a new pane's path only once its process has started (on
+	// Linux, from the pty's foreground process). Wait for that, not for a
+	// refusal: a reap that does not refuse deletes the workspace.
+	want := realPathOf(t, ws)
 	deadline := time.Now().Add(5 * time.Second)
-	for reapCmd("api", "--yes") == nil {
+	for {
+		out, _ := exec.Command("tmux", "list-panes", "-t", "=api", "-F", "#{pane_current_path}").Output()
+		if strings.TrimSpace(string(out)) == want {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("reap did not refuse a workspace a session of its name runs in")
+			t.Fatalf("tmux never reported the pane at %s (last: %q)", want, out)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+	if err := reapCmd("api", "--yes"); err == nil {
+		t.Fatal("reap did not refuse a workspace a session of its name runs in")
 	}
 	if err := reapCmd("api", "--yes", "--force"); err != nil {
 		t.Fatalf("reap --force: %v", err)
