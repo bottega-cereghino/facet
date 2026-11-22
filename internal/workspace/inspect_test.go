@@ -371,17 +371,19 @@ func TestReapHoldsARepositoryInAnIgnoredDirectory(t *testing.T) {
 				t.Fatalf("reap would delete vendor/lib and its commit: %v", st.Blockers())
 			}
 
-			// An ignored directory with no repository in it holds nothing.
+			// An ignored directory with no repository in it holds as no
+			// repository; vendor/ is nothing a tool rebuilds, so its files
+			// hold as ignored files (#364, part 7).
 			if err := os.RemoveAll(lib); err != nil {
 				t.Fatal(err)
 			}
-			writeTestFile(t, filepath.Join(clone, "vendor", "cache.bin"), "rebuildable\n")
+			writeTestFile(t, filepath.Join(clone, "vendor", "cache.bin"), "hand-made\n")
 			st, err = Inspect(ws, gitx.Git{}, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if b := st.Blockers(); len(b) != 0 {
-				t.Fatalf("an ignored file alone holds: %v", b)
+			if hasBlocker(st, "repository") || !hasBlocker(st, "files git ignores that nothing rebuilds: vendor/") {
+				t.Fatalf("an ignored directory with no repository: %v", st.Blockers())
 			}
 		})
 	}

@@ -652,8 +652,13 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   never looks there, so its files are in no repository
   (`TestReapHoldsFilesInASubmoduleDirectoryThatIsNotInitialised`,
   `TestReapDoesNotHoldOnAnEmptySubmoduleOrATrackedMarker`).
-- **What `reap` does not protect:** other files git ignores inside a clone (`.env`,
-  `node_modules`, build output: holding on them would hold every workspace);
+- **`reap` refuses while a clone holds a file it ignores that nothing
+  rebuilds**, such as a `.env` or a local config: the clone is its only copy
+  (`TestReapHoldsAnIgnoredFileNothingRebuilds`). Dependency folders and build
+  output do not hold: prune's rebuildable list (`node_modules`, `.venv`, the
+  Python tool caches, `.next`, `.turbo`, `.parcel-cache`), plus `target`,
+  `dist`, `__pycache__` and `.DS_Store`, at any depth.
+- **What `reap` does not protect:** what those rebuildable directories hold;
   commits reachable only from a local tag (a clone carries every upstream tag,
   so a tag cannot tell your work from a release); and commits reachable only
   from the reflog (amended, rebased or reset away) or from `refs/notes`, since
