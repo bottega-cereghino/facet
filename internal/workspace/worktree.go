@@ -167,7 +167,7 @@ func removeWorktree(git gitx.Runner, checkout, dir string) error {
 	}
 	// Resolved now, while it exists: once deleted, /var no longer resolves to
 	// the /private/var git lists.
-	real := realPath(dir)
+	resolved := realPath(dir)
 	makeDirsWritable(dir)
 	if _, err := git.Run(checkout, nil, "worktree", "remove", "--force", "--force", "--", dir); err == nil {
 		return nil
@@ -181,8 +181,8 @@ func removeWorktree(git gitx.Runner, checkout, dir string) error {
 	// `git worktree prune` would also drop every other prunable worktree, one
 	// on a disk that is not mounted included. remove of a directory that is
 	// gone drops its entry alone.
-	if list, err := git.Run(checkout, nil, "worktree", "list", "--porcelain"); err != nil || listed(linkedWorktrees(list), real) {
-		if _, err := git.Run(checkout, nil, "worktree", "remove", "--force", "--force", "--", real); err != nil {
+	if list, err := git.Run(checkout, nil, "worktree", "list", "--porcelain"); err != nil || listed(linkedWorktrees(list), resolved) {
+		if _, err := git.Run(checkout, nil, "worktree", "remove", "--force", "--force", "--", resolved); err != nil {
 			return fmt.Errorf("deleted the worktree %s, but %s still lists it: %w\nfix: run `git -C %s worktree remove --force --force %s`", dir, checkout, err, checkout, dir)
 		}
 	}
