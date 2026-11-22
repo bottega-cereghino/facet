@@ -231,8 +231,12 @@ func inspectGitDir(git gitx.Runner, name, g, gone string) CloneState {
 	return c
 }
 
-// gitDirStash counts the stash entries of the repository at git directory g.
-// git stash list needs a work tree; the stash is the reflog of refs/stash.
+// gitDirStash counts the stash entries of the repository at g, a work tree or
+// a git directory (git stash list needs a work tree). The stash is the reflog
+// of refs/stash, but the ref outlives its reflog: `git reflog expire --all`
+// empties the reflog and leaves refs/stash naming the newest entry, which
+// `git stash list` then never prints (#378). So refs/stash is at least one
+// entry.
 func gitDirStash(git gitx.Runner, g string) (int, error) {
 	out, err := git.Run(g, nil, "for-each-ref", "refs/stash")
 	if err != nil || strings.TrimSpace(out) == "" {
@@ -242,5 +246,6 @@ func gitDirStash(git gitx.Runner, g string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(strings.TrimSpace(out))
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	return max(n, 1), err
 }
