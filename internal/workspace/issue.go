@@ -662,11 +662,15 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 	// is 0, and only then is the more expensive per-ref landing proof run.
 	//
 	// In a worktree, --branches would be the checkout's branches, which outlive
-	// the worktree, so only HEAD is counted there.
-	countArgs := []string{"rev-list", "--count", "HEAD", "--branches", "--not", "--remotes"}
+	// the worktree, so only HEAD is counted there. The per-worktree refs
+	// (refs/worktree/*, refs/bisect/*) are counted in both: they live in the
+	// worktree's own admin directory and go with it.
+	perWorktree := []string{"--glob=refs/worktree/*", "--glob=refs/bisect/*"}
+	countArgs := append([]string{"rev-list", "--count", "HEAD", "--branches"}, perWorktree...)
 	if !own {
-		countArgs = []string{"rev-list", "--count", "HEAD", "--not", "--remotes"}
+		countArgs = append([]string{"rev-list", "--count", "HEAD"}, perWorktree...)
 	}
+	countArgs = append(countArgs, "--not", "--remotes")
 	if out, err := git.Run(p, nil, countArgs...); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git rev-list failed: %v", err))
 	} else if _, err := strconv.Atoi(strings.TrimSpace(out)); err != nil {
@@ -727,8 +731,8 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 // classification is still per ref, because "landed" is a property of the ref
 // that was proven, not of an individual sha; only the accounting is a set.
 //
-// headOnly walks HEAD alone: in a linked worktree the local branches are the
-// checkout's, and they outlive the worktree.
+// headOnly walks HEAD alone, with the per-worktree refs: in a linked worktree
+// the local branches are the checkout's, and they outlive the worktree.
 func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup, headOnly bool) (unpushed, landed int, defUnresolved bool, err error) {
 	def := remoteDefaultBranch(git, dir)
 
@@ -752,6 +756,15 @@ func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup,
 			refs = append(refs, "HEAD")
 		}
 	}
+	// Per-worktree refs (refs/worktree/*, refs/bisect/*) live in the
+	// worktree's own admin directory, which goes with it, whether it is a
+	// linked worktree or the main one; in a linked worktree for-each-ref lists
+	// only its own. Full names, so no branch or tag of the same name stands in.
+	perWorktree, err := git.Run(dir, nil, "for-each-ref", "--format=%(refname)", "refs/worktree", "refs/bisect")
+	if err != nil {
+		return 0, 0, false, err
+	}
+	refs = append(refs, strings.Fields(perWorktree)...)
 
 	unpushedShas := map[string]struct{}{}
 	landedShas := map[string]struct{}{}

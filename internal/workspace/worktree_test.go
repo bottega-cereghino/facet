@@ -550,3 +550,30 @@ func TestRemoveWorktreeLeavesAFolderItDoesNotList(t *testing.T) {
 		t.Fatalf("removeWorktree deleted a folder inside a worktree: %v", err)
 	}
 }
+
+// Per-worktree refs (refs/worktree/*, refs/bisect/*) live in the worktree's
+// admin directory, which `git worktree remove` deletes. A commit only such a
+// ref reaches goes with a worktree clone, so it holds like one HEAD reaches
+// (#315).
+func TestReapHoldsACommitOnlyAPerWorktreeRefReaches(t *testing.T) {
+	for _, ref := range []string{"refs/worktree/keep", "refs/bisect/bad"} {
+		t.Run(ref, func(t *testing.T) {
+			roots, ws, _, _ := worktreeSetup(t)
+			if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
+				t.Fatal(err)
+			}
+			clone := filepath.Join(ws, "repo")
+			commitFile(t, clone, "work.txt", "a day of work\n", "kept under a per-worktree ref")
+			gitOut(t, clone, "update-ref", ref, gitOut(t, clone, "rev-parse", "HEAD"))
+			gitOut(t, clone, "checkout", "-q", "--detach", "refs/remotes/origin/main")
+
+			st, err := Inspect(ws, gitx.Git{}, nil, nil)
+			if err != nil {
+				t.Fatalf("Inspect: %v", err)
+			}
+			if !blockersMention(st.Blockers(), "unpushed") {
+				t.Errorf("a commit only %s reaches goes with the worktree, yet reap sees %v (notes %v)", ref, st.Blockers(), st.Notes())
+			}
+		})
+	}
+}
