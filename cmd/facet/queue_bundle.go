@@ -23,46 +23,27 @@ func issueStaysAlone(labels []string) bool {
 	return false
 }
 
-// bundleFor chooses the issues one run takes. ranked is in start order.
-// blocked reports an issue this process will not start now.
+// bundleFor chooses the issues one run takes. ranked is in start order,
+// highest project first. blocked reports an issue this process will not
+// start now.
 //
-// The first free issue in the top project is the run. Further issues join
-// it only while they are the next free issue, in the same repository, for
-// the same agent and the same effort, and neither issue is feat or
-// research. A free issue that does not fit stops the run, so a later small
-// issue does not jump ahead of it. The size is the agent's bundle, or 1
-// when the first issue stays alone.
-func bundleFor(cfg queueConfig, ranked []queuedIssue, projects []string, blocked func(queuedIssue) bool) ([]queuedIssue, string) {
-	if len(ranked) == 0 {
-		return nil, ""
-	}
-	top := projectRank(ranked[0].Repo, projects)
-	primary, held, rest := firstFree(ranked, projects, top, blocked)
-	if primary == nil {
-		return nil, held
-	}
-	return fillBundle(cfg, *primary, rest, projects, top, blocked), ""
-}
-
-func firstFree(ranked []queuedIssue, projects []string, top int, blocked func(queuedIssue) bool) (*queuedIssue, string, []queuedIssue) {
-	var held string
+// The first free issue is the run, whatever its project: a project whose
+// issues are all running, done or waiting to retry leaves the slot to the
+// next project down. Further issues join it only while they are the next
+// free issue, in the same repository, for the same agent and the same
+// effort, and neither issue is feat or research. A free issue that does not
+// fit stops the run, so a later small issue does not jump ahead of it. The
+// size is the agent's bundle, or 1 when the first issue stays alone.
+func bundleFor(cfg queueConfig, ranked []queuedIssue, blocked func(queuedIssue) bool) []queuedIssue {
 	for i, iss := range ranked {
-		if projectRank(iss.Repo, projects) != top {
-			return nil, held, nil
+		if !blocked(iss) {
+			return fillBundle(cfg, iss, ranked[i+1:], blocked)
 		}
-		if blocked(iss) {
-			if held == "" {
-				held = iss.Repo
-			}
-			continue
-		}
-		picked := iss
-		return &picked, "", ranked[i+1:]
 	}
-	return nil, held, nil
+	return nil
 }
 
-func fillBundle(cfg queueConfig, primary queuedIssue, rest []queuedIssue, projects []string, top int, blocked func(queuedIssue) bool) []queuedIssue {
+func fillBundle(cfg queueConfig, primary queuedIssue, rest []queuedIssue, blocked func(queuedIssue) bool) []queuedIssue {
 	run := []queuedIssue{primary}
 	limit := runLimit(cfg, primary)
 	if limit < 2 {
@@ -73,7 +54,7 @@ func fillBundle(cfg queueConfig, primary queuedIssue, rest []queuedIssue, projec
 		return run
 	}
 	for _, iss := range rest {
-		if len(run) >= limit || projectRank(iss.Repo, projects) != top {
+		if len(run) >= limit {
 			break
 		}
 		if blocked(iss) {
