@@ -26,7 +26,12 @@ const maxAlternateDepth = 5
 //   - objects/info/alternates leading into gone, the directory reap deletes:
 //     the repository borrows objects that go with the workspace. For a
 //     worktree clone this is the checkout's repository, outside the
-//     workspace, which would be left broken.
+//     workspace, which would be left broken;
+//   - a file in annex/objects or lfs/objects: content git-annex or Git LFS
+//     keeps in the git directory, which the census skips for a repository
+//     another check judges, and which no ref describes. The file in the work
+//     tree is a symlink or a pointer whose blob is pushed while the content
+//     may be on no remote, and facet reads neither tool's records (#398).
 func gitDirHolds(git gitx.Runner, dir, gone string) ([]string, error) {
 	common, err := commonDir(git, dir)
 	if err != nil {
@@ -48,7 +53,45 @@ func gitDirHolds(git gitx.Runner, dir, gone string) ([]string, error) {
 		holds = append(holds, fmt.Sprintf("its repository %s borrows objects from %s, which goes with the workspace; "+
 			"run `git repack -a -d` in it and delete its objects/info/alternates, then reap again", common, inside))
 	}
+	for _, store := range objectStores {
+		dir := filepath.Join(common, store.path)
+		found, err := holdsAFile(dir)
+		if err != nil {
+			return holds, fmt.Errorf("read %s: %w", dir, err)
+		}
+		if found {
+			holds = append(holds, fmt.Sprintf("its repository keeps %s content in %s, which facet cannot see on any remote; "+
+				"%s, then reap the workspace by name with --force", store.tool, dir, store.fix))
+		}
+	}
 	return holds, nil
+}
+
+// objectStores are the stores inside a git directory where a tool keeps
+// content its committed blobs only name, with the push that copies it out.
+var objectStores = []struct{ path, tool, fix string }{
+	{filepath.Join("annex", "objects"), "git-annex", "copy it to a remote with `git annex copy --to <remote>`"},
+	{filepath.Join("lfs", "objects"), "Git LFS", "push it with `git lfs push --all <remote>`"},
+}
+
+// holdsAFile reports whether the directory dir, missing or not, has a file
+// anywhere below it that is not a directory. Links are not followed.
+func holdsAFile(dir string) (bool, error) {
+	found := false
+	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if !d.IsDir() {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found, err
 }
 
 // commonDir is the real path of the git directory that holds the objects and
