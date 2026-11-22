@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"sync"
 	"time"
 
@@ -69,6 +68,7 @@ type queueRunner struct {
 	env      queueEnv
 	mu       sync.Mutex
 	inflight map[string]bool
+	running  int
 	done     map[string]bool
 	retryAt  map[string]time.Time
 	wake     chan struct{}
@@ -113,13 +113,13 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		r.pause(ctx)
 		return false, nil
 	}
-	iss, held, err := r.candidate()
+	run, held, err := r.candidate()
 	if err != nil {
 		r.logf("queue: %s", err.Error())
 		r.pause(ctx)
 		return false, nil
 	}
-	if iss == nil {
+	if len(run) == 0 {
 		if held != "" {
 			r.logf("queue: %s still has an open issue labelled %s; not starting a lower project", held, r.cfg.Label)
 		} else {
@@ -140,7 +140,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	if stop, err := r.finishIfStopped(ctx); stop || err != nil {
 		return true, err
 	}
-	r.start(ctx, *iss)
+	r.start(ctx, run)
 	return false, nil
 }
 
@@ -174,17 +174,19 @@ func holdFile(path string) (bool, error) {
 	return false, fmt.Errorf("hold file %s: %w\nfix: the queue stops when it cannot tell whether the hold file exists", path, err)
 }
 
+// full reports that max agents are already running. inflight counts issues,
+// and one run can hold several, so the cap is the number of runs.
 func (r *queueRunner) full() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return len(r.inflight) >= r.cfg.Max
+	return r.running >= r.cfg.Max
 }
 
-// candidate returns the next issue to start. held is a repository whose
+// candidate returns the issues one run takes. held is a repository whose
 // open issue is keeping a lower project from starting, when there is no
 // issue to start. The priority file is read here, so an edit applies to
 // the next pick.
-func (r *queueRunner) candidate() (*queuedIssue, string, error) {
+func (r *queueRunner) candidate() ([]queuedIssue, string, error) {
 	issues, err := r.collect()
 	if err != nil {
 		return nil, "", err
@@ -197,25 +199,10 @@ func (r *queueRunner) candidate() (*queuedIssue, string, error) {
 	defer r.mu.Unlock()
 	now := r.env.now()
 	ranked := orderQueued(issues, projects)
-	if len(ranked) == 0 {
-		return nil, "", nil
-	}
-	top := projectRank(ranked[0].Repo, projects)
-	var held string
-	for _, iss := range ranked {
-		if projectRank(iss.Repo, projects) != top {
-			return nil, held, nil
-		}
-		if r.blocked(iss, now) {
-			if held == "" {
-				held = iss.Repo
-			}
-			continue
-		}
-		picked := iss
-		return &picked, "", nil
-	}
-	return nil, held, nil
+	run, held := bundleFor(r.cfg, ranked, projects, func(iss queuedIssue) bool {
+		return r.blocked(iss, now)
+	})
+	return run, held, nil
 }
 
 func (r *queueRunner) projectOrder() ([]string, error) {
@@ -272,10 +259,12 @@ func (r *queueRunner) gate(ctx context.Context) error {
 	return r.env.run(ctx, "", r.cfg.Gate)
 }
 
-func (r *queueRunner) start(ctx context.Context, iss queuedIssue) {
-	key := iss.key()
+func (r *queueRunner) start(ctx context.Context, run []queuedIssue) {
 	r.mu.Lock()
-	r.inflight[key] = true
+	r.running++
+	for _, iss := range run {
+		r.inflight[iss.key()] = true
+	}
 	r.mu.Unlock()
 	r.wg.Add(1)
 	go func() {
@@ -283,29 +272,33 @@ func (r *queueRunner) start(ctx context.Context, iss queuedIssue) {
 		defer r.poke()
 		defer func() {
 			r.mu.Lock()
-			delete(r.inflight, key)
+			r.running--
+			for _, iss := range run {
+				delete(r.inflight, iss.key())
+			}
 			r.mu.Unlock()
 		}()
-		r.runOne(ctx, iss)
+		r.runOne(ctx, run)
 	}()
 }
 
-func (r *queueRunner) runOne(ctx context.Context, iss queuedIssue) {
-	if ctx.Err() != nil {
+func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue) {
+	if ctx.Err() != nil || len(run) == 0 {
 		return
 	}
+	iss := run[0]
 	// Resolve the effort before spawning. A disagreement between labels is
 	// not an issue to start, and a workspace would only sit there.
 	effort, err := r.cfg.effortFor(iss.Issue.LabelNames())
 	if err != nil {
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
-		r.deferRetry(iss)
+		r.deferAll(run, r.deferRetry)
 		return
 	}
 	ws, err := r.env.spawn(iss.Repo, iss.Issue.Number)
 	if err != nil {
 		r.logf("queue: spawn %s#%d: %v", iss.Repo, iss.Issue.Number, err)
-		r.deferRetry(iss)
+		r.deferAll(run, r.deferRetry)
 		return
 	}
 	if ctx.Err() != nil {
@@ -315,17 +308,17 @@ func (r *queueRunner) runOne(ctx context.Context, iss queuedIssue) {
 	if err != nil || held {
 		return
 	}
-	argv, who, err := r.argvFor(iss, ws, effort)
+	argv, who, err := r.argvFor(run, ws, effort)
 	if err != nil {
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
-		r.deferRetry(iss)
+		r.deferAll(run, r.deferRetry)
 		return
 	}
-	r.logf("queue: %s#%d agent %s effort %s in %s", iss.Repo, iss.Issue.Number, who, effort, ws)
+	r.logf("queue: %s#%d agent %s effort %s bundle %d in %s", iss.Repo, iss.Issue.Number, who, effort, len(run), ws)
 	err = r.env.run(ctx, ws, argv)
 	if err == nil {
-		r.logf("queue: %s#%d agent exited", iss.Repo, iss.Issue.Number)
-		r.markDone(iss)
+		r.logf("queue: %s#%d agent exited, bundle %d", iss.Repo, iss.Issue.Number, len(run))
+		r.deferAll(run, r.markDone)
 		return
 	}
 	// An ExitError means the process ran and finished, whatever its status.
@@ -334,44 +327,21 @@ func (r *queueRunner) runOne(ctx context.Context, iss queuedIssue) {
 	// which is not the agent finishing the issue.
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		r.logf("queue: %s#%d agent exited: %v", iss.Repo, iss.Issue.Number, err)
-		r.markDone(iss)
+		r.logf("queue: %s#%d agent exited: %v, bundle %d", iss.Repo, iss.Issue.Number, err, len(run))
+		r.deferAll(run, r.markDone)
 		return
 	}
 	r.logf("queue: %s#%d did not start: %v", iss.Repo, iss.Issue.Number, err)
 	if ctx.Err() != nil {
 		return
 	}
-	r.deferRetry(iss)
+	r.deferAll(run, r.deferRetry)
 }
 
-func (r *queueRunner) argvFor(iss queuedIssue, ws, effort string) ([]string, string, error) {
-	label, cmd, err := r.cfg.commandFor(iss.Issue.LabelNames())
-	if err != nil {
-		return nil, "", err
+func (r *queueRunner) deferAll(run []queuedIssue, fn func(queuedIssue)) {
+	for _, iss := range run {
+		fn(iss)
 	}
-	vars := map[string]string{
-		"repo":      iss.Repo,
-		"number":    strconv.Itoa(iss.Issue.Number),
-		"title":     iss.Issue.Title,
-		"workspace": ws,
-		"label":     r.cfg.Label,
-		"url":       iss.Issue.URL,
-		"effort":    effort,
-	}
-	// prompt is expanded first, then dropped in as a single value, so a title
-	// is not scanned for further placeholders.
-	prompt := expand(r.cfg.Prompt, vars)
-	vars["prompt"] = prompt
-	out := make([]string, len(cmd))
-	for i, a := range cmd {
-		out[i] = expand(a, vars)
-	}
-	who := label
-	if who == "" {
-		who = "default"
-	}
-	return out, who, nil
 }
 
 func (r *queueRunner) deferRetry(iss queuedIssue) {

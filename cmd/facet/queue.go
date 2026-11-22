@@ -33,6 +33,10 @@ func newQueueCmd() *cobra.Command {
 			"effort.labels maps an issue label to an effort. The default is medium.\n" +
 			"{effort} in a command is where that word goes. Two labels that name\n" +
 			"different efforts are not started. Each start is logged with its effort.\n\n" +
+			"bundle on an agent is how many issues one run of that command takes from\n" +
+			"the same repository. Omitted means 1 and the maximum is 5. An issue\n" +
+			"labelled feat or research is always a run of one. The workspace is the\n" +
+			"first issue's. Each start is logged with the bundle size.\n\n" +
 			"Before each start it runs the gate command, when one is set. A non-zero exit\n" +
 			"waits and tries later. When the hold file exists, it starts nothing and stops;\n" +
 			"an agent already running is left to finish.\n\n" +

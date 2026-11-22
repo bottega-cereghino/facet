@@ -15,13 +15,18 @@ const (
 	defaultQueueWait   = 30 * time.Second
 	defaultQueueLabel  = "next"
 	defaultQueueEffort = "medium"
+	// maxQueueBundle is the most issues one agent run takes. One is the
+	// default, and a larger batch hides which issue failed.
+	maxQueueBundle = 5
 )
 
 // defaultQueuePrompt is what an agent is told when the config leaves prompt
 // empty. The issue body is not in it: spawn writes that into the workspace,
-// quoted, and a prompt is an argument vector.
-const defaultQueuePrompt = "Do {repo}#{number}: {title}. The workspace is {workspace}. " +
-	"Do the work the issue describes. Merge when the checks are green. " +
+// quoted, and a prompt is an argument vector. {issues} is one line per
+// issue in the run, so a bundle still names every issue.
+const defaultQueuePrompt = "Do each issue below, in order. The workspace is {workspace}. " +
+	"{issues} " +
+	"Do the work each issue describes. Merge when the checks are green. " +
 	"Comment the result on the issue. Remove the {label} label when the issue is done. Then exit."
 
 // queueConfig is a validated queue file. Durations and defaults are resolved.
@@ -41,9 +46,18 @@ type queueConfig struct {
 
 // queueAgent is one command, chosen when the issue carries Label.
 // An empty Label is the default, used when no other entry matches.
+// Bundle is how many issues one run of Command takes from one repository.
 type queueAgent struct {
+	Label   string
+	Command []string
+	Bundle  int
+}
+
+// queueAgentFile is the JSON shape of one agent, before defaults.
+type queueAgentFile struct {
 	Label   string   `json:"label"`
 	Command []string `json:"command"`
+	Bundle  *int     `json:"bundle"`
 }
 
 // queueEffortFile is the JSON shape of the effort map, before checks.
@@ -55,16 +69,16 @@ type queueEffortFile struct {
 
 // queueFile is the JSON shape, before defaults and checks.
 type queueFile struct {
-	Max        *int            `json:"max"`
-	Hold       string          `json:"hold"`
-	Gate       []string        `json:"gate"`
-	Wait       string          `json:"wait"`
-	Label      string          `json:"label"`
-	Priorities string          `json:"priorities"`
-	Repos      []string        `json:"repos"`
-	Prompt     string          `json:"prompt"`
-	Agents     []queueAgent    `json:"agents"`
-	Effort     queueEffortFile `json:"effort"`
+	Max        *int             `json:"max"`
+	Hold       string           `json:"hold"`
+	Gate       []string         `json:"gate"`
+	Wait       string           `json:"wait"`
+	Label      string           `json:"label"`
+	Priorities string           `json:"priorities"`
+	Repos      []string         `json:"repos"`
+	Prompt     string           `json:"prompt"`
+	Agents     []queueAgentFile `json:"agents"`
+	Effort     queueEffortFile  `json:"effort"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -92,7 +106,6 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 		Wait:   defaultQueueWait,
 		Label:  defaultQueueLabel,
 		Prompt: defaultQueuePrompt,
-		Agents: f.Agents,
 	}
 	if f.Max != nil {
 		cfg.Max = *f.Max
@@ -124,8 +137,8 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	for _, repo := range f.Repos {
 		cfg.Repos = append(cfg.Repos, strings.TrimSpace(repo))
 	}
-	for i := range cfg.Agents {
-		cfg.Agents[i].Label = strings.TrimSpace(cfg.Agents[i].Label)
+	for _, raw := range f.Agents {
+		cfg.Agents = append(cfg.Agents, raw.agent())
 	}
 	effort, labels, err := normalizeEffort(cfg.Label, f.Effort)
 	if err != nil {
@@ -152,7 +165,22 @@ func (c queueConfig) validate() error {
 	if err := validateQueueRepos(c.Repos); err != nil {
 		return err
 	}
-	return validateQueueAgents(c.Label, c.Agents)
+	if err := validateQueueAgents(c.Label, c.Agents); err != nil {
+		return err
+	}
+	return validateBundlePrompt(c)
+}
+
+func (f queueAgentFile) agent() queueAgent {
+	n := 1
+	if f.Bundle != nil {
+		n = *f.Bundle
+	}
+	return queueAgent{
+		Label:   strings.TrimSpace(f.Label),
+		Command: f.Command,
+		Bundle:  n,
+	}
 }
 
 // normalizeEffort resolves the default and the label map. Label keys are
@@ -265,9 +293,26 @@ func validateQueueAgents(queueLabel string, agents []queueAgent) error {
 		if !commandHasPrompt(a.Command) {
 			return fmt.Errorf("queue config: the agent labelled %q has no {prompt}\nfix: put {prompt} in the argument that receives the task text", displayLabel(label))
 		}
+		if a.Bundle < 1 || a.Bundle > maxQueueBundle {
+			return fmt.Errorf("queue config: the agent labelled %q has bundle %d\nfix: set bundle from 1 to %d, or omit it for 1", displayLabel(label), a.Bundle, maxQueueBundle)
+		}
 	}
 	if defaults != 1 {
 		return fmt.Errorf("queue config: %d agents have an empty label, want 1\nfix: one entry with an empty label is the command used when no other label matches", defaults)
+	}
+	return nil
+}
+
+// validateBundlePrompt refuses a batch whose prompt cannot name every
+// issue. A run of one still has {number} and {title}.
+func validateBundlePrompt(c queueConfig) error {
+	if strings.Contains(c.Prompt, "{issues}") {
+		return nil
+	}
+	for _, a := range c.Agents {
+		if a.Bundle > 1 {
+			return fmt.Errorf("queue config: the agent labelled %q bundles %d issues and the prompt has no {issues}\nfix: put {issues} in the prompt, where the list of issues in the run goes", displayLabel(a.Label), a.Bundle)
+		}
 	}
 	return nil
 }
@@ -288,10 +333,19 @@ func commandHasPrompt(argv []string) bool {
 	return false
 }
 
-// commandFor returns the first agent whose label the issue carries, or the
+// commandFor returns the label and argv of the agent agentFor chose.
+func (c queueConfig) commandFor(labels []string) (string, []string, error) {
+	a, err := c.agentFor(labels)
+	if err != nil {
+		return "", nil, err
+	}
+	return a.Label, a.Command, nil
+}
+
+// agentFor returns the first agent whose label the issue carries, or the
 // default entry when none do. Matching is case-insensitive. The default is
 // not a match-all: it is only the fallback, wherever it sits in the list.
-func (c queueConfig) commandFor(labels []string) (string, []string, error) {
+func (c queueConfig) agentFor(labels []string) (queueAgent, error) {
 	have := map[string]bool{}
 	for _, l := range labels {
 		have[strings.ToLower(l)] = true
@@ -306,13 +360,13 @@ func (c queueConfig) commandFor(labels []string) (string, []string, error) {
 			continue
 		}
 		if have[strings.ToLower(a.Label)] {
-			return a.Label, a.Command, nil
+			return *a, nil
 		}
 	}
 	if fallback == nil {
-		return "", nil, fmt.Errorf("no default agent\nfix: add an agents entry with an empty label")
+		return queueAgent{}, fmt.Errorf("no default agent\nfix: add an agents entry with an empty label")
 	}
-	return "", fallback.Command, nil
+	return *fallback, nil
 }
 
 // expand replaces {key} placeholders in one pass. A value is not scanned

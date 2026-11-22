@@ -424,8 +424,8 @@ never passed through a shell.
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
-| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}`. |
-| `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}`. |
+| `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 
 The order is fixed. When `priorities` is set, the queue reads that file
@@ -453,6 +453,20 @@ in the map, `effort.default` is used, and omitted means `medium`. Two labels
 that name different efforts are a refusal: the queue logs that and waits,
 and does not guess. Each start is logged with the effort it used.
 
+An agent's `bundle` is how many issues one run of that command takes.
+Omitted means 1, and the maximum is 5. One run is still one agent, and it
+counts as one toward `max`. The issues are the next ones in the same
+repository that would use that same command and the same effort. The run
+stops at an issue that does not fit, so a later issue does not jump ahead
+of it. The workspace is the first issue's. The others are named in the
+prompt and are not spawned. `{issues}` is one line per issue,
+`owner/repo#n: title`. `{bundle}` is how many. When `bundle` is greater
+than 1 the prompt has to contain `{issues}`.
+
+An issue labelled `feat` or `research` is a run of one. It is not added to
+another issue's run, and the issues after it wait. The match ignores case
+and is the whole label. Each start is logged with the bundle size.
+
 The agent starts in the workspace directory. The `CLAUDE.md` there is the one
 `facet spawn` wrote, with the issue text quoted. The queue does not reap
 workspaces. When it stops, the directories stay, and the next time it takes
@@ -476,6 +490,9 @@ The stop is the hold file, or an interrupt. Remove the file and start
 `TestQueueTakesP1BeforeAnOlderIssue`,
 `TestQueuePassesTheEffortForTheIssueLabel`,
 `TestQueueWaitsWhenEffortLabelsDisagree`,
+`TestQueueBundlesSmallIssuesFromOneRepo`,
+`TestQueueStopsABundleAtAFeature`,
+`TestQueueCountsABundleAsOneAgent`,
 `TestQueueStaysWithTheHighestProject`,
 `TestQueueMovesOnWhenTheHighestProjectHasNoNextIssue`,
 `TestQueueDoesNotHandTheSameIssueOutTwice`,

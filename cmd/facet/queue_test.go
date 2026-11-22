@@ -59,6 +59,14 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 		t.Fatalf("agents = %+v", cfg.Agents)
 	}
 	for _, a := range cfg.Agents {
+		if a.Bundle != 1 {
+			t.Errorf("agent %q bundle = %d, want 1", a.Label, a.Bundle)
+		}
+	}
+	if !strings.Contains(cfg.Prompt, "{issues}") {
+		t.Fatalf("example prompt = %q, want {issues}", cfg.Prompt)
+	}
+	for _, a := range cfg.Agents {
 		if !commandHasPrompt(a.Command) || !strings.Contains(strings.Join(a.Command, " "), "{effort}") {
 			t.Errorf("agent %q command = %q, want {prompt} and {effort}", a.Label, a.Command)
 		}
@@ -96,6 +104,17 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	if got, err := ok.effortFor(nil); err != nil || got != defaultQueueEffort {
 		t.Fatalf("effort with no labels = %q, %v", got, err)
 	}
+	if ok.Agents[0].Bundle != 1 {
+		t.Fatalf("default bundle = %d, want 1", ok.Agents[0].Bundle)
+	}
+	bundled, err := loadTempConfig(t, `{
+		"prompt": "Do {issues}",
+		"repos": ["acme/widgets"],
+		"agents": [{"bundle": 5, "command": ["agent", "{prompt}"]}]
+	}`)
+	if err != nil || bundled.Agents[0].Bundle != 5 {
+		t.Fatalf("bundle 5: %+v, %v", bundled.Agents, err)
+	}
 
 	cases := []struct {
 		name string
@@ -121,6 +140,9 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 		{"effort is the queue label", `{"effort": {"labels": {"next": "low"}}, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "queue label"},
 		{"duplicate effort label", `{"effort": {"labels": {"Fix": "low", "fix": "high"}}, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "two effort"},
 		{"unknown effort field", `{"effort": {"rank": "low"}, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "rank"},
+		{"bundle too big", `{"repos": ["acme/widgets"], "agents": [{"bundle": 6, "command": ["a", "{prompt}"]}]}`, "bundle"},
+		{"bundle zero", `{"repos": ["acme/widgets"], "agents": [{"bundle": 0, "command": ["a", "{prompt}"]}]}`, "bundle"},
+		{"bundle without the issue list", `{"prompt": "Do {number}", "repos": ["acme/widgets"], "agents": [{"bundle": 3, "command": ["a", "{prompt}"]}]}`, "{issues}"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -172,6 +194,123 @@ func TestQueueEffortFor(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "fix:") || !strings.Contains(err.Error(), "low") || !strings.Contains(err.Error(), "medium") {
 		t.Fatalf("disagreement: %v", err)
 	}
+}
+
+func TestBundleFor(t *testing.T) {
+	cfg := bundleConfig(5)
+	open := func(queuedIssue) bool { return false }
+	small := []queuedIssue{
+		qIssue("acme/widgets", 1, "2026-01-01T00:00:00Z", "Latch", "next", "fix"),
+		qIssue("acme/widgets", 2, "2026-01-02T00:00:00Z", "Hinge", "next", "fix"),
+		qIssue("acme/widgets", 3, "2026-01-03T00:00:00Z", "Bolt", "next", "chore"),
+	}
+	run, held := bundleFor(cfg, orderQueued(small, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#1", "acme/widgets#2", "acme/widgets#3")
+
+	run, held = bundleFor(bundleConfig(2), orderQueued(small, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#1", "acme/widgets#2")
+
+	// A feature stops the run even when its effort matches the small issues.
+	// The later fix does not jump ahead of it.
+	stopped := []queuedIssue{
+		small[0],
+		qIssue("acme/widgets", 4, "2026-01-02T00:00:00Z", "Panel", "next", "Feat"),
+		qIssue("acme/widgets", 3, "2026-01-03T00:00:00Z", "Bolt", "next", "fix"),
+	}
+	run, held = bundleFor(cfg, orderQueued(stopped, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#1")
+
+	alone := []queuedIssue{
+		qIssue("acme/widgets", 5, "2020-01-01T00:00:00Z", "Study", "next", "Research"),
+		small[0],
+		small[1],
+	}
+	run, held = bundleFor(cfg, orderQueued(alone, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#5")
+
+	// feature is not feat. Same effort, so the two share a run.
+	word := []queuedIssue{
+		qIssue("acme/widgets", 6, "2026-01-01T00:00:00Z", "Named", "next", "fix", "feature"),
+		small[1],
+	}
+	run, held = bundleFor(cfg, orderQueued(word, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#6", "acme/widgets#2")
+
+	repos := []queuedIssue{
+		small[0],
+		qIssue("acme/other", 7, "2026-01-02T00:00:00Z", "Other", "next", "fix"),
+	}
+	run, held = bundleFor(cfg, orderQueued(repos, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#1")
+
+	agents := []queuedIssue{
+		small[0],
+		qIssue("acme/widgets", 8, "2026-01-02T00:00:00Z", "Codex", "next", "fix", "codex"),
+	}
+	run, held = bundleFor(cfg, orderQueued(agents, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#1")
+
+	effort := []queuedIssue{
+		small[0],
+		qIssue("acme/widgets", 9, "2026-01-02T00:00:00Z", "Design", "next", "design"),
+	}
+	run, held = bundleFor(cfg, orderQueued(effort, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#1")
+
+	// An issue whose labels disagree is not bundled past, and it is not taken.
+	bad := []queuedIssue{
+		small[0],
+		qIssue("acme/widgets", 10, "2026-01-02T00:00:00Z", "Both", "next", "fix", "design"),
+		small[2],
+	}
+	run, held = bundleFor(cfg, orderQueued(bad, nil), nil, open)
+	wantRun(t, run, held, "", "acme/widgets#1")
+
+	// An issue already in flight is skipped. The next one that fits still joins.
+	run, held = bundleFor(cfg, orderQueued(small, nil), nil, func(iss queuedIssue) bool {
+		return iss.Issue.Number == 2
+	})
+	wantRun(t, run, held, "", "acme/widgets#1", "acme/widgets#3")
+
+	run, held = bundleFor(cfg, orderQueued(small, nil), nil, func(queuedIssue) bool { return true })
+	wantRun(t, run, held, "acme/widgets")
+
+	projects := []string{"widgets", "other"}
+	ranked := orderQueued([]queuedIssue{
+		qIssue("acme/widgets", 1, "2026-06-01T00:00:00Z", "Plain", "next", "fix"),
+		qIssue("acme/other", 2, "2020-01-01T00:00:00Z", "Urgent", "next", "fix", "p1"),
+	}, projects)
+	run, held = bundleFor(cfg, ranked, projects, func(iss queuedIssue) bool {
+		return iss.Repo == "acme/widgets"
+	})
+	wantRun(t, run, held, "acme/widgets")
+}
+
+func wantRun(t *testing.T, run []queuedIssue, held, wantHeld string, want ...string) {
+	t.Helper()
+	if held != wantHeld {
+		t.Errorf("held = %q, want %q", held, wantHeld)
+	}
+	if got := strings.Join(keys(run), ","); got != strings.Join(want, ",") {
+		t.Errorf("run = %s, want %s", got, strings.Join(want, ","))
+	}
+}
+
+func bundleConfig(n int) queueConfig {
+	return queueConfig{
+		Effort: "medium",
+		effortLabels: map[string]string{
+			"fix": "low", "chore": "low", "feat": "low", "design": "medium",
+		},
+		Agents: []queueAgent{
+			{Label: "codex", Command: []string{"c", "{prompt}"}, Bundle: n},
+			{Command: []string{"d", "{prompt}"}, Bundle: n},
+		},
+	}
+}
+
+func qIssue(repo string, number int, created, title string, labels ...string) queuedIssue {
+	return queuedIssue{Repo: repo, Issue: labelled(number, created, title, labels...)}
 }
 
 func TestQueueCommandFor(t *testing.T) {
@@ -268,7 +407,7 @@ func TestQueueCommandStopsOnTheHoldFileWithoutListing(t *testing.T) {
 		Hold:   hold,
 		Wait:   "20ms",
 		Repos:  []string{"acme/widgets"},
-		Agents: []queueAgent{{Command: []string{"agent", "{prompt}"}}},
+		Agents: []queueAgentFile{{Command: []string{"agent", "{prompt}"}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -538,6 +677,134 @@ func TestQueueWaitsWhenEffortLabelsDisagree(t *testing.T) {
 	}
 	if !strings.Contains(s.buf.String(), "fix:") {
 		t.Fatalf("log = %q, want the refusal", s.buf.String())
+	}
+}
+
+func TestQueueBundlesSmallIssuesFromOneRepo(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.Agents = []queueAgent{{Bundle: 3, Command: []string{appendScript(t), out, "{issues}"}}}
+	var mu sync.Mutex
+	var spawned []int
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{
+				labelled(1, "2026-01-01T00:00:00Z", "Latch", "next", "fix"),
+				labelled(2, "2026-01-02T00:00:00Z", "Hinge", "next", "fix"),
+				labelled(3, "2026-01-03T00:00:00Z", "Bolt", "next", "fix"),
+			}, nil
+		},
+		spawn: func(_ string, n int) (string, error) {
+			mu.Lock()
+			spawned = append(spawned, n)
+			mu.Unlock()
+			return os.MkdirTemp(dir, "ws")
+		},
+	})
+	waitFor(t, "the bundle", func() bool {
+		body := readFile(t, out)
+		return strings.Contains(body, "Latch") && strings.Contains(body, "Hinge") && strings.Contains(body, "Bolt")
+	})
+	time.Sleep(200 * time.Millisecond)
+	s.stop(t)
+	mu.Lock()
+	got := append([]int(nil), spawned...)
+	mu.Unlock()
+	if len(got) != 1 || got[0] != 1 {
+		t.Fatalf("spawned %v, want only the first issue", got)
+	}
+	if !strings.Contains(s.buf.String(), "bundle 3") {
+		t.Fatalf("log = %q, want bundle 3", s.buf.String())
+	}
+}
+
+func TestQueueStopsABundleAtAFeature(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.effortLabels = map[string]string{"fix": "low", "feat": "low"}
+	cfg.Agents = []queueAgent{{Bundle: 5, Command: []string{appendScript(t), out, "{bundle}\n{issues}"}}}
+	var mu sync.Mutex
+	var spawned []int
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{
+				labelled(1, "2026-01-01T00:00:00Z", "Latch", "next", "fix"),
+				labelled(2, "2026-01-02T00:00:00Z", "Hinge", "next", "fix"),
+				labelled(3, "2026-01-03T00:00:00Z", "Panel", "next", "feat"),
+				labelled(4, "2026-01-04T00:00:00Z", "Bolt", "next", "fix"),
+			}, nil
+		},
+		spawn: func(_ string, n int) (string, error) {
+			mu.Lock()
+			spawned = append(spawned, n)
+			mu.Unlock()
+			return os.MkdirTemp(dir, "ws")
+		},
+	})
+	waitFor(t, "the feature and the later fix", func() bool {
+		return strings.Contains(readFile(t, out), "Bolt")
+	})
+	s.stop(t)
+	if got, want := readLines(t, out), []string{
+		"2",
+		"acme/widgets#1: Latch",
+		"acme/widgets#2: Hinge",
+		"1",
+		"acme/widgets#3: Panel",
+		"1",
+		"acme/widgets#4: Bolt",
+	}; strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("runs =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	mu.Lock()
+	gotSpawn := append([]int(nil), spawned...)
+	mu.Unlock()
+	if strings.Trim(fmt.Sprint(gotSpawn), "[]") != "1 3 4" {
+		t.Fatalf("spawned %v, want the first of each run and not the bundled hinge", gotSpawn)
+	}
+}
+
+func TestQueueCountsABundleAsOneAgent(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.Max = 2
+	cfg.Agents = []queueAgent{{Bundle: 2, Command: []string{blockScript(t), out, "{issues}"}}}
+	var mu sync.Mutex
+	var spawned []int
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{
+				labelled(1, "2026-01-01T00:00:00Z", "Latch", "next", "fix"),
+				labelled(2, "2026-01-02T00:00:00Z", "Hinge", "next", "fix"),
+				labelled(3, "2026-01-03T00:00:00Z", "Bolt", "next", "fix"),
+				labelled(4, "2026-01-04T00:00:00Z", "Nut", "next", "fix"),
+			}, nil
+		},
+		spawn: func(_ string, n int) (string, error) {
+			mu.Lock()
+			spawned = append(spawned, n)
+			mu.Unlock()
+			return os.MkdirTemp(dir, "ws")
+		},
+	})
+	waitFor(t, "two bundles", func() bool {
+		body := readFile(t, out)
+		return strings.Contains(body, "Nut") && strings.Contains(body, "Hinge")
+	})
+	time.Sleep(200 * time.Millisecond)
+	s.stop(t)
+	mu.Lock()
+	got := append([]int(nil), spawned...)
+	mu.Unlock()
+	seen := map[int]bool{}
+	for _, n := range got {
+		seen[n] = true
+	}
+	if len(got) != 2 || !seen[1] || !seen[3] {
+		t.Fatalf("spawned %v, want the first issue of each bundle", got)
 	}
 }
 

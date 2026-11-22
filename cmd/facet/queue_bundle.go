@@ -1,0 +1,166 @@
+package main
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// aloneLabels are issue labels that are one run, whatever the agent's
+// bundle is. A feature or a research issue stays on its own so a failure
+// in it is not hidden inside a batch. The match ignores case and is the
+// whole label: feature is not feat.
+var aloneLabels = []string{"feat", "research"}
+
+func issueStaysAlone(labels []string) bool {
+	for _, label := range labels {
+		for _, alone := range aloneLabels {
+			if strings.EqualFold(strings.TrimSpace(label), alone) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// bundleFor chooses the issues one run takes. ranked is in start order.
+// blocked reports an issue this process will not start now.
+//
+// The first free issue in the top project is the run. Further issues join
+// it only while they are the next free issue, in the same repository, for
+// the same agent and the same effort, and neither issue is feat or
+// research. A free issue that does not fit stops the run, so a later small
+// issue does not jump ahead of it. The size is the agent's bundle, or 1
+// when the first issue stays alone.
+func bundleFor(cfg queueConfig, ranked []queuedIssue, projects []string, blocked func(queuedIssue) bool) ([]queuedIssue, string) {
+	if len(ranked) == 0 {
+		return nil, ""
+	}
+	top := projectRank(ranked[0].Repo, projects)
+	primary, held, rest := firstFree(ranked, projects, top, blocked)
+	if primary == nil {
+		return nil, held
+	}
+	return fillBundle(cfg, *primary, rest, projects, top, blocked), ""
+}
+
+func firstFree(ranked []queuedIssue, projects []string, top int, blocked func(queuedIssue) bool) (*queuedIssue, string, []queuedIssue) {
+	var held string
+	for i, iss := range ranked {
+		if projectRank(iss.Repo, projects) != top {
+			return nil, held, nil
+		}
+		if blocked(iss) {
+			if held == "" {
+				held = iss.Repo
+			}
+			continue
+		}
+		picked := iss
+		return &picked, "", ranked[i+1:]
+	}
+	return nil, held, nil
+}
+
+func fillBundle(cfg queueConfig, primary queuedIssue, rest []queuedIssue, projects []string, top int, blocked func(queuedIssue) bool) []queuedIssue {
+	run := []queuedIssue{primary}
+	limit := runLimit(cfg, primary)
+	if limit < 2 {
+		return run
+	}
+	who, effort, ok := bundleKey(cfg, primary)
+	if !ok {
+		return run
+	}
+	for _, iss := range rest {
+		if len(run) >= limit || projectRank(iss.Repo, projects) != top {
+			break
+		}
+		if blocked(iss) {
+			continue
+		}
+		if !joinsBundle(cfg, primary, iss, who, effort) {
+			break
+		}
+		run = append(run, iss)
+	}
+	return run
+}
+
+// runLimit is how many issues may follow the primary, including it.
+// A feature or research issue is one. A missing agent is one, and the
+// start reports that.
+func runLimit(cfg queueConfig, primary queuedIssue) int {
+	if issueStaysAlone(primary.Issue.LabelNames()) {
+		return 1
+	}
+	a, err := cfg.agentFor(primary.Issue.LabelNames())
+	if err != nil || a.Bundle < 2 {
+		return 1
+	}
+	return a.Bundle
+}
+
+// bundleKey is the agent label and effort a companion has to share.
+// ok is false when the effort labels disagree or there is no agent:
+// that issue is started on its own, and the start reports the refusal.
+func bundleKey(cfg queueConfig, iss queuedIssue) (string, string, bool) {
+	a, err := cfg.agentFor(iss.Issue.LabelNames())
+	if err != nil {
+		return "", "", false
+	}
+	effort, err := cfg.effortFor(iss.Issue.LabelNames())
+	if err != nil {
+		return "", "", false
+	}
+	return a.Label, effort, true
+}
+
+func joinsBundle(cfg queueConfig, primary, iss queuedIssue, who, effort string) bool {
+	if iss.Repo != primary.Repo || issueStaysAlone(iss.Issue.LabelNames()) {
+		return false
+	}
+	gotWho, gotEffort, ok := bundleKey(cfg, iss)
+	return ok && gotWho == who && strings.EqualFold(gotEffort, effort)
+}
+
+func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string) ([]string, string, error) {
+	iss := run[0]
+	label, cmd, err := r.cfg.commandFor(iss.Issue.LabelNames())
+	if err != nil {
+		return nil, "", err
+	}
+	vars := map[string]string{
+		"repo":      iss.Repo,
+		"number":    strconv.Itoa(iss.Issue.Number),
+		"title":     iss.Issue.Title,
+		"workspace": ws,
+		"label":     r.cfg.Label,
+		"url":       iss.Issue.URL,
+		"effort":    effort,
+		"issues":    issuesText(run),
+		"bundle":    strconv.Itoa(len(run)),
+	}
+	// prompt is expanded first, then dropped in as a single value, so a title
+	// is not scanned for further placeholders.
+	prompt := expand(r.cfg.Prompt, vars)
+	vars["prompt"] = prompt
+	out := make([]string, len(cmd))
+	for i, a := range cmd {
+		out[i] = expand(a, vars)
+	}
+	who := label
+	if who == "" {
+		who = "default"
+	}
+	return out, who, nil
+}
+
+// issuesText is the {issues} value: one line per issue, repo#n: title.
+func issuesText(run []queuedIssue) string {
+	lines := make([]string, len(run))
+	for i, iss := range run {
+		lines[i] = fmt.Sprintf("%s#%d: %s", iss.Repo, iss.Issue.Number, iss.Issue.Title)
+	}
+	return strings.Join(lines, "\n")
+}

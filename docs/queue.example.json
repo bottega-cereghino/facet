@@ -6,7 +6,7 @@
   "label": "next",
   "priorities": "priorities.example.txt",
   "repos": ["acme/widgets", "acme/other"],
-  "prompt": "Do {repo}#{number}: {title}. The workspace is {workspace}. Do the work the issue describes. Merge when the checks are green. Comment the result on the issue. Remove the {label} label when the issue is done. Then exit.",
+  "prompt": "Do each issue below, in order. The workspace is {workspace}. {issues} Do the work each issue describes. Merge when the checks are green. Comment the result on the issue. Remove the {label} label when the issue is done. Then exit.",
   "effort": {
     "default": "medium",
     "labels": {
@@ -20,6 +20,7 @@
   "agents": [
     {
       "label": "codex",
+      "bundle": 1,
       "command": ["agent", "--for", "codex", "--effort", "{effort}", "{prompt}"]
     },
     {
