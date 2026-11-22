@@ -1,0 +1,5 @@
+# One project name per line, highest first.
+# A # starts a comment, including after a name.
+# The name is the repository name: widgets for acme/widgets.
+widgets
+other    # a lower project

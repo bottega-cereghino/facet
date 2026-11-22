@@ -26,8 +26,10 @@ func newQueueCmd() *cobra.Command {
 			"across every repository in the config.\n\n" +
 			"The commands, the cap, the gate and the hold file come from the JSON config\n" +
 			"(--config, or FACET_QUEUE). docs/queue.example.json is an example.\n\n" +
-			"It takes an issue labelled p1 before p2, p2 before p3, and p3 before an issue\n" +
-			"with none of those labels. Within each, the oldest issue is first.\n\n" +
+			"When priorities names a file, each line is a repository name, highest first,\n" +
+			"and a # starts a comment. The queue starts work only in the highest project\n" +
+			"that has an open issue with the label. Within that project it takes p1 before\n" +
+			"p2, p2 before p3, and p3 before an issue with none of those, oldest first.\n\n" +
 			"Before each start it runs the gate command, when one is set. A non-zero exit\n" +
 			"waits and tries later. When the hold file exists, it starts nothing and stops;\n" +
 			"an agent already running is left to finish.\n\n" +

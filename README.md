@@ -422,17 +422,27 @@ never passed through a shell.
 | `gate` | a command run before each start. A non-zero exit waits `wait` and tries later. Omitted means there is no gate. |
 | `wait` | how long to wait before looking again. Omitted means 30s. |
 | `label` | which label marks an issue as queued. Omitted means `next`. |
+| `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
 | `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}`. |
 | `agents` | one command per label. `{prompt}` is the task text. |
 
-The order is fixed. An issue labelled `p1` is taken before `p2`, `p2` before
-`p3`, and `p3` before an issue with none of those labels. An issue that
-carries more than one of them is taken at the earliest. Within one of those
-groups the earliest `createdAt` is first. The same created time is broken by
-repository name, then by issue number. The match ignores case, and `p10` is
-not `p1`. These labels do not choose the agent unless an agents entry uses
-the same label. A milestone does not move an issue.
+The order is fixed. When `priorities` is set, the queue reads that file
+again before each start. A line is a repository name (`widgets` for
+`acme/widgets`), highest first, and a `#` starts a comment. It starts work
+only in the highest named project that still has an open issue with the
+queue label. A lower project waits, even for a free slot, and even when its
+issue is older or labelled `p1`. A repository the file does not name comes
+after every named one. An edit to the file applies to the next start.
+
+Within that project, an issue labelled `p1` is taken before `p2`, `p2`
+before `p3`, and `p3` before an issue with none of those labels. An issue
+that carries more than one of them is taken at the earliest. Within one of
+those groups the earliest `createdAt` is first. The same created time is
+broken by repository name, then by issue number. The match ignores case,
+and `p10` is not `p1`. These labels do not choose the agent unless an
+agents entry uses the same label. A milestone does not move an issue.
+`docs/priorities.example.txt` is an example of the file.
 
 The agent starts in the workspace directory. The `CLAUDE.md` there is the one
 `facet spawn` wrote, with the issue text quoted. The queue does not reap
@@ -455,6 +465,8 @@ The stop is the hold file, or an interrupt. Remove the file and start
 `TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
 `TestQueueTakesTheOldestIssueFirst`,
 `TestQueueTakesP1BeforeAnOlderIssue`,
+`TestQueueStaysWithTheHighestProject`,
+`TestQueueMovesOnWhenTheHighestProjectHasNoNextIssue`,
 `TestQueueDoesNotHandTheSameIssueOutTwice`,
 `TestQueueRetriesASpawnThatFailed`,
 `TestQueueRetriesWhenTheAgentCannotStart` and

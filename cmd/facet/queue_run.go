@@ -85,7 +85,11 @@ func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		retryAt:  map[string]time.Time{},
 		wake:     make(chan struct{}, 1),
 	}
-	r.logf("queue: up to %d agent(s), label %s, order p1 then p2 then p3 then oldest", cfg.Max, cfg.Label)
+	if cfg.Priorities != "" {
+		r.logf("queue: up to %d agent(s), label %s, projects from %s", cfg.Max, cfg.Label, cfg.Priorities)
+	} else {
+		r.logf("queue: up to %d agent(s), label %s, order p1 then p2 then p3 then oldest", cfg.Max, cfg.Label)
+	}
 	err := r.loop(ctx)
 	r.wg.Wait()
 	return err
@@ -109,14 +113,18 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		r.pause(ctx)
 		return false, nil
 	}
-	iss, err := r.candidate()
+	iss, held, err := r.candidate()
 	if err != nil {
 		r.logf("queue: %s", err.Error())
 		r.pause(ctx)
 		return false, nil
 	}
 	if iss == nil {
-		r.logf("queue: no open issue labelled %s; waiting %s", r.cfg.Label, r.cfg.Wait)
+		if held != "" {
+			r.logf("queue: %s still has an open issue labelled %s; not starting a lower project", held, r.cfg.Label)
+		} else {
+			r.logf("queue: no open issue labelled %s; waiting %s", r.cfg.Label, r.cfg.Wait)
+		}
 		r.pause(ctx)
 		return false, nil
 	}
@@ -172,22 +180,49 @@ func (r *queueRunner) full() bool {
 	return len(r.inflight) >= r.cfg.Max
 }
 
-func (r *queueRunner) candidate() (*queuedIssue, error) {
+// candidate returns the next issue to start. held is a repository whose
+// open issue is keeping a lower project from starting, when there is no
+// issue to start. The priority file is read here, so an edit applies to
+// the next pick.
+func (r *queueRunner) candidate() (*queuedIssue, string, error) {
 	issues, err := r.collect()
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	projects, err := r.projectOrder()
+	if err != nil {
+		return nil, "", err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.env.now()
-	for _, iss := range orderQueued(issues) {
+	ranked := orderQueued(issues, projects)
+	if len(ranked) == 0 {
+		return nil, "", nil
+	}
+	top := projectRank(ranked[0].Repo, projects)
+	var held string
+	for _, iss := range ranked {
+		if projectRank(iss.Repo, projects) != top {
+			return nil, held, nil
+		}
 		if r.blocked(iss, now) {
+			if held == "" {
+				held = iss.Repo
+			}
 			continue
 		}
 		picked := iss
-		return &picked, nil
+		return &picked, "", nil
 	}
-	return nil, nil
+	return nil, held, nil
+}
+
+func (r *queueRunner) projectOrder() ([]string, error) {
+	if r.cfg.Priorities == "" {
+		return nil, nil
+	}
+	return readPriorities(r.cfg.Priorities)
 }
 
 // collect asks every repository. One failure fails the round: starting while

@@ -4,7 +4,8 @@
   "gate": ["gate"],
   "wait": "30s",
   "label": "next",
-  "repos": ["acme/widgets"],
+  "priorities": "priorities.example.txt",
+  "repos": ["acme/widgets", "acme/other"],
   "prompt": "Do {repo}#{number}: {title}. The workspace is {workspace}. Do the work the issue describes. Merge when the checks are green. Comment the result on the issue. Remove the {label} label when the issue is done. Then exit.",
   "agents": [
     {

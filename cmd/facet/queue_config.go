@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -24,14 +25,15 @@ const defaultQueuePrompt = "Do {repo}#{number}: {title}. The workspace is {works
 
 // queueConfig is a validated queue file. Durations and defaults are resolved.
 type queueConfig struct {
-	Max    int
-	Hold   string
-	Gate   []string
-	Wait   time.Duration
-	Label  string
-	Repos  []string
-	Prompt string
-	Agents []queueAgent
+	Max        int
+	Hold       string
+	Gate       []string
+	Wait       time.Duration
+	Label      string
+	Priorities string
+	Repos      []string
+	Prompt     string
+	Agents     []queueAgent
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -43,14 +45,15 @@ type queueAgent struct {
 
 // queueFile is the JSON shape, before defaults and checks.
 type queueFile struct {
-	Max    *int         `json:"max"`
-	Hold   string       `json:"hold"`
-	Gate   []string     `json:"gate"`
-	Wait   string       `json:"wait"`
-	Label  string       `json:"label"`
-	Repos  []string     `json:"repos"`
-	Prompt string       `json:"prompt"`
-	Agents []queueAgent `json:"agents"`
+	Max        *int         `json:"max"`
+	Hold       string       `json:"hold"`
+	Gate       []string     `json:"gate"`
+	Wait       string       `json:"wait"`
+	Label      string       `json:"label"`
+	Priorities string       `json:"priorities"`
+	Repos      []string     `json:"repos"`
+	Prompt     string       `json:"prompt"`
+	Agents     []queueAgent `json:"agents"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -62,15 +65,15 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, repos, prompt, agents", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, priorities, repos, prompt, agents", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
 	}
-	return raw.normalize()
+	return raw.normalize(path)
 }
 
-func (f queueFile) normalize() (queueConfig, error) {
+func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg := queueConfig{
 		Max:    defaultQueueMax,
 		Hold:   strings.TrimSpace(f.Hold),
@@ -95,6 +98,17 @@ func (f queueFile) normalize() (queueConfig, error) {
 			return queueConfig{}, fmt.Errorf("queue config: wait %q is not a duration\nfix: use a Go duration such as 30s or 1m", f.Wait)
 		}
 		cfg.Wait = d
+	}
+	if p := strings.TrimSpace(f.Priorities); p != "" {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(filepath.Dir(configPath), p)
+		}
+		cfg.Priorities = p
+		// Read once here so a missing file fails before the loop. The loop
+		// reads it again on each pick, so a later edit is not missed.
+		if _, err := readPriorities(p); err != nil {
+			return queueConfig{}, err
+		}
 	}
 	for _, repo := range f.Repos {
 		cfg.Repos = append(cfg.Repos, strings.TrimSpace(repo))

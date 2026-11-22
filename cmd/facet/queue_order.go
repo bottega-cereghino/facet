@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,21 +23,26 @@ func (q queuedIssue) key() string {
 }
 
 // orderQueued returns issues in the order the queue starts them.
-// An issue labelled p1 comes before p2, p2 before p3, and p3 before an
+// projects is the priority file, highest first. A repository named there
+// comes before one named later, and before one the file does not name.
+// Within a project, p1 comes before p2, p2 before p3, and p3 before an
 // issue with none of those. Within one of those groups the oldest
 // createdAt is first, then the repository name, then the issue number.
-// The order is fixed: a milestone does not move an issue.
-func orderQueued(issues []queuedIssue) []queuedIssue {
+// A milestone does not move an issue.
+func orderQueued(issues []queuedIssue, projects []string) []queuedIssue {
 	out := append([]queuedIssue(nil), issues...)
 	// Stable, so a tie that issueBefore does not break stays in the order
 	// the issues were listed, which is the order of repos in the config.
 	sort.SliceStable(out, func(i, j int) bool {
-		return issueBefore(out[i], out[j])
+		return issueBefore(out[i], out[j], projects)
 	})
 	return out
 }
 
-func issueBefore(a, b queuedIssue) bool {
+func issueBefore(a, b queuedIssue, projects []string) bool {
+	if c := projectRank(a.Repo, projects) - projectRank(b.Repo, projects); c != 0 {
+		return c < 0
+	}
 	if c := comparePriority(a.Issue, b.Issue); c != 0 {
 		return c < 0
 	}
@@ -67,8 +74,63 @@ func priorityRank(iss ghx.Issue) int {
 	return best
 }
 
-// queuePriorities is the order the queue starts work, earliest first.
+// queuePriorities is the order the queue starts work inside one project.
 var queuePriorities = []string{"p1", "p2", "p3"}
+
+// projectRank is the index of the repository's name in projects, or
+// len(projects) when the file does not name it. An empty projects list
+// ranks every repository together.
+func projectRank(repo string, projects []string) int {
+	name := repo
+	if _, n, ok := strings.Cut(repo, "/"); ok && n != "" {
+		name = n
+	}
+	for i, p := range projects {
+		if strings.EqualFold(p, name) {
+			return i
+		}
+	}
+	return len(projects)
+}
+
+// readPriorities reads a priority file. One project name per line, highest
+// first. A # starts a comment, including after a name. Blank lines are
+// skipped. The file is read again each time the queue picks an issue, so
+// an edit applies to the next start.
+func readPriorities(path string) ([]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("priorities %s: %w\nfix: the file is one project name per line, highest first, and a # starts a comment", path, err)
+	}
+	return parsePriorities(path, b)
+}
+
+func parsePriorities(path string, b []byte) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for i, line := range strings.Split(string(b), "\n") {
+		if h := strings.IndexByte(line, '#'); h >= 0 {
+			line = line[:h]
+		}
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if strings.Contains(name, "/") || strings.ContainsAny(name, " \t") {
+			return nil, fmt.Errorf("priorities %s:%d: %q is not a project name\nfix: write the repository name, such as widgets for acme/widgets, one per line", path, i+1, name)
+		}
+		key := strings.ToLower(name)
+		if seen[key] {
+			return nil, fmt.Errorf("priorities %s:%d: project %s is listed twice\nfix: list each project once, highest first", path, i+1, name)
+		}
+		seen[key] = true
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("priorities %s names no project\nfix: one project name per line, highest first; a # starts a comment", path)
+	}
+	return out, nil
+}
 
 func compareCreated(a, b string) int {
 	at, aerr := time.Parse(time.RFC3339, a)

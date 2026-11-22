@@ -45,8 +45,15 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	if cfg.Max != 6 || cfg.Label != "next" || cfg.Wait != 30*time.Second {
 		t.Fatalf("defaults from the example: %+v", cfg)
 	}
-	if cfg.Hold == "" || len(cfg.Gate) == 0 || len(cfg.Repos) != 1 || len(cfg.Agents) != 3 {
+	if cfg.Hold == "" || len(cfg.Gate) == 0 || len(cfg.Repos) != 2 || len(cfg.Agents) != 3 || cfg.Priorities == "" {
 		t.Fatalf("example is missing a field: %+v", cfg)
+	}
+	names, err := readPriorities(cfg.Priorities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(names, ",") != "widgets,other" {
+		t.Fatalf("example priorities = %q", names)
 	}
 	if cfg.Agents[0].Label != "codex" || cfg.Agents[1].Label != "gemini" || cfg.Agents[2].Label != "" {
 		t.Fatalf("agents = %+v", cfg.Agents)
@@ -91,6 +98,7 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 		{"duplicate agent label", `{"repos": ["acme/widgets"], "agents": [{"label": "Codex", "command": ["a", "{prompt}"]}, {"label": "codex", "command": ["b", "{prompt}"]}, {"command": ["c", "{prompt}"]}]}`, "two agents"},
 		{"bad wait", `{"wait": "soon", "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "duration"},
 		{"extra value", `{"repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]} {}`, "extra data"},
+		{"missing priorities", `{"priorities": "missing.txt", "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "priorities"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,7 +157,7 @@ func TestQueueOrdersIssues(t *testing.T) {
 		{Repo: "acme/widgets", Issue: labelled(7, "2026-01-02T00:00:00Z", "not p1", "next", "p10")},
 		{Repo: "acme/widgets", Issue: labelled(8, "not-a-date", "bad date", "next")},
 	}
-	if got, want := keys(orderQueued(issues)), []string{
+	if got, want := keys(orderQueued(issues, nil)), []string{
 		"acme/widgets#6", "acme/widgets#2",
 		"acme/widgets#4", "acme/widgets#5",
 		"acme/widgets#3",
@@ -163,7 +171,7 @@ func TestQueueOrdersIssues(t *testing.T) {
 		{Repo: "acme/other", Issue: labelled(9, "2026-01-01T00:00:00Z", "b", "p2")},
 		{Repo: "acme/widgets", Issue: labelled(7, "2026-01-01T00:00:00Z", "c", "p2")},
 	}
-	if got, want := keys(orderQueued(same)), []string{
+	if got, want := keys(orderQueued(same, nil)), []string{
 		"acme/other#9", "acme/widgets#7", "acme/widgets#8",
 	}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("tie break = %v, want %v", got, want)
@@ -298,6 +306,48 @@ func TestQueueDoesNotStartWhenARepositoryCannotBeListed(t *testing.T) {
 	}
 }
 
+func TestParsePriorities(t *testing.T) {
+	got, err := parsePriorities("p.txt", []byte("# highest first\n\nWidgets\nother  # lower\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "Widgets,other" {
+		t.Fatalf("priorities = %q", got)
+	}
+	for _, tc := range []struct {
+		body string
+		want string
+	}{
+		{"Widgets\nwidgets\n", "listed twice"},
+		{"acme/widgets\n", "not a project name"},
+		{"# only a comment\n\n", "names no project"},
+	} {
+		_, err := parsePriorities("p.txt", []byte(tc.body))
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "fix:") {
+			t.Errorf("body %q: error %v, want it to mention %q and the fix", tc.body, err, tc.want)
+		}
+	}
+	_, err = readPriorities(filepath.Join(t.TempDir(), "missing.txt"))
+	if err == nil || !strings.Contains(err.Error(), "fix:") {
+		t.Fatalf("missing file: %v", err)
+	}
+}
+
+func TestQueueOrdersTheHighestProjectFirst(t *testing.T) {
+	projects := []string{"Widgets", "other"}
+	issues := []queuedIssue{
+		{Repo: "acme/other", Issue: labelled(9, "2020-01-01T00:00:00Z", "urgent", "next", "p1")},
+		{Repo: "acme/widgets", Issue: labelled(2, "2026-06-01T00:00:00Z", "plain", "next")},
+		{Repo: "acme/bells", Issue: labelled(1, "2019-01-01T00:00:00Z", "old", "next", "p1")},
+		{Repo: "acme/widgets", Issue: labelled(3, "2026-01-01T00:00:00Z", "top", "next", "p1")},
+	}
+	if got, want := keys(orderQueued(issues, projects)), []string{
+		"acme/widgets#3", "acme/widgets#2", "acme/other#9", "acme/bells#1",
+	}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
 func TestQueueTakesTheOldestIssueFirst(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "out")
 	script := appendScript(t)
@@ -325,6 +375,66 @@ func TestQueueTakesTheOldestIssueFirst(t *testing.T) {
 	waitFor(t, "three agents", func() bool { return len(readLines(t, out)) >= 3 })
 	s.stop(t)
 	if got, want := readLines(t, out), []string{"5", "2", "9"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("start order = %v, want %v", got, want)
+	}
+}
+
+func TestQueueStaysWithTheHighestProject(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 2
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Agents = []queueAgent{{Command: []string{blockScript(t), out, "{number}", "{prompt}"}}}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			switch repo {
+			case "acme/widgets":
+				return []ghx.Issue{labelled(1, "2026-06-01T00:00:00Z", "plain", "next")}, nil
+			case "acme/other":
+				// Older, and p1, and a free slot: still not this project.
+				return []ghx.Issue{labelled(2, "2026-01-01T00:00:00Z", "urgent", "next", "p1")}, nil
+			default:
+				return nil, fmt.Errorf("unexpected repo %s", repo)
+			}
+		},
+	})
+	waitFor(t, "the higher project", func() bool { return len(readLines(t, out)) >= 1 })
+	time.Sleep(200 * time.Millisecond)
+	s.stop(t)
+	if got, want := readLines(t, out), []string{"1"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("started %v, want only the higher project", got)
+	}
+}
+
+func TestQueueMovesOnWhenTheHighestProjectHasNoNextIssue(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Agents = []queueAgent{{Command: []string{appendScript(t), out, "{number}", "{prompt}"}}}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			switch repo {
+			case "acme/widgets":
+				b, err := os.ReadFile(out)
+				if err != nil && !os.IsNotExist(err) {
+					return nil, err
+				}
+				if len(bytes.TrimSpace(b)) > 0 {
+					return nil, nil
+				}
+				return []ghx.Issue{labelled(1, "2026-06-01T00:00:00Z", "plain", "next")}, nil
+			case "acme/other":
+				return []ghx.Issue{labelled(2, "2020-01-01T00:00:00Z", "urgent", "next", "p1")}, nil
+			default:
+				return nil, fmt.Errorf("unexpected repo %s", repo)
+			}
+		},
+	})
+	waitFor(t, "the next project", func() bool { return len(readLines(t, out)) >= 2 })
+	s.stop(t)
+	if got, want := readLines(t, out), []string{"1", "2"}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("start order = %v, want %v", got, want)
 	}
 }
@@ -774,6 +884,15 @@ func loadTempConfig(t *testing.T, body string) (queueConfig, error) {
 		t.Fatal(err)
 	}
 	return loadQueueConfig(path)
+}
+
+func writePriorities(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "priorities.txt")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func writeExe(t *testing.T, name, body string) string {
