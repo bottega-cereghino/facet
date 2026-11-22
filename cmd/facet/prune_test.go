@@ -19,7 +19,7 @@ func pruneWorkspace(t *testing.T, root, name string) (ws, deps string) {
 	t.Helper()
 	ws, deps = bareNodeModules(t, root, name)
 	clone := filepath.Dir(deps)
-	if err := os.WriteFile(filepath.Join(clone, "package.json"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(clone, "package.json"), []byte(`{"dependencies": {"left-pad": "1.3.0"}}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (gitx.Git{}).Run(clone, nil, "add", "package.json"); err != nil {
