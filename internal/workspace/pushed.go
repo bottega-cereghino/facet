@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,7 +99,7 @@ func remoteCounts(git gitx.Runner, url, dir, gone string) bool {
 		}
 	}
 	if fi.Mode().IsRegular() {
-		return true
+		return isBundle(path)
 	}
 	out, err := git.Run(path, nil, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
 	if err != nil {
@@ -156,4 +157,21 @@ func resolvePath(path string) string {
 		return path
 	}
 	return filepath.Join(resolvePath(parent), filepath.Base(path))
+}
+
+// isBundle reports whether the file at path starts with a git bundle's
+// header. git fetches from a bundle file, but upload-pack also follows a
+// gitfile (`gitdir: <path>`), so a remote URL naming a file can be the clone
+// itself (#380): only a bundle is a copy of its own.
+func isBundle(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	head := make([]byte, len("# v2 git bundle\n"))
+	if _, err := io.ReadFull(f, head); err != nil {
+		return false
+	}
+	return string(head) == "# v2 git bundle\n" || string(head) == "# v3 git bundle\n"
 }

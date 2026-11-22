@@ -160,3 +160,44 @@ func TestReapHoldsWorkPushedToABackupWhoseObjectsAreTheClones(t *testing.T) {
 		t.Fatalf("the backup's objects are the clone's, which go with the workspace; blockers = %v", st.Blockers())
 	}
 }
+
+// A remote URL may name a file. git fetches a bundle from one, but upload-pack
+// also follows a gitfile, so a file reading `gitdir: <clone>/.git` fetches the
+// clone itself: only a bundle is a copy (#380).
+func TestReapHoldsWorkWhoseRemoteURLIsAGitfileIntoTheClone(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	gitfile := filepath.Join(t.TempDir(), "backup")
+	writeTestFile(t, gitfile, "gitdir: "+filepath.Join(clone, ".git")+"\n")
+	gitOut(t, clone, "remote", "add", "backup", gitfile)
+	gitOut(t, clone, "switch", "-q", "-c", "feature")
+	commitFile(t, clone, "idea.txt", "the idea\n", "the idea")
+	gitOut(t, clone, "fetch", "-q", "backup")
+	if got := gitOut(t, clone, "rev-parse", "refs/remotes/backup/feature"); got != gitOut(t, clone, "rev-parse", "HEAD") {
+		t.Fatalf("setup: backup/feature = %s, want HEAD", got)
+	}
+	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBlocker(st, "unpushed") {
+		t.Fatalf("the commit's only repository is the clone, fetched through %s; blockers = %v", gitfile, st.Blockers())
+	}
+}
+
+// A bundle outside the workspace is a copy of what it holds.
+func TestReapCountsWorkInABundleOutsideTheWorkspaceAsPushed(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	gitOut(t, clone, "switch", "-q", "-c", "feature")
+	commitFile(t, clone, "idea.txt", "the idea\n", "the idea")
+	bundle := filepath.Join(t.TempDir(), "feature.bundle")
+	gitOut(t, clone, "bundle", "create", "-q", bundle, "feature")
+	gitOut(t, clone, "remote", "add", "backup", bundle)
+	gitOut(t, clone, "fetch", "-q", "backup")
+	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasBlocker(st, "unpushed") {
+		t.Fatalf("work in a bundle outside the workspace holds: %v", st.Blockers())
+	}
+}
