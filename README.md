@@ -583,7 +583,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `git init` in it) keeps its history in the `.git` that reap deletes, so it
   holds, pushed or not, and so does a `.git` git cannot read
   (`TestReapHoldsAWorkspaceThatIsItsOwnRepository`,
-  `TestReapHoldsARepositoryAtTheWorkspaceRoot`). The `CLAUDE.md` spawn
+  `TestReapHoldsARepositoryAtTheWorkspaceRoot`). A repository beside the
+  clones (git or another VCS) holds whatever the enclosing repository records
+  of it: `git add -A` keeps a hand clone as a gitlink, its HEAD's sha and none
+  of its commits (`TestReapHoldsAHandCloneTheEnclosingRepoHasAsAGitlink`,
+  `TestReapHoldsAGitlinkedHandCloneThatMovedOn`). The `CLAUDE.md` spawn
   writes is facet's own only while it hashes to what spawn recorded in the
   manifest; edited, or spawned before the hash was recorded, it holds: nothing
   rewrites it, so an agent's notes there are the only copy
