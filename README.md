@@ -332,7 +332,10 @@ directories in its clones that one command rebuilds (`node_modules`, `.venv`
 and the tool caches). It lists what each workspace would free and deletes only
 with `--apply`, after one confirmation (`-y` skips it), and only from a
 workspace no clone of which was used within `--idle-days` (14 by default) and
-that nothing runs from. A directory that frees under 1 MiB, such as a
+that nothing runs from. Use is the newest of a clone's git activity and every
+entry inside the listed directories, so a `pip install` into
+`.venv/lib/…/site-packages` or an edit deep in `node_modules` counts
+(`TestPruneSeesAnInstallOrEditInsideTheDirectory`). A directory that frees under 1 MiB, such as a
 `node_modules` pnpm cloned from its store, is not named: deleting it would only
 cost a reinstall. A directory is named only when the clone tracks a file
 that rebuilds it in the same directory, the one its tool reads when it
