@@ -254,3 +254,25 @@ func TestLsofProcessesUnderFailsWhenLsofFails(t *testing.T) {
 		})
 	}
 }
+
+// A name that only starts with ".." lies beneath the root (#317).
+func TestUnderRootTakesADotDotNameAsInside(t *testing.T) {
+	root := t.TempDir()
+	// The paths exist, as the ones tmux and lsof report do, so /var resolves
+	// to /private/var on both sides.
+	if err := os.MkdirAll(filepath.Join(root, "..wt", "f"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]bool{
+		root:                                 true,
+		filepath.Join(root, "..wt"):          true,
+		filepath.Join(root, "..wt", "f"):     true,
+		filepath.Join(root, "..", "sibling"): false,
+		filepath.Dir(root):                   false,
+	}
+	for p, want := range cases {
+		if got := underRoot(root, p); got != want {
+			t.Errorf("underRoot(%q, %q) = %v, want %v", root, p, got, want)
+		}
+	}
+}

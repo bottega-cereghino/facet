@@ -99,7 +99,7 @@ func (n *innerRepos) modules(name, clone, mods string) {
 		n.seen[resolved] = true
 		rel, _ := filepath.Rel(mods, g)
 		where := g
-		if r, err := filepath.Rel(clone, g); err == nil && !strings.HasPrefix(r, "..") {
+		if r, err := filepath.Rel(clone, g); err == nil && isUnder(clone, g) {
 			where = filepath.Join(name, r)
 		}
 		label := fmt.Sprintf("%s (not checked out; its repository is %s)", filepath.Join(name, rel), where)

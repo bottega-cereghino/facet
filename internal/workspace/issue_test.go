@@ -1567,6 +1567,9 @@ func TestIsUnder(t *testing.T) {
 		filepath.Join("a"):           false,
 		filepath.Join("a", "bb"):     false,
 		filepath.Join("x"):           false,
+		// A name that only starts with ".." is inside (#317).
+		filepath.Join("a", "b", "..wt"):    true,
+		filepath.Join("a", "b", "..", "c"): false,
 	}
 	for p, want := range cases {
 		if got := isUnder(root, p); got != want {
