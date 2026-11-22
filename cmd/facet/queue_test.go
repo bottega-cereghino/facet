@@ -1711,3 +1711,56 @@ func TestQueueDryRunSkipsARunSpawnCannotRoute(t *testing.T) {
 		t.Fatalf("dry-run =\n%s", got)
 	}
 }
+
+// skipGate exits 3, skip this run, for acme/widgets and passes the rest.
+func skipGate(t *testing.T) string {
+	t.Helper()
+	return writeExe(t, "gate-skip", "#!/bin/sh\nif [ \"$1\" = acme/widgets ]; then echo 'red pull request' >&2; exit 3; fi\nexit 0\n")
+}
+
+func twoRepoIssues(repo, _ string) ([]ghx.Issue, error) {
+	switch repo {
+	case "acme/widgets":
+		return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
+	case "acme/other":
+		return []ghx.Issue{openIssue(2, "2026-01-01T00:00:00Z")}, nil
+	default:
+		return nil, fmt.Errorf("unexpected repo %s", repo)
+	}
+}
+
+func TestQueueMovesOnWhenTheGateSkipsARun(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 1
+	// A wait this long would time the test out: the start below has to come
+	// without one.
+	cfg.Wait = time.Hour
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Gate = []string{skipGate(t), "{repo}"}
+	cfg.Agents = []queueAgent{{Command: []string{appendScript(t), out, "{number}", "{prompt}"}}}
+	s := startQueue(t, cfg, queueEnv{list: twoRepoIssues})
+	waitFor(t, "the lower project's agent", func() bool { return len(readLines(t, out)) >= 1 })
+	s.stop(t)
+	if got := strings.Join(readLines(t, out), ","); got != "2" {
+		t.Fatalf("started %s, want 2", got)
+	}
+}
+
+func TestQueueDryRunListsPastARunTheGateSkips(t *testing.T) {
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 2
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Gate = []string{skipGate(t), "{repo}"}
+	var buf bytes.Buffer
+	if err := dryQueue(context.Background(), cfg, queueEnv{list: twoRepoIssues, out: &buf}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "would not start acme/widgets#1: gate skips it") ||
+		!strings.Contains(got, "would start acme/other#2") ||
+		strings.Contains(got, "would start acme/widgets#1") {
+		t.Fatalf("dry-run =\n%s", got)
+	}
+}
