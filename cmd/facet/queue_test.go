@@ -941,6 +941,177 @@ func TestQueueWaitsWhenTheGateFails(t *testing.T) {
 	}
 }
 
+func TestQueueGateSeesTheIssue(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	args := filepath.Join(dir, "gate-args")
+	script := writeExe(t, "gate-see", "#!/bin/sh\nout=$1\nshift\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> \"$out\"; done\nexit 0\n")
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.effortLabels = map[string]string{"fix": "low"}
+	cfg.Gate = []string{script, args, "{repo}", "{number}", "{title}", "{effort}", "{labels}"}
+	cfg.Agents = []queueAgent{{Command: []string{appendScript(t), out, "{number}"}}}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			iss := labelled(4, "2026-01-01T00:00:00Z", "$(echo pwned); rm", "next", "fix")
+			return []ghx.Issue{iss}, nil
+		},
+	})
+	waitFor(t, "the agent", func() bool { return len(readLines(t, out)) >= 1 })
+	s.stop(t)
+	got := readLines(t, args)
+	want := []string{"acme/widgets", "4", "$(echo pwned); rm", "low", "next,fix"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("gate args = %q, want %q", got, want)
+	}
+}
+
+func TestQueueGateDoesNotRunWhenEffortLabelsDisagree(t *testing.T) {
+	dir := t.TempDir()
+	count := filepath.Join(dir, "gate-count")
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.effortLabels = map[string]string{"fix": "low", "feat": "medium"}
+	cfg.Gate = []string{gateScript(t, count, 1)}
+	var spawned atomic.Int32
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{labelled(4, "2026-01-01T00:00:00Z", "Both", "next", "fix", "feat")}, nil
+		},
+		spawn: func(string, int) (string, error) {
+			spawned.Add(1)
+			return os.MkdirTemp(dir, "ws")
+		},
+	})
+	time.Sleep(150 * time.Millisecond)
+	s.stop(t)
+	if spawned.Load() != 0 {
+		t.Fatalf("spawned %d time(s) while the effort labels disagree", spawned.Load())
+	}
+	if readFile(t, count) != "" {
+		t.Fatalf("gate ran: %q", readFile(t, count))
+	}
+	if !strings.Contains(s.buf.String(), "fix:") {
+		t.Fatalf("log = %q, want the refusal", s.buf.String())
+	}
+}
+
+func TestQueueDryRunPrintsTheNextRunsAndDoesNotSpawn(t *testing.T) {
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.Max = 2
+	var spawned atomic.Int32
+	var buf bytes.Buffer
+	err := dryQueue(context.Background(), cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{
+				openIssue(1, "2026-01-01T00:00:00Z"),
+				openIssue(2, "2026-01-02T00:00:00Z"),
+			}, nil
+		},
+		spawn: func(string, int) (string, error) {
+			spawned.Add(1)
+			return "", errors.New("dry-run spawned")
+		},
+		out: &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spawned.Load() != 0 {
+		t.Fatalf("spawned %d time(s)", spawned.Load())
+	}
+	got := buf.String()
+	if !strings.Contains(got, "dry-run: would start acme/widgets#1 agent default effort medium bundle 1") ||
+		!strings.Contains(got, "dry-run: would start acme/widgets#2 agent default effort medium bundle 1") ||
+		!strings.Contains(got, "dry-run: acme/widgets#1: Issue 1") {
+		t.Fatalf("dry-run =\n%s", got)
+	}
+}
+
+func TestQueueDryRunStopsWhenTheGateFails(t *testing.T) {
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.Max = 4
+	cfg.Gate = []string{writeExe(t, "gate-no", "#!/bin/sh\nexit 1\n")}
+	var spawned atomic.Int32
+	var buf bytes.Buffer
+	err := dryQueue(context.Background(), cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{
+				openIssue(1, "2026-01-01T00:00:00Z"),
+				openIssue(2, "2026-01-02T00:00:00Z"),
+			}, nil
+		},
+		spawn: func(string, int) (string, error) {
+			spawned.Add(1)
+			return "", errors.New("dry-run spawned")
+		},
+		out: &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spawned.Load() != 0 {
+		t.Fatalf("spawned %d time(s)", spawned.Load())
+	}
+	got := buf.String()
+	if !strings.Contains(got, "dry-run: would not start acme/widgets#1: gate:") || strings.Contains(got, "would start") {
+		t.Fatalf("dry-run =\n%s", got)
+	}
+}
+
+func TestQueueDryRunStopsOnTheHoldFileWithoutListing(t *testing.T) {
+	cfg := oneAgentConfig(nil)
+	cfg.Hold = filepath.Join(t.TempDir(), "hold")
+	if err := os.WriteFile(cfg.Hold, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var listed atomic.Int32
+	var buf bytes.Buffer
+	err := dryQueue(context.Background(), cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			listed.Add(1)
+			return nil, errors.New("listed while held")
+		},
+		out: &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed.Load() != 0 {
+		t.Fatalf("listed %d time(s) while the hold file exists", listed.Load())
+	}
+	if !strings.Contains(buf.String(), "would start nothing") {
+		t.Fatalf("dry-run =\n%s", buf.String())
+	}
+}
+
+func TestQueueDryRunStaysWithTheHighestProject(t *testing.T) {
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 4
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	var buf bytes.Buffer
+	err := dryQueue(context.Background(), cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			switch repo {
+			case "acme/widgets":
+				return []ghx.Issue{openIssue(1, "2026-01-02T00:00:00Z")}, nil
+			case "acme/other":
+				return []ghx.Issue{openIssue(2, "2026-01-01T00:00:00Z")}, nil
+			default:
+				return nil, fmt.Errorf("unexpected repo %s", repo)
+			}
+		},
+		out: &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "would start acme/widgets#1") ||
+		!strings.Contains(got, "not starting a lower project") ||
+		strings.Contains(got, "acme/other#2") {
+		t.Fatalf("dry-run =\n%s", got)
+	}
+}
+
 func TestQueueDoesNotHandTheSameIssueOutTwice(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out")

@@ -128,12 +128,21 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		r.pause(ctx)
 		return false, nil
 	}
-	if err := r.gate(ctx); err != nil {
+	// Effort is resolved before the gate. A disagreement is not an issue to
+	// start, and the gate would otherwise judge a run that never begins.
+	effort, err := r.cfg.effortFor(run[0].Issue.LabelNames())
+	if err != nil {
+		r.logf("queue: %s#%d: %v", run[0].Repo, run[0].Issue.Number, err)
+		r.deferAll(run, r.deferRetry)
+		r.pause(ctx)
+		return false, nil
+	}
+	if err := r.gate(ctx, run, effort); err != nil {
 		if ctx.Err() != nil {
 			r.logf("queue: stopping")
 			return true, nil
 		}
-		r.logf("queue: gate: %s; waiting %s", err.Error(), r.cfg.Wait)
+		r.logf("queue: %s#%d gate: %s; waiting %s", run[0].Repo, run[0].Issue.Number, err.Error(), r.cfg.Wait)
 		r.pause(ctx)
 		return false, nil
 	}
@@ -252,11 +261,11 @@ func (r *queueRunner) blocked(iss queuedIssue, now time.Time) bool {
 	return ok && now.Before(until)
 }
 
-func (r *queueRunner) gate(ctx context.Context) error {
+func (r *queueRunner) gate(ctx context.Context, run []queuedIssue, effort string) error {
 	if len(r.cfg.Gate) == 0 {
 		return nil
 	}
-	return r.env.run(ctx, "", r.cfg.Gate)
+	return r.env.run(ctx, "", gateArgv(r.cfg, run, effort))
 }
 
 func (r *queueRunner) start(ctx context.Context, run []queuedIssue) {

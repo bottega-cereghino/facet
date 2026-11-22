@@ -1,7 +1,7 @@
 {
   "max": 6,
   "hold": "facet-queue.hold",
-  "gate": ["gate"],
+  "gate": ["gate", "{repo}", "{number}", "{labels}"],
   "wait": "30s",
   "label": "next",
   "priorities": "priorities.example.txt",
