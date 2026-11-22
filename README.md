@@ -524,7 +524,21 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` sees every untracked and modified file whatever git's config says.**
   Its status check names `--untracked-files=all` and `--ignore-submodules=none`,
   so `status.showUntrackedFiles=no` cannot hide a new file from it
-  (`TestReapHoldsAnUntrackedFileTheConfigHides`).
+  (`TestReapHoldsAnUntrackedFileTheConfigHides`), and turns off
+  `core.fsmonitor`, whose hook can miss an edit
+  (`TestReapSeesAnEditTheFSMonitorMisses`). A tracked file marked
+  `assume-unchanged` or `skip-worktree`, or read through a clean filter, is
+  hashed as it is on disk and compared with what is committed, in a clone and
+  in the enclosing repository alike, since git status skips the first and sees
+  the second only through the filter (`TestReapSeesAnEditBehindAnIndexBit`,
+  `TestReapHoldsAnEnclosingEditBehindAnIndexBit`,
+  `TestReapSeesContentACleanFilterHides`). A Git LFS file matches when the
+  committed pointer names its content
+  (`TestReapJudgesAnLFSFileByThePointerItsBlobHolds`); any other filter that
+  changes what it stores, such as git-crypt's, holds the file. A clone whose
+  `core.worktree` points elsewhere holds, since git would read that directory
+  instead of the one reap deletes
+  (`TestReapSeesFilesWhenCoreWorktreePointsElsewhere`).
 - **`reap` reads the repository on disk, not what the environment tells git.**
   Every git call drops `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the
   other variables that point git at another repository, index or config (git
@@ -575,9 +589,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`prune` deletes only directories git ignores**, named in a fixed list of
   rebuildable ones, holding no tracked file and outside any nested repository
   or worktree; an ignored `.secrets/` or an unignored `node_modules` stays
-  (`TestPruneDeletesWhatWasFoundAndNothingElse`). One with a git repository
-  anywhere inside it, such as an editable pip install in a `.venv`, stays too
-  (`TestInspectPruneKeepsADirectoryHoldingARepository`), and so does one with
+  (`TestPruneDeletesWhatWasFoundAndNothingElse`). One with a repository
+  anywhere inside it, such as an editable pip install in a `.venv`, stays too,
+  whether git, Mercurial, Jujutsu, Subversion, Sapling, Bazaar, Darcs, Pijul,
+  CVS, RCS, SCCS or Fossil, a bare git repository or a Fossil repository file
+  (`TestInspectPruneKeepsADirectoryHoldingARepository`,
+  `TestPruneKeepsADirectoryHoldingANonGitRepository`), and so does one with
   no file that rebuilds it tracked beside it, such as a hand-built `.venv` with
   no `pyproject.toml`: an untracked one, or one further up, does not count
   (`TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds`,

@@ -24,6 +24,11 @@ type CloneState struct {
 	Branch string
 	// Dirty means uncommitted changes or untracked files.
 	Dirty bool
+	// Hidden names the tracked files that differ from what is committed while
+	// git status calls them unchanged: an index mark or a clean filter hides
+	// them (see hiddenEdits). Each entry says what hides it and how to show
+	// it. Non-empty is a blocker.
+	Hidden []string
 	// Worktrees names the clone's linked worktrees (`git worktree add`). Their
 	// uncommitted files and detached commits are invisible to the checks here,
 	// which read only the main worktree, and deleting the clone deletes their
@@ -171,6 +176,11 @@ func (s *IssueState) Blockers() []string {
 	for _, c := range s.Clone {
 		if c.Dirty {
 			out = append(out, fmt.Sprintf("%s has uncommitted changes", c.Dir))
+		}
+	}
+	for _, c := range s.Clone {
+		for _, h := range c.Hidden {
+			out = append(out, fmt.Sprintf("%s: %s", c.Dir, h))
 		}
 	}
 	if s.PR != nil && strings.EqualFold(s.PR.State, "OPEN") {
@@ -464,9 +474,9 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		for _, n := range names {
 			loose = append(loose, fmt.Sprintf("%s is in no repository -- this workspace is its only copy", n))
 		}
-		return "", capLoose(loose)
+		return "", capList(loose, "files not committed anywhere")
 	}
-	args := []string{"status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=all", "--"}
+	args := append(append([]string{}, honestStatus...), "status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=all", "--")
 	args = append(args, names...)
 	out, err := git.Run(ws, nil, args...)
 	if err != nil {
@@ -479,7 +489,14 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		path := rec[3:]
 		loose = append(loose, fmt.Sprintf("%s is not committed in %s -- this workspace is its only copy", path, enclosing))
 	}
-	return enclosing, capLoose(loose)
+	hidden, err := hiddenEdits(git, ws, names)
+	if err != nil {
+		return enclosing, append(loose, fmt.Sprintf("could not look in %s for edits git status does not show: %v -- cannot confirm the files beside the clones are safe to delete", enclosing, err))
+	}
+	for _, h := range hidden {
+		loose = append(loose, fmt.Sprintf("%s differs from what is committed in %s, and this workspace is its only copy -- %s", h.path, enclosing, h.why))
+	}
+	return enclosing, capList(loose, "files not committed anywhere")
 }
 
 // linkedWorktrees reads `git worktree list --porcelain`: one "worktree <path>"
@@ -566,11 +583,13 @@ func ownRepository(ws, top string) string {
 		"push what you need, move .git out of the workspace, then reap again", ws)
 }
 
-func capLoose(loose []string) []string {
-	if len(loose) <= maxLoose {
-		return loose
+// capList keeps the first maxLoose entries of list and counts the rest as
+// more of what.
+func capList(list []string, what string) []string {
+	if len(list) <= maxLoose {
+		return list
 	}
-	return append(loose[:maxLoose:maxLoose], fmt.Sprintf("... and %d more files not committed anywhere", len(loose)-maxLoose))
+	return append(list[:maxLoose:maxLoose], fmt.Sprintf("... and %d more %s", len(list)-maxLoose, what))
 }
 
 // inspectClone reads one clone's state. Every git probe that fails is recorded
@@ -591,13 +610,31 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 	}
 	own := c.WorktreeOf == ""
 
+	// core.worktree can point git at another directory, and every check of
+	// files below would then read that one, never the files deleted here.
+	if top, err := git.Run(p, nil, "rev-parse", "--show-toplevel"); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not find its work tree: %v", err))
+	} else if top = strings.TrimSpace(top); realPath(top) != realPath(p) {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("its work tree is %s (core.worktree), so git never looks at the files here; run `git config --unset core.worktree` in it, then reap again", top))
+	}
+
 	// The flags are explicit so no config can hide a file from the check:
 	// status.showUntrackedFiles=no drops untracked files, and
 	// submodule.<name>.ignore or diff.ignoreSubmodules drop a dirty submodule.
-	if out, err := git.Run(p, nil, "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none"); err != nil {
+	// honestStatus turns off the caches that answer for the disk.
+	statusArgs := append(append([]string{}, honestStatus...), "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+	if out, err := git.Run(p, nil, statusArgs...); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git status failed: %v", err))
 	} else {
 		c.Dirty = strings.TrimSpace(out) != ""
+	}
+	if hidden, err := hiddenEdits(git, p, nil); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for edits git status does not show: %v", err))
+	} else {
+		for _, h := range hidden {
+			c.Hidden = append(c.Hidden, fmt.Sprintf("%s differs from what is committed -- %s", h.path, h.why))
+		}
+		c.Hidden = capList(c.Hidden, "files git status does not show as changed")
 	}
 
 	// A clone with its own repository is held by every linked worktree: each

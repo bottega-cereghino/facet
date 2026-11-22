@@ -171,6 +171,57 @@ func TestInspectPruneKeepsADirectoryHoldingARepository(t *testing.T) {
 	}
 }
 
+// git is not the only repository a rebuildable name can hold. pip's editable
+// installs check Mercurial, Subversion and Bazaar repositories out into
+// .venv/src as readily as git ones, a Jujutsu repository that is not colocated
+// has no .git at all, and a bare git repository or a Fossil repository file
+// has no checkout around it. Each may hold commits or changes that exist
+// nowhere else, so the directory stays.
+func TestPruneKeepsADirectoryHoldingANonGitRepository(t *testing.T) {
+	for _, tc := range []struct {
+		name, rel string // rel is the repository's only copy, inside the .venv
+		bare      bool   // rel is made by git init --bare instead of written
+	}{
+		{name: "mercurial", rel: "src/mylib/.hg/store/data"},
+		{name: "jujutsu", rel: "src/mylib/.jj/repo/store/data"},
+		{name: "subversion", rel: "src/mylib/.svn/wc.db"},
+		{name: "sapling", rel: "src/mylib/.sl/store/data"},
+		{name: "bazaar", rel: "src/mylib/.bzr/branch/data"},
+		{name: "darcs", rel: "src/mylib/_darcs/patches/data"},
+		{name: "pijul", rel: "src/mylib/.pijul/pristine/db"},
+		{name: "cvs", rel: "src/mylib/CVS/Entries"},
+		{name: "fossil checkout", rel: "src/mylib/.fslckout"},
+		{name: "fossil repository", rel: "src/mylib.fossil"},
+		{name: "bare git", rel: "src/mylib.git", bare: true},
+		{name: "the venv itself a checkout", rel: ".hg/store/data"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws, clone := rebuildClone(t, ".venv", ".", "pyproject.toml", "")
+			only := filepath.Join(clone, ".venv", filepath.FromSlash(tc.rel))
+			if tc.bare {
+				mustGit(t, clone, "init", "-q", "--bare", only)
+				writeMiB(t, filepath.Join(only, "objects", "pack", "only-copy.pack"))
+			} else {
+				writeMiB(t, only)
+			}
+			st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Prune(st); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(only); err != nil {
+				t.Fatalf("prune deleted a .venv holding a repository (%s): %v (found %v, kept %v)",
+					tc.name, err, foundRels(st), st.Kept)
+			}
+			if len(st.Found) != 0 {
+				t.Errorf("found %v; want the .venv left out", foundRels(st))
+			}
+		})
+	}
+}
+
 // A wholly ignored name holding a file someone force-added is not wholly
 // ignored, so git lists its files one by one and prune leaves it.
 func TestInspectPruneLeavesAnIgnoredDirectoryHoldingATrackedFile(t *testing.T) {
