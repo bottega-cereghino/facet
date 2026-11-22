@@ -119,7 +119,8 @@ type IssueState struct {
 	// open PR cannot be ruled out. Distinct from PR == nil, which means the lookup
 	// ran and found none.
 	PRUnknown bool
-	// SessionLive means a multiplexer session of this name is running.
+	// SessionLive means the multiplexer session of this name has a pane
+	// rooted in the workspace; reap --force ends it.
 	SessionLive bool
 	// LiveRoots names tmux panes or processes -- in any session, not only the
 	// one above -- whose current working directory is rooted here. Non-empty
@@ -207,7 +208,7 @@ func (s *IssueState) Blockers() []string {
 		out = append(out, "could not determine the pull-request state -- an open PR cannot be ruled out")
 	}
 	if s.SessionLive {
-		out = append(out, "a multiplexer session is attached")
+		out = append(out, fmt.Sprintf("tmux session %q runs in it -- end it, or --force ends it", filepath.Base(s.Dir)))
 	}
 	for _, r := range s.LiveRoots {
 		out = append(out, fmt.Sprintf("%s -- kill it before reaping", r))
@@ -263,9 +264,13 @@ func (s *IssueState) Notes() []string {
 	return out
 }
 
-// LiveChecker reports whether a multiplexer session is running. It is an
-// interface so the reap logic is testable without a multiplexer.
-type LiveChecker interface{ Live(session string) bool }
+// LiveChecker reports whether the multiplexer session of this name is the
+// workspace's: it has a pane rooted in dir. A session that only shares the
+// name is someone else's. It is an interface so the reap logic is testable
+// without a multiplexer.
+type LiveChecker interface {
+	Live(session, dir string) bool
+}
 
 // LiveRootChecker reports tmux panes or processes, in any session, whose
 // current working directory is rooted inside a workspace -- unlike
@@ -382,7 +387,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 		}
 	}
 	if mux != nil {
-		st.SessionLive = mux.Live(filepath.Base(ws))
+		st.SessionLive = mux.Live(filepath.Base(ws), ws)
 	}
 	st.checkRunning(ws, mux)
 	st.SizeBytes = freedBytes(ws)

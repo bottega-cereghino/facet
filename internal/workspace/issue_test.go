@@ -68,14 +68,14 @@ func fetchFailGit() *gitxtest.Runner {
 // fakeLive stands in for a multiplexer that reports the queried session as live.
 type fakeLive struct{ live bool }
 
-func (f fakeLive) Live(string) bool { return f.live }
+func (f fakeLive) Live(string, string) bool { return f.live }
 
 // fakeLiveRoots implements both LiveChecker and LiveRootChecker, the same
 // combination mux.Tmux satisfies in production, so InspectIssue's type
 // assertion to LiveRootChecker picks it up.
 type fakeLiveRoots struct{ roots []string }
 
-func (fakeLiveRoots) Live(string) bool { return false }
+func (fakeLiveRoots) Live(string, string) bool { return false }
 
 func (f fakeLiveRoots) LiveRoots(string) ([]string, error) { return f.roots, nil }
 
@@ -1245,24 +1245,24 @@ func TestFailedPRLookupBlocksReap(t *testing.T) {
 	}
 }
 
-// A live multiplexer session on this workspace's name is a soft blocker: the
-// reap is "only rude" while attached, but must still refuse.
+// A session of this workspace's name with a pane in it is a soft blocker: the
+// reap is "only rude" while it runs, but must still refuse.
 func TestLiveSessionBlocksReap(t *testing.T) {
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, fakeLive{live: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasBlocker(st, "multiplexer session") {
+	if !hasBlocker(st, "tmux session") {
 		t.Fatalf("a live session must block reap; blockers = %v", st.Blockers())
 	}
 	// A dead session (or nil checker) must not.
 	st, _ = InspectIssue(ws, gitx.Git{}, nil, fakeLive{live: false})
-	if hasBlocker(st, "multiplexer session") {
+	if hasBlocker(st, "tmux session") {
 		t.Errorf("a dead session must not block: %v", st.Blockers())
 	}
 	st, _ = InspectIssue(ws, gitx.Git{}, nil, nil)
-	if hasBlocker(st, "multiplexer session") {
+	if hasBlocker(st, "tmux session") {
 		t.Errorf("no checker must not block: %v", st.Blockers())
 	}
 }
@@ -1451,7 +1451,7 @@ func TestLiveSessionIsMatchedByDirectory(t *testing.T) {
 
 type recordLive struct{ asked string }
 
-func (r *recordLive) Live(s string) bool { r.asked = s; return false }
+func (r *recordLive) Live(s, _ string) bool { r.asked = s; return false }
 
 func hasBlocker(st *IssueState, substr string) bool {
 	for _, b := range st.Blockers() {
