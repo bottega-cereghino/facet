@@ -514,17 +514,25 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestCloneTakesAURLStartingWithDashesAsARepository`).
 - **`--prune` deletes only links**, never a clone: each entry is confirmed to be
   a symlink before it is removed, so a plain directory is never mistaken for one.
-- **`reap` counts commits reachable from any local branch or HEAD and from no
-  remote.** Unlike `@{u}..HEAD`, that also catches a branch which was never
+- **`reap` counts commits reachable from any local ref and from no remote.**
+  Every ref is local except `refs/remotes`, `refs/tags` and `refs/notes`: HEAD,
+  every branch, `refs/replace`, and any namespace a tool writes, so a list of
+  names cannot miss the next one (`TestReapHoldsACommitOnlyALocalRefReaches`).
+  A local ref that points at a tree or a blob holds, since nothing tells
+  whether a remote has it (`TestReapHoldsALocalRefThatIsNotACommit`); the stash
+  holds as a stash (`TestReapDoesNotCountRefsOutsideLocalWork`). Unlike
+  `@{u}..HEAD`, that also catches a branch which was never
   pushed at all — the branch most easily lost. Only the refs of a configured
   remote count, refreshed by the fetch below, so a ref left under
   `refs/remotes` by a remote removed by hand proves nothing
   (`TestReapHoldsWorkOnlyAStaleRemoteRefHas`); and only a remote whose
   repository is outside the workspace, so the clone itself, a bare backup in
   it or a sibling clone is no copy
-  (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). A worktree's own refs
-  (`refs/worktree/*`, `refs/bisect/*`, and `refs/rewritten/*`, where an
-  interrupted `rebase -r` keeps its labels) count too, since they go with it
+  (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). In a worktree
+  clone, whose branches are the checkout's and stay with it, HEAD and the
+  worktree's own refs count (`refs/worktree/*`, `refs/bisect/*`, and
+  `refs/rewritten/*`, where an interrupted `rebase -r` keeps its labels),
+  since they go with it
   (`TestReapHoldsACommitOnlyAPerWorktreeRefReaches`,
   `TestReapHoldsACommitOnlyARebaseLabelReaches`). It fetches every remote with
   `--prune` first, not only `origin`, so a branch deleted from a fork since it
