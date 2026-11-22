@@ -27,7 +27,7 @@ import (
 // goes.
 func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(string) bool) error {
 	states, inspectErrs := inspectEach(dirs)
-	var picked []*workspace.IssueState
+	var picked, heldBy []*workspace.IssueState
 	var held, unchecked int
 	var total int64
 	for i, st := range states {
@@ -37,6 +37,7 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 			_, _ = fmt.Fprintf(out, "could not check %s, left alone: %v\n", filepath.Base(dirs[i]), inspectErrs[i])
 		case len(st.Blockers()) > 0:
 			held++
+			heldBy = append(heldBy, st)
 		case st.StaleFetch():
 			held++
 			_, _ = fmt.Fprintf(out, "left alone %s: %s\n", reapName(st), staleReason(st))
@@ -50,7 +51,8 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 		left += fmt.Sprintf(" and %d that could not be checked", unchecked)
 	}
 	if len(picked) == 0 {
-		_, _ = fmt.Fprintf(out, "nothing to reap: %s. `facet ls --size` says which are held.\n", left)
+		printHeld(out, heldBy)
+		_, _ = fmt.Fprintf(out, "nothing to reap: %s. `facet reap <name>` says all that holds one.\n", left)
 		return nil
 	}
 
@@ -62,6 +64,7 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 	if err := w.Flush(); err != nil {
 		return err
 	}
+	printHeld(out, heldBy)
 	_, _ = fmt.Fprintf(out, "\n%d reapable, freeing %s; %s left alone.\n", len(picked), humanBytes(total), left)
 	if dryRun {
 		_, _ = fmt.Fprintln(out, "dry run: nothing was deleted.")
@@ -179,4 +182,51 @@ func reapArg(st *workspace.IssueState) string {
 		return st.Dir
 	}
 	return filepath.Base(st.Dir)
+}
+
+// printHeld lists the held workspaces grouped by what holds them, one line
+// each, so a long list reads at a glance: a group is one combination of
+// HoldKinds, the largest first. A workspace held by ignored files names the
+// first of them, since those are the ones only it has. `facet reap <name>`
+// says all that holds one.
+func printHeld(out io.Writer, held []*workspace.IssueState) {
+	if len(held) == 0 {
+		return
+	}
+	groups := map[string][]*workspace.IssueState{}
+	for _, st := range held {
+		k := strings.Join(st.HoldKinds(), ", ")
+		groups[k] = append(groups[k], st)
+	}
+	keys := make([]string, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if len(groups[keys[i]]) != len(groups[keys[j]]) {
+			return len(groups[keys[i]]) > len(groups[keys[j]])
+		}
+		return keys[i] < keys[j]
+	})
+	_, _ = fmt.Fprintf(out, "\nheld (%d), by what holds them:\n", len(held))
+	for _, k := range keys {
+		sts := groups[k]
+		sort.Slice(sts, func(i, j int) bool { return reapName(sts[i]) < reapName(sts[j]) })
+		_, _ = fmt.Fprintf(out, "  %s (%d)\n", k, len(sts))
+		for _, st := range sts {
+			line := "    " + reapName(st)
+			if paths := st.IgnoredPaths(); len(paths) > 0 {
+				line += "  ignored: " + firstOf(paths, 3)
+			}
+			_, _ = fmt.Fprintln(out, line)
+		}
+	}
+}
+
+// firstOf joins the first n of list and counts the rest.
+func firstOf(list []string, n int) string {
+	if len(list) <= n {
+		return strings.Join(list, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(list[:n], ", "), len(list)-n)
 }
