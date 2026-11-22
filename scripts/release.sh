@@ -80,4 +80,4 @@ fi
 # shellcheck disable=SC2016 # the backticks are Markdown, printed as they are
 printf '\nInstall: `go install github.com/bottega-cereghino/facet/cmd/facet@v%s`\n' "$version" >>"$notes_file"
 gh release edit "v$version" --repo "$REPO_URL" --notes-file "$notes_file" >/dev/null
-echo v$version: release notes set from CHANGELOG.md; ls $notes_file
+echo "v$version: release notes set from CHANGELOG.md"
