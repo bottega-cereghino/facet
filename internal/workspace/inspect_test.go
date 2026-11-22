@@ -513,22 +513,3 @@ func TestReapHoldsAnEditedNoteRenamedInCaseOnly(t *testing.T) {
 		t.Fatalf("notes.md, edited after a rename in case only, does not hold: %v", b)
 	}
 }
-
-func TestUnderNameFoldsCase(t *testing.T) {
-	names := []string{"notes.md", "docs"}
-	for path, want := range map[string]bool{
-		"delivery/Notes.md":      true,
-		"Delivery/notes.md":      true,
-		"delivery/docs/a.md":     true,
-		"delivery/DOCS/b/c.md":   true,
-		"delivery/notes.md.bak":  false,
-		"delivery/repo/notes.md": false,
-		"other/notes.md":         false,
-		"delivery":               false,
-		"deliveryx/notes.md":     false,
-	} {
-		if got := underName(path, "delivery/", names); got != want {
-			t.Errorf("underName(%q) = %v, want %v", path, got, want)
-		}
-	}
-}

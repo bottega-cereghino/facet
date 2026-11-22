@@ -445,14 +445,20 @@ func contentHash(b []byte) string {
 const maxLoose = 10
 
 // looseFiles finds what a workspace holds outside its clones and links that
-// exists nowhere else, and the enclosing repository it checked
-// against. Each result is phrased as a blocker.
+// exists nowhere else, and the enclosing repository it checked against. Each
+// result is phrased as a blocker.
 //
-// Inside an enclosing repository, a path git reports in any way -- modified,
-// untracked or ignored -- has no committed copy. Outside one, every loose
-// entry is the only copy. A status that fails blocks: a state that could not
-// be read is never assumed clean. Only a repository above the workspace
-// counts as enclosing: one at its root goes with it (ownRepository).
+// It holds on anything it cannot account for (#364). An entry at the top
+// level is accounted for when it is a declared clone, a declared link that is
+// a symlink, one of facet's own files, the CLAUDE.md spawn wrote, or a
+// directory whose every file the enclosing repository has committed at that
+// exact path with the same content. Committed means in the enclosing
+// repository's HEAD: an ignore rule, the index and what git status reports do
+// not count, and a name is matched byte for byte, never across case or
+// Unicode forms. A directory holding a repository marker of any kind, at any
+// depth, holds. Outside an enclosing repository every loose entry is the only
+// copy. Only a repository above the workspace counts as enclosing: one at its
+// root goes with it (ownRepository).
 func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing string, loose []string) {
 	entries, err := os.ReadDir(ws)
 	if err != nil {
@@ -464,10 +470,13 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		if _, ok := m.Clones[n]; ok {
 			continue
 		}
-		// A link name is skipped only as a symlink, below: a real directory at
-		// a name the manifest declares a link is no clone either, so nothing
-		// else would judge it.
-		if ownFiles[n] || (n == claudeMD && spawnsClaudeMD(ws, m)) || e.Type()&os.ModeSymlink != 0 {
+		// A link is skipped only as a symlink the manifest declares: a real
+		// directory at a link's name is no clone either, so nothing else would
+		// judge it, and an undeclared symlink is judged as any loose entry.
+		if _, ok := m.Links[n]; ok && e.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		if ownFiles[n] || (n == claudeMD && spawnsClaudeMD(ws, m)) {
 			continue
 		}
 		names = append(names, n)
@@ -476,59 +485,128 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 	if held := ownRepository(ws, enclosing); held != "" {
 		return "", []string{held}
 	}
-	// A repository beside the clones (a hand clone, a checkout `facet rm`
-	// dropped) holds whatever the enclosing repository says of it: `git add -A`
-	// records it as a gitlink, the sha of its HEAD and none of its commits, and
-	// status then reads clean while HEAD matches.
-	names, repos := splitRepositories(ws, names)
-	for _, n := range repos {
-		loose = append(loose, fmt.Sprintf("%s is a repository of its own -- its commits, branches and stashes are nowhere else; push what it holds and move it out of the workspace (or `facet add clone` it), then reap again", n))
-	}
 	if len(names) == 0 {
-		return enclosing, capList(loose, "files not committed anywhere")
+		return enclosing, nil
 	}
 	if enclosing == "" {
 		for _, n := range names {
+			if _, held := holdsRepository(filepath.Join(ws, n)); held || isCheckout(filepath.Join(ws, n)) {
+				loose = append(loose, repositoryOfItsOwn(n))
+				continue
+			}
 			loose = append(loose, fmt.Sprintf("%s is in no repository -- this workspace is its only copy", n))
 		}
 		return "", capList(loose, "files not committed anywhere")
 	}
-	// --ignore-submodules=none: diff.ignoreSubmodules in the enclosing
-	// repository's config must not hide a gitlinked entry that moved on.
-	//
-	// The status covers the whole workspace (".") and keeps the entries under
-	// a loose name, folding case, rather than passing the names as pathspecs:
-	// on a case-insensitive disk a note committed as Notes.md and renamed to
-	// notes.md matches neither the index entry nor an untracked file as the
-	// pathspec notes.md, so its later edits went unseen. Pathspecs are
-	// literal (gitx), and git refuses icase beside literal.
 	prefix, err := git.Run(ws, nil, "rev-parse", "--show-prefix")
 	if err != nil {
 		return enclosing, []string{fmt.Sprintf("git rev-parse in %s failed: %v -- cannot confirm the files beside the clones are safe to delete", enclosing, err)}
 	}
-	args := append(append([]string{}, honestStatus...), "status", "--porcelain=v1", "-z", "--no-renames", "--ignored=matching", "--untracked-files=all", "--ignore-submodules=none", "--", ".")
-	out, err := git.Run(ws, nil, args...)
+	prefix = strings.TrimSpace(prefix)
+	committed, err := committedFiles(git, ws)
 	if err != nil {
-		return enclosing, []string{fmt.Sprintf("git status in %s failed: %v -- cannot confirm the files beside the clones are safe to delete", enclosing, err)}
+		return enclosing, []string{fmt.Sprintf("could not list what %s has committed: %v -- cannot confirm the files beside the clones are safe to delete", enclosing, err)}
 	}
-	for _, rec := range strings.Split(out, "\x00") {
-		if len(rec) < 4 {
-			continue
-		}
-		path := rec[3:]
-		if !underName(path, strings.TrimSpace(prefix), names) {
-			continue
-		}
-		loose = append(loose, fmt.Sprintf("%s is not committed in %s -- this workspace is its only copy", path, enclosing))
-	}
-	hidden, err := hiddenEdits(git, ws, names)
-	if err != nil {
-		return enclosing, append(loose, fmt.Sprintf("could not look in %s for edits git status does not show: %v -- cannot confirm the files beside the clones are safe to delete", enclosing, err))
-	}
-	for _, h := range hidden {
-		loose = append(loose, fmt.Sprintf("%s differs from what is committed in %s, and this workspace is its only copy -- %s", h.path, enclosing, h.why))
+	for _, n := range names {
+		loose = append(loose, unaccounted(ws, n, prefix, enclosing, committed)...)
 	}
 	return enclosing, capList(loose, "files not committed anywhere")
+}
+
+// repositoryOfItsOwn is the blocker for a repository at rel in a workspace,
+// beside the clones.
+func repositoryOfItsOwn(rel string) string {
+	return fmt.Sprintf("%s is a repository of its own -- its commits, branches and stashes are nowhere else; push what it holds and move it out of the workspace (or `facet add clone` it), then reap again", rel)
+}
+
+// treeEntry is one blob of a tree: its mode and object name.
+type treeEntry struct{ mode, oid string }
+
+// committedFiles lists the blobs the enclosing repository's HEAD holds under
+// ws, by their path relative to ws, exactly as the tree spells it. An
+// enclosing repository with no commit yet has committed nothing.
+func committedFiles(git gitx.Runner, ws string) (map[string]treeEntry, error) {
+	if _, err := git.Run(ws, nil, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil {
+		var gitErr *gitx.Error
+		if errors.As(err, &gitErr) && gitErr.ExitCode == 1 {
+			return map[string]treeEntry{}, nil
+		}
+		return nil, err
+	}
+	// Run in ws, ls-tree lists only what is under it, by paths relative to it.
+	out, err := git.Run(ws, nil, "ls-tree", "-r", "-z", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	files := map[string]treeEntry{}
+	for _, rec := range strings.Split(out, "\x00") {
+		meta, path, ok := strings.Cut(rec, "\t")
+		if !ok {
+			continue
+		}
+		f := strings.Fields(meta) // mode, type, object name
+		if len(f) != 3 || f[1] != "blob" {
+			continue
+		}
+		files[path] = treeEntry{mode: f[0], oid: f[2]}
+	}
+	return files, nil
+}
+
+// unaccounted walks the loose entry name in ws and returns a blocker for each
+// thing in it the enclosing repository has not committed at that path with
+// the same content (looseFiles). prefix is ws relative to the enclosing
+// repository's top level, which the blockers name paths from. The walk never
+// follows a symlink.
+func unaccounted(ws, name, prefix, enclosing string, committed map[string]treeEntry) []string {
+	var held []string
+	_ = filepath.WalkDir(filepath.Join(ws, name), func(p string, d fs.DirEntry, err error) error {
+		rel, relErr := filepath.Rel(ws, p)
+		if relErr != nil {
+			rel = p
+		}
+		rel = filepath.ToSlash(rel)
+		if err != nil {
+			held = append(held, fmt.Sprintf("could not read %s%s: %v -- cannot confirm it is safe to delete", prefix, rel, err))
+			return nil
+		}
+		if d.IsDir() {
+			if isCheckout(p) {
+				held = append(held, repositoryOfItsOwn(rel))
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if why := differsFromCommitted(p, d, committed[rel]); why != "" {
+			held = append(held, fmt.Sprintf("%s%s %s %s -- this workspace is its only copy", prefix, rel, why, enclosing))
+		}
+		return nil
+	})
+	return held
+}
+
+// differsFromCommitted says how the file at p, the entry d, is not the blob e
+// committed at its path, or "" when it is: the same kind (a symlink, or a
+// regular file) and the same bytes.
+func differsFromCommitted(p string, d fs.DirEntry, e treeEntry) string {
+	if e.oid == "" {
+		return "is not committed in"
+	}
+	symlink := d.Type()&fs.ModeSymlink != 0
+	switch {
+	case symlink && e.mode == "120000":
+	case d.Type().IsRegular() && (e.mode == "100644" || e.mode == "100755"):
+	default:
+		return "is not what is committed at its path in"
+	}
+	differs, err := differsFromBlob(p, e.oid)
+	if err != nil {
+		return fmt.Sprintf("could not be compared (%v) with what is committed in", err)
+	}
+	if differs {
+		return "differs from what is committed in"
+	}
+	return ""
 }
 
 // linkedWorktrees reads `git worktree list --porcelain`: one "worktree <path>"
@@ -584,37 +662,6 @@ func githubRepo(url string) string {
 		return ""
 	}
 	return owner + "/" + name
-}
-
-// underName reports whether path, relative to the enclosing repository's top
-// level, lies under one of names in the workspace prefix points at, folding
-// case: the disk may not tell Notes.md from notes.md, and the index keeps the
-// name a file was committed under.
-func underName(path, prefix string, names []string) bool {
-	if len(path) < len(prefix) || !strings.EqualFold(path[:len(prefix)], prefix) {
-		return false
-	}
-	first, _, _ := strings.Cut(path[len(prefix):], "/")
-	for _, n := range names {
-		if strings.EqualFold(first, n) {
-			return true
-		}
-	}
-	return false
-}
-
-// splitRepositories separates the names in ws that are a repository or a
-// checkout of one (see isCheckout: git, any other VCS, a bare repository)
-// from the rest.
-func splitRepositories(ws string, names []string) (rest, repos []string) {
-	for _, n := range names {
-		if isCheckout(filepath.Join(ws, n)) {
-			repos = append(repos, n)
-		} else {
-			rest = append(rest, n)
-		}
-	}
-	return rest, repos
 }
 
 // enclosingRepo returns the top level of the repository ws sits inside, or ""
