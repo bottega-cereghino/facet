@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bottega-cereghino/facet/internal/gitx"
 )
 
 // The top level of a workspace holds on anything reap cannot account for
@@ -57,7 +59,9 @@ func TestReapHoldsANoteWhoseNameIsDecomposed(t *testing.T) {
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enc := enclosingRepoIn(t, root)
-	if v := strings.TrimSpace(gitOut(t, enc, "config", "--get", "core.precomposeunicode")); v != "true" {
+	// Only git on macOS precomposes names; elsewhere git prints the name the
+	// disk keeps, and the two never differ.
+	if v, err := (gitx.Git{}).Run(enc, nil, "config", "--get", "core.precomposeunicode"); err != nil || strings.TrimSpace(v) != "true" {
 		t.Skip("needs git's precomposeUnicode (macOS)")
 	}
 	nfd := "café.md" // e + combining acute accent
