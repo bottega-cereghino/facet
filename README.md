@@ -582,9 +582,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`prune` deletes only directories git ignores**, named in a fixed list of
   rebuildable ones, holding no tracked file and outside any nested repository
   or worktree; an ignored `.secrets/` or an unignored `node_modules` stays
-  (`TestPruneDeletesWhatWasFoundAndNothingElse`). One with a git repository
-  anywhere inside it, such as an editable pip install in a `.venv`, stays too
-  (`TestInspectPruneKeepsADirectoryHoldingARepository`), and so does one with
+  (`TestPruneDeletesWhatWasFoundAndNothingElse`). One with a repository
+  anywhere inside it, such as an editable pip install in a `.venv`, stays too,
+  whether git, Mercurial, Jujutsu, Subversion, Sapling, Bazaar, Darcs, Pijul,
+  CVS, RCS, SCCS or Fossil, a bare git repository or a Fossil repository file
+  (`TestInspectPruneKeepsADirectoryHoldingARepository`,
+  `TestPruneKeepsADirectoryHoldingANonGitRepository`), and so does one with
   no file that rebuilds it tracked beside it, such as a hand-built `.venv` with
   no `pyproject.toml`: an untracked one, or one further up, does not count
   (`TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds`,

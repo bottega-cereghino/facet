@@ -33,9 +33,10 @@ type PruneState struct {
 	LastUsed time.Time // the newest git or install activity in any clone
 	Found    []Regen
 	// Kept names the directories of a listed name left alone, and why: they
-	// hold a git repository (`pip install -e git+...` checks one out inside a
-	// .venv, and a fork is sometimes cloned into node_modules to debug it), or
-	// nothing the clone tracks beside them rebuilds them.
+	// hold a repository (`pip install -e git+...`, or hg+, svn+ or bzr+,
+	// checks one out inside a .venv, and a fork is sometimes cloned into
+	// node_modules to debug it), or nothing the clone tracks beside them
+	// rebuilds them.
 	Kept []string
 	Held []string // why Prune leaves it alone; empty means it may prune
 }
@@ -163,7 +164,7 @@ func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []strin
 		if err != nil || !d.IsDir() || path == clone {
 			return nil
 		}
-		if d.Name() == ".git" || isCheckout(path) {
+		if repoMarkers[d.Name()] || isCheckout(path) {
 			return filepath.SkipDir // a nested repository or worktree: another checkout's
 		}
 		regen, ok := regenNames[d.Name()]
@@ -177,7 +178,7 @@ func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []strin
 		rel = filepath.ToSlash(rel)
 		last = newer(last, path)
 		if repo, held := holdsRepository(path); held {
-			kept = append(kept, fmt.Sprintf("%s/%s holds a git repository at %s", name, rel, repo))
+			kept = append(kept, fmt.Sprintf("%s/%s holds a repository at %s", name, rel, repo))
 			return filepath.SkipDir
 		}
 		n := freedBytes(path)
@@ -199,16 +200,17 @@ func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []strin
 	return found, kept, last, err
 }
 
-// holdsRepository reports whether a .git, directory or file, sits anywhere under
-// dir, and where. A tree that cannot be walked in full counts as holding one.
+// holdsRepository reports whether a repository of any kind (see
+// marksRepository) sits anywhere under dir, and where. A tree that cannot be
+// walked in full counts as holding one.
 func holdsRepository(dir string) (string, bool) {
 	var repo string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.Name() == ".git" {
-			repo = filepath.Dir(path)
+		if path != dir && marksRepository(filepath.Dir(path), d) {
+			repo = path
 			return fs.SkipAll
 		}
 		return nil
@@ -217,6 +219,46 @@ func holdsRepository(dir string) (string, bool) {
 		return dir + " (could not walk it: " + err.Error() + ")", true
 	}
 	return repo, repo != ""
+}
+
+// repoMarkers are the names, of a directory or a file, that mark a repository
+// or a checkout of one. pip checks git, Mercurial, Subversion and Bazaar
+// repositories out into a .venv; the rest are there because a name costs
+// nothing to keep, and a repository missed is commits lost.
+var repoMarkers = map[string]bool{
+	".git":      true, // git; a file in a worktree or a submodule
+	".hg":       true, // Mercurial
+	".sl":       true, // Sapling
+	".jj":       true, // Jujutsu, which needs no .git beside it
+	".svn":      true, // Subversion
+	".bzr":      true, // Bazaar and Breezy
+	"_darcs":    true, // Darcs
+	".pijul":    true, // Pijul
+	"CVS":       true, // a CVS checkout
+	"RCS":       true, // RCS keeps each file's history beside it
+	"SCCS":      true, // and so does SCCS
+	".fslckout": true, // a Fossil checkout
+	"_FOSSIL_":  true, // a Fossil checkout, by its older name
+}
+
+// marksRepository reports whether the entry d, in the directory parent, marks
+// a repository: a name in repoMarkers, a Fossil repository (one file, named
+// *.fossil by convention), or the HEAD of a bare git repository, which has no
+// .git, beside its objects and refs directories.
+func marksRepository(parent string, d fs.DirEntry) bool {
+	name := d.Name()
+	switch {
+	case repoMarkers[name], strings.HasSuffix(name, ".fossil"):
+		return true
+	case name == "HEAD" && !d.IsDir():
+		return isDir(filepath.Join(parent, "objects")) && isDir(filepath.Join(parent, "refs"))
+	}
+	return false
+}
+
+func isDir(path string) bool {
+	fi, err := os.Lstat(path)
+	return err == nil && fi.IsDir()
 }
 
 // ignoredDirs lists the clone's wholly ignored directories. With --directory
@@ -237,9 +279,20 @@ func ignoredDirs(git gitx.Runner, clone string) (map[string]bool, error) {
 	return ignored, nil
 }
 
+// isCheckout reports whether dir is a repository or a checkout of one: an
+// entry in it marks one. A directory that cannot be read is not called one
+// here; the walk, or holdsRepository for a listed name, answers for it.
 func isCheckout(dir string) bool {
-	_, err := os.Lstat(filepath.Join(dir, ".git"))
-	return err == nil
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if marksRepository(dir, e) {
+			return true
+		}
+	}
+	return false
 }
 
 // newer is the later of t and path's modification time.
