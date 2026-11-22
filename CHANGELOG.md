@@ -6,6 +6,24 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.10.0](https://github.com/bottega-cereghino/facet/compare/v0.9.0...v0.10.0) (2026-11-22)
+
+
+### Added
+
+* **queue:** pass the next issue to the gate ([#416](https://github.com/bottega-cereghino/facet/issues/416)) ([749fa91](https://github.com/bottega-cereghino/facet/commit/749fa912b7b7cf1c6c449f768975c7e10c83e10f))
+* run one configured agent for each queued issue ([#414](https://github.com/bottega-cereghino/facet/issues/414)) ([423ad32](https://github.com/bottega-cereghino/facet/commit/423ad326d4704c9a9b89b2d763eb79fe360bd333))
+
+
+### Fixed
+
+* **reap:** account for a file that is what checkout writes from a pushed blob ([#406](https://github.com/bottega-cereghino/facet/issues/406)) ([1db0c90](https://github.com/bottega-cereghino/facet/commit/1db0c90c41276fff0a965afdef6c2e4a7d745fc1))
+* **reap:** count no symbolic ref under refs/remotes as pushed ([#407](https://github.com/bottega-cereghino/facet/issues/407)) ([b0b03c7](https://github.com/bottega-cereghino/facet/commit/b0b03c779b8c98b1ff5e5954c98b8069090783d3))
+* **reap:** hold LFS content that only its pushed pointer accounts for ([#404](https://github.com/bottega-cereghino/facet/issues/404)) ([b9bfa1b](https://github.com/bottega-cereghino/facet/commit/b9bfa1b5df61c6003670f6f158961ba545f3ab36))
+* **reap:** hold on annex or LFS content kept in the git directory ([#409](https://github.com/bottega-cereghino/facet/issues/409)) ([e634b1a](https://github.com/bottega-cereghino/facet/commit/e634b1a13daaac739035813f62a07cbfb65df070))
+* **reap:** let facet's own names go only as regular files ([#403](https://github.com/bottega-cereghino/facet/issues/403)) ([5d57b04](https://github.com/bottega-cereghino/facet/commit/5d57b04be010d6f82b15b0458732f5c21b883e27))
+* **reap:** name what is rebuilt from the work tree that holds it ([#405](https://github.com/bottega-cereghino/facet/issues/405)) ([2d5b103](https://github.com/bottega-cereghino/facet/commit/2d5b1038195068292e65b0d5b060034ae7dc30f3))
+
 ## [0.9.0](https://github.com/bottega-cereghino/facet/compare/v0.8.0...v0.9.0) (2026-11-22)
 
 
