@@ -34,7 +34,7 @@ func TestTmuxPanesUnderFindsPaneRootedInDir(t *testing.T) {
 	var live []string
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		live = tmuxPanesUnder(dir, socket)
+		live = tmuxPanesUnder(dir, socket, "")
 		if len(live) > 0 || time.Now().After(deadline) {
 			break
 		}
@@ -47,7 +47,7 @@ func TestTmuxPanesUnderFindsPaneRootedInDir(t *testing.T) {
 		t.Errorf("description %q does not name the session, so an operator could not find it", live[0])
 	}
 
-	elsewhere := tmuxPanesUnder(t.TempDir(), socket)
+	elsewhere := tmuxPanesUnder(t.TempDir(), socket, "")
 	if len(elsewhere) != 0 {
 		t.Errorf("tmuxPanesUnder(unrelated dir) = %v; want none", elsewhere)
 	}

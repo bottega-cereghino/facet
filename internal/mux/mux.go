@@ -4,13 +4,17 @@
 // facet used to open workspaces in tmux itself. It no longer does: spawn prints
 // where to work, and opening a multiplexer is the operator's business (pass
 // `facet spawn --exec` a tmux command to have one opened). What remains is the
-// read side. A tmux session named after the workspace, a pane rooted inside
-// it, or a process whose working directory is inside it all hold the reap, and
-// a lingering session of that name is killed before the directory goes.
+// read side. A pane rooted inside the workspace, in any session, or a process
+// with anything inside it open holds the reap. A session named after the
+// workspace is the workspace's only while one of its panes is rooted there;
+// `reap --force` then ends it before the directory goes. One of that name whose
+// panes all run elsewhere is someone else's, and is left alone.
 package mux
 
 import (
+	"os"
 	"os/exec"
+	"strings"
 )
 
 // Tmux reads the tmux server.
@@ -39,18 +43,37 @@ func tmuxOutput(args ...string) (string, error) {
 // Available reports whether tmux is installed.
 func (Tmux) Available() bool { return tmuxRun("-V") == nil }
 
-// Live reports whether the named session exists on the tmux server. tmux has
-// no "exited" state: a session is either present or it is not.
-func (Tmux) Live(session string) bool {
-	return tmuxRun("has-session", "-t", "="+session) == nil
+// Live reports whether the named session has a pane rooted in dir, other than
+// the one facet runs from. A session of that name whose panes all run
+// elsewhere is not the workspace's: the name alone once held, and with
+// --force killed, the user's own session for another project (#330).
+func (Tmux) Live(session, dir string) bool {
+	return len(tmuxPanesUnder(dir, "", session)) > 0
 }
 
-// Kill ends the session, and reports success when there was nothing to kill.
-func (Tmux) Kill(name string) error {
-	// Killing a session that never existed makes tmux exit non-zero, which is
-	// not an error worth surfacing.
-	_ = tmuxRun("kill-session", "-t", "="+name)
+// Kill ends the named session when it is the workspace's (Live), and never the
+// session facet itself runs in, which would end facet before its delete.
+func (t Tmux) Kill(session, dir string) error {
+	if !t.Live(session, dir) || ownSession() == session {
+		return nil
+	}
+	// A session that ended meanwhile makes tmux exit non-zero, which is not an
+	// error worth surfacing.
+	_ = tmuxRun("kill-session", "-t", "="+session)
 	return nil
+}
+
+// ownSession is the tmux session facet runs in, or "" outside tmux.
+func ownSession() string {
+	pane := os.Getenv("TMUX_PANE")
+	if os.Getenv("TMUX") == "" || pane == "" {
+		return ""
+	}
+	out, err := tmuxOutput("display-message", "-p", "-t", pane, "#{session_name}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // Pick returns tmux when it is installed, or nil.
