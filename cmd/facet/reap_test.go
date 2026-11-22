@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // facet#83's invocation trap: `facet reap <name>` answered
@@ -172,5 +173,82 @@ func TestReapRefusesAFolderInsideAWorkspace(t *testing.T) {
 	_, err := inspectTarget(src, git, nil)
 	if err == nil || !strings.Contains(err.Error(), "inside the workspace "+free) || !strings.Contains(err.Error(), "fix: facet reap "+free) {
 		t.Fatalf("reap %s = %v; want a refusal naming the workspace", src, err)
+	}
+}
+
+// forceOrigin is a bare repository with one commit on main.
+func forceOrigin(t *testing.T) string {
+	t.Helper()
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	gitIn(t, "", "init", "-q", "--bare", "-b", "main", origin)
+	seed := filepath.Join(t.TempDir(), "seed")
+	gitIn(t, "", "clone", "-q", origin, seed)
+	gitIn(t, seed, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
+	gitIn(t, seed, "push", "-q", "origin", "HEAD:main")
+	return origin
+}
+
+// forceWorkspace is a long-lived workspace under root with one clone, app.
+func forceWorkspace(t *testing.T, root, name string) (ws, app string) {
+	t.Helper()
+	origin := forceOrigin(t)
+	ws = filepath.Join(root, name)
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&manifest.Manifest{Name: name, Clones: map[string]string{"app": origin}}).Write(ws); err != nil {
+		t.Fatal(err)
+	}
+	app = filepath.Join(ws, "app")
+	gitIn(t, "", "clone", "-q", origin, app)
+	return ws, app
+}
+
+// --force covers the holders it showed, never new ones. A holder's sentence
+// ("app has uncommitted changes", "app has 1 unpushed commit") reads the same
+// however much work lands while the prompt waits, so a new file in a clone
+// already dirty, or an amend that keeps the count, was deleted (#322).
+func TestReapForceRefusesWorkThatLandsDuringThePrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		before func(t *testing.T, app string)
+		during func(t *testing.T, app string)
+		kept   string
+	}{
+		{"a new file in a clone already dirty",
+			func(t *testing.T, app string) { putFile(t, filepath.Join(app, "scratch.txt"), "accepted as lost\n") },
+			func(t *testing.T, app string) {
+				putFile(t, filepath.Join(app, "new-work.md"), "written while the prompt waited\n")
+			},
+			"new-work.md"},
+		{"an amend that keeps the unpushed count",
+			func(t *testing.T, app string) {
+				putFile(t, filepath.Join(app, "a.txt"), "accepted as lost\n")
+				gitIn(t, app, "add", "a.txt")
+				gitIn(t, app, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "a")
+			},
+			func(t *testing.T, app string) {
+				putFile(t, filepath.Join(app, "b.txt"), "amended in while the prompt waited\n")
+				gitIn(t, app, "add", "b.txt")
+				gitIn(t, app, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--amend", "--no-edit")
+			},
+			"b.txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _, _ := reapableRoot(t)
+			ws, app := forceWorkspace(t, root, "facet-test-force-"+strings.ReplaceAll(tc.name, " ", "-"))
+			tc.before(t, app)
+			answer := func(string) bool {
+				tc.during(t, app)
+				return true
+			}
+			err := runReap(t, answer, filepath.Base(ws), "--force")
+			if !exists(t, filepath.Join(app, tc.kept)) {
+				t.Fatalf("reap --force deleted work that landed during its prompt (err=%v)", err)
+			}
+			if err == nil {
+				t.Fatal("reap --force returned no error, though it did not delete")
+			}
+		})
 	}
 }

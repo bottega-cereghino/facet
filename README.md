@@ -643,7 +643,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` checks again after its prompt**, so work that started while it
   waited holds the workspace, with `--force` too: force covers the holders it
   showed, never new ones (`TestReapChecksAgainAfterThePrompt`,
-  `TestReapForceRefusesWhatStartedDuringThePrompt`).
+  `TestReapForceRefusesWhatStartedDuringThePrompt`). A holder's sentence
+  ("app has uncommitted changes") reads the same however much work lands
+  under it, so with holders shown, any change to the workspace's files during
+  the prompt refuses too: a new file in a clone already dirty, an amend
+  (`TestReapForceRefusesWorkThatLandsDuringThePrompt`).
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`, and with `--dry-run` it deletes nothing

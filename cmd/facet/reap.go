@@ -176,9 +176,25 @@ func newReapCmd() *cobra.Command {
 				fmt.Println("\n--force: deleting despite the above.")
 			}
 			if !yes {
+				// --force covers the holders shown, never work that lands while
+				// the prompt waits; a holder's sentence cannot tell, so the
+				// files can. Taken after the inspection (whose fetch writes
+				// under .git) and again before the next one.
+				var before string
+				if len(blockers) > 0 {
+					if before, err = workspace.Fingerprint(st.Dir); err != nil {
+						return fmt.Errorf("could not read %s to notice work that lands during the prompt: %w -- refusing to reap", st.Dir, err)
+					}
+				}
 				if !reapConfirm(fmt.Sprintf("Delete %s?", st.Dir)) {
 					fmt.Println("aborted.")
 					return nil
+				}
+				if len(blockers) > 0 {
+					after, err := workspace.Fingerprint(st.Dir)
+					if err != nil || after != before {
+						return fmt.Errorf("%s changed while the prompt waited; --force covers only what it showed -- refusing to reap; run reap again to see what is there now", st.Dir)
+					}
 				}
 				// Work can start while the prompt waits: a commit, a new file,
 				// an agent in a second pane. Check again, as --reapable does, and
