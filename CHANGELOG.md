@@ -6,6 +6,13 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.4](https://github.com/bottega-cereghino/facet/compare/v0.7.3...v0.7.4) (2026-11-22)
+
+
+### Fixed
+
+* **reap:** read the repository on disk, not what the environment tells git ([#333](https://github.com/bottega-cereghino/facet/issues/333)) ([2fa8445](https://github.com/bottega-cereghino/facet/commit/2fa8445fd40cc52a23772fe2720d8aedcd969a20)), refs [#314](https://github.com/bottega-cereghino/facet/issues/314) [#310](https://github.com/bottega-cereghino/facet/issues/310)
+
 ## [0.7.3](https://github.com/bottega-cereghino/facet/compare/v0.7.2...v0.7.3) (2026-11-21)
 
 
