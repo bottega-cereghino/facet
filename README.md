@@ -540,8 +540,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   file counts only when the file is a bundle, since git follows a gitfile
   there too (`TestReapHoldsWorkWhoseRemoteURLIsAGitfileIntoTheClone`,
   `TestReapCountsWorkInABundleOutsideTheWorkspaceAsPushed`); and a backup that
-  borrows the clone's objects through its alternates (`git clone --shared`)
-  holds none of them
+  borrows the clone's objects through its alternates (`git clone --shared`),
+  or whose `objects` directory is a link into the clone
+  (`TestReapHoldsWorkPushedToABackupWhoseObjectsAreTheClones`), holds none of
+  them
   (`TestReapHoldsWorkPushedToABackupThatBorrowsTheClonesObjects`). In a worktree
   clone, whose branches are the checkout's and stay with it, HEAD and the
   worktree's own refs count (`refs/worktree/*`, `refs/bisect/*`, and
