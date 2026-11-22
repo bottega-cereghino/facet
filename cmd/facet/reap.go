@@ -194,14 +194,15 @@ func newReapCmd() *cobra.Command {
 					fmt.Println("aborted.")
 					return nil
 				}
+				// The path first: the fingerprint reads through it.
+				if err := samePath(ws, pinned); err != nil {
+					return err
+				}
 				if len(blockers) > 0 {
 					after, err := workspace.Fingerprint(st.Dir)
 					if err != nil || after != before {
 						return fmt.Errorf("%s changed while the prompt waited; --force covers only what it showed -- refusing to reap; run reap again to see what is there now", st.Dir)
 					}
-				}
-				if err := samePath(ws, pinned); err != nil {
-					return err
 				}
 				// Work can start while the prompt waits: a commit, a new file,
 				// an agent in a second pane. Check again, as --reapable does, and
