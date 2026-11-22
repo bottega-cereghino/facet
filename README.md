@@ -663,7 +663,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   ("app has uncommitted changes") reads the same however much work lands
   under it, so with holders shown, any change to the workspace's files during
   the prompt refuses too: a new file in a clone already dirty, an amend
-  (`TestReapForceRefusesWorkThatLandsDuringThePrompt`).
+  (`TestReapForceRefusesWorkThatLandsDuringThePrompt`). The launchd jobs are
+  read again for that check, so a job loaded while the prompt waited holds too
+  (`TestReapRecheckSeesALaunchdJobLoadedDuringThePrompt`), in `--reapable`
+  and `prune` alike
+  (`TestReapableRecheckSeesALaunchdJobLoadedDuringThePrompt`,
+  `TestPruneRecheckSeesALaunchdJobLoadedDuringThePrompt`).
 - **`reap --reapable` deletes only what `reap` alone would**, and checks each
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`, and with `--dry-run` it deletes nothing

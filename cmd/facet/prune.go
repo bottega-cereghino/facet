@@ -108,6 +108,9 @@ func runPrune(w io.Writer, dirs []string, git gitx.Runner, live workspace.LiveCh
 		_, _ = fmt.Fprintln(w, "aborted.")
 		return nil
 	}
+	if lc, ok := live.(liveChecks); ok {
+		live = lc.fresh()
+	}
 	var freed int64
 	var errs []error
 	for _, st := range states {

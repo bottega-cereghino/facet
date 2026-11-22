@@ -321,9 +321,10 @@ func inspectTarget(dir string, git gitx.Runner, live workspace.LiveChecker) (*wo
 // muxLive returns a session checker, or nil when tmux is not installed.
 // muxLive is every liveness check reap makes beyond git: the multiplexer's
 // sessions and panes, processes through lsof, and loaded launchd jobs. The
-// jobs are checked even without a multiplexer.
+// jobs are checked even without a multiplexer, and read anew for each call,
+// so the check after a prompt sees a job loaded while it waited.
 func muxLive() workspace.LiveChecker {
-	c := liveChecks{jobs: jobs}
+	c := liveChecks{jobs: jobs.Fresh()}
 	if l := mux.Pick(); l != nil {
 		c.mux = l
 	}
@@ -335,6 +336,13 @@ func muxLive() workspace.LiveChecker {
 type liveChecks struct {
 	mux  workspace.LiveChecker
 	jobs *launchd.Jobs
+}
+
+// fresh is the same checks with the launchd jobs read anew: a check after a
+// prompt sees a job loaded while it waited.
+func (c liveChecks) fresh() workspace.LiveChecker {
+	c.jobs = c.jobs.Fresh()
+	return c
 }
 
 func (c liveChecks) Live(session string) bool { return c.mux != nil && c.mux.Live(session) }
