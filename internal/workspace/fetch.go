@@ -11,10 +11,10 @@ import (
 // fetchRemotes fetches every remote of the repository at dir with --prune, into
 // refs/remotes/<name>/ and nowhere else, each
 // bounded by fetchTimeout where the Runner supports it, and returns the ones
-// that could not be fetched. The unpushed count subtracts every remote's refs,
-// so each must be fresh: a branch pushed to a fork and deleted there since
-// would otherwise still read as pushed. A remote list that cannot be read is
-// an error.
+// that could not be fetched. The unpushed count subtracts the refs of every
+// remote outside the workspace (countedRemotes), so each must be fresh: a
+// branch pushed to a fork and deleted there since would otherwise still read
+// as pushed. A remote list that cannot be read is an error.
 func fetchRemotes(git gitx.Runner, dir string) (stale []string, err error) {
 	if sf, ok := git.(*SharedFetch); ok {
 		return sf.fetch(dir)
