@@ -339,9 +339,18 @@ writes it: `package.json` for `node_modules`, `.next`, `.turbo` and
 `requirements*.txt` for `.venv` and the Python caches, which also take their
 tool's own config (`mypy.ini`, `pytest.ini` or `conftest.py`, `ruff.toml`). A
 file further up does not count: the root's `pyproject.toml` does not install
-a `.venv` in `api/`. Without one the directory is kept, and the listing says
-so on a `kept:` line. `.terraform` is never named: it keeps the selected
-`terraform workspace`, and a fresh `init` would quietly plan against `default`.
+a `.venv` in `api/`. For `node_modules` and `.venv`, which people also install
+into by hand, the file must declare a package as well, in the copy staged in
+the index and on disk alike: a `package.json` lists a dependency or a
+workspace, or has a `pnpm-workspace.yaml` beside it; a `pyproject.toml` has a
+`[project]` or `[tool.poetry]` table, or a `uv.lock` beside it; a `setup.cfg`
+has `[metadata]` or `[options]` and a `setup.py`, or a `pyproject.toml` that
+leaves the build to setuptools, beside it; a requirements file names a
+requirement. A `setup.py` or a `Pipfile` counts as it is. A tool's settings
+alone (`[tool.ruff]`, `[flake8]`) still count for that tool's cache. Without
+such a file the directory is kept, and the listing says so on a `kept:` line.
+`.terraform` is never named: it keeps the selected `terraform workspace`, and
+a fresh `init` would quietly plan against `default`.
 
 ## The issue graph was removed
 
@@ -591,7 +600,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   no file that rebuilds it tracked beside it, such as a hand-built `.venv` with
   no `pyproject.toml`: an untracked one, or one further up, does not count
   (`TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds`,
-  `TestPruneKeepsWhatNothingTrackedRebuildsAndSaysWhy`).
+  `TestPruneKeepsWhatNothingTrackedRebuildsAndSaysWhy`). Beside a `.venv` or
+  a `node_modules`, a file that declares no package to install does not count
+  either, such as a `pyproject.toml` holding only ruff's settings or a
+  `package.json` holding only `"type": "module"`, nor one changed on disk
+  since it was staged (`TestPruneKeepsADirectoryBesideAFileThatInstallsNothing`,
+  `TestPruneDeletesADirectoryBesideAFileThatInstallsIt`).
 - **`prune` holds what it cannot check**: a clone whose last use cannot be
   read (looked up in its own git directory, so a worktree clone is dated too),
   or a probe for what runs from it that fails. It checks each workspace again
