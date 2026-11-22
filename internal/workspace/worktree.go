@@ -195,8 +195,11 @@ func removeWorktree(git gitx.Runner, checkout, dir string) error {
 // uncommitted files and the commits only its HEAD reaches. Its branch's pull
 // request is looked up too, since a worktree is usually one pull request's
 // work. A directory that is a repository of its own is refused: reap never
-// deletes a checkout.
+// deletes a checkout. It is inspected, and deleted, at its real path.
 func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) (*IssueState, error) {
+	// The real path, so a worktree named through a symlink is walked: a walk
+	// does not descend into a symlink at its root (#381).
+	dir = realPath(dir)
 	of, err := worktreeOf(git, dir)
 	if err != nil {
 		return nil, fmt.Errorf("%s: cannot tell whether it is a worktree: %w", dir, err)

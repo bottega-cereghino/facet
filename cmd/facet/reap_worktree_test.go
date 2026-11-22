@@ -18,7 +18,11 @@ func worktreeRoots(t *testing.T) (checkout, wt string) {
 	reapableRoot(t)
 	checkout, _ = branchSetup(t)
 	roots.Projects = filepath.Dir(checkout)
-	wt = filepath.Join(t.TempDir(), "agent-wt")
+	tmp, err := filepath.EvalSymlinks(t.TempDir()) // the real path, as reap names it
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt = filepath.Join(tmp, "agent-wt")
 	gitIn(t, checkout, "worktree", "add", "-q", "-b", "agent", wt, "origin/main")
 	return checkout, wt
 }
@@ -96,4 +100,26 @@ func TestReapForceUnlinksASymlinkedCloneAndKeepsItsTarget(t *testing.T) {
 		t.Errorf("the workspace %s is still there", ws)
 	}
 	gitIn(t, wt, "status", "--porcelain")
+}
+
+// A workspace's clone named through a symlink outside the workspace is still
+// inside it, so reap refuses it and names the workspace (#384).
+func TestReapRefusesAWorkspacesCloneNamedThroughASymlink(t *testing.T) {
+	_, wt := worktreeRoots(t)
+	ws := filepath.Dir(wt)
+	if err := (&manifest.Manifest{Name: "w", Clones: map[string]string{"agent-wt": "o/r"}}).Write(ws); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "shortcut")
+	if err := os.Symlink(wt, alias); err != nil {
+		t.Fatal(err)
+	}
+	resolvedWS, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = inspectTarget(alias, git, nil)
+	if err == nil || !strings.Contains(err.Error(), "fix: facet reap "+resolvedWS) {
+		t.Fatalf("inspectTarget(symlink to a clone) = %v; want the refusal naming %s", err, resolvedWS)
+	}
 }
