@@ -160,7 +160,8 @@ func TestParseLsofDescribesEachProcessOnce(t *testing.T) {
 }
 
 // A shell is not a system service and neither is a pid that does not exist:
-// only an executable under /System is left out, and doubt holds the workspace.
+// only an executable under /System, outside its apps, is left out, and doubt
+// holds the workspace.
 func TestIsSystemService(t *testing.T) {
 	if _, err := exec.LookPath("ps"); err != nil {
 		t.Skip("ps not installed")
@@ -171,12 +172,14 @@ func TestIsSystemService(t *testing.T) {
 	if isSystemService("999999999") {
 		t.Error("a pid that does not exist was taken for a system service")
 	}
-	out, err := exec.Command("ps", "-axo", "pid=,comm=").Output()
+	// Only the user's own processes: the kernel gives no other user's
+	// executable, and lsof sees only the user's processes anyway.
+	out, err := exec.Command("ps", "-U", strconv.Itoa(os.Getuid()), "-o", "pid=,comm=").Output()
 	if err != nil {
-		t.Skipf("ps -ax: %v", err)
+		t.Skipf("ps -U: %v", err)
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		if pid, comm, ok := strings.Cut(strings.TrimSpace(line), " "); ok && strings.HasPrefix(strings.TrimSpace(comm), "/System/") {
+		if pid, comm, ok := strings.Cut(strings.TrimSpace(line), " "); ok && systemExecutable(strings.TrimSpace(comm)) {
 			if !isSystemService(pid) {
 				t.Errorf("%s (pid %s) was not taken for a system service", strings.TrimSpace(comm), pid)
 			}
