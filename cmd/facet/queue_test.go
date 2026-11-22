@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -574,7 +575,9 @@ func TestQueueGivesAFreeSlotToTheNextProjectDown(t *testing.T) {
 	}{
 		// One slot: the higher project, though the lower issue is older and p1.
 		{1, "1"},
-		// A second slot the higher project cannot fill goes down, after it.
+		// A second slot the higher project cannot fill goes down. Both agents
+		// run at once, so the order they write in is not the start order:
+		// the max 1 case and the dry-run test hold the order.
 		{2, "1,2"},
 	} {
 		dir := t.TempDir()
@@ -598,7 +601,9 @@ func TestQueueGivesAFreeSlotToTheNextProjectDown(t *testing.T) {
 		waitFor(t, "the starts", func() bool { return len(readLines(t, out)) >= tc.max })
 		time.Sleep(200 * time.Millisecond)
 		s.stop(t)
-		if got := strings.Join(readLines(t, out), ","); got != tc.want {
+		got := readLines(t, out)
+		sort.Strings(got)
+		if strings.Join(got, ",") != tc.want {
 			t.Fatalf("max %d: started %s, want %s", tc.max, got, tc.want)
 		}
 	}
