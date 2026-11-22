@@ -304,7 +304,10 @@ their targets are untouched.
 
 `facet reap --reapable` deletes every workspace at the root that `reap` would
 delete now. It lists them with the disk each frees and the total, asks once,
-and leaves every held workspace alone. It never forces, and it checks each
+and leaves every held workspace alone. The held ones are listed too, one line
+each, grouped by what holds them (unpushed commits, uncommitted changes,
+ignored files nothing rebuilds, with the first of those files named);
+`facet reap <name>` says all that holds one. It never forces, and it checks each
 workspace again just before deleting it, so work started while the prompt
 waited is not lost. It never guesses either: a workspace with a remote it could
 not fetch is left alone and named, since a branch deleted upstream would still
