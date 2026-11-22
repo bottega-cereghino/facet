@@ -76,6 +76,13 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 	case hasWorktree(picked):
 		question = fmt.Sprintf("Delete these %d workspaces and worktrees?", len(picked))
 	}
+	// Where each path leads, read before the prompt: a parent swapped for a
+	// symlink while it waits must not point a delete elsewhere (#363).
+	pins := map[string]targetPath{}
+	pinErrs := map[string]error{}
+	for _, st := range picked {
+		pins[st.Dir], pinErrs[st.Dir] = pathOf(st.Dir)
+	}
 	if !yes && !ask(question) {
 		_, _ = fmt.Fprintln(out, "aborted.")
 		return nil
@@ -86,6 +93,14 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 	var errs []error
 	enclosing := map[string]bool{}
 	for _, st := range picked {
+		if err := pinErrs[st.Dir]; err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", reapName(st), err))
+			continue
+		}
+		if err := samePath(st.Dir, pins[st.Dir]); err != nil {
+			_, _ = fmt.Fprintf(out, "skipped %s: %v\n", reapName(st), err)
+			continue
+		}
 		again, err := inspectTarget(st.Dir, git, live)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", filepath.Base(st.Dir), err))

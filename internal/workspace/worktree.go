@@ -131,6 +131,19 @@ func worktreeOf(git gitx.Runner, dir string) (string, error) {
 	return common, nil
 }
 
+// TopLevel reports whether dir is the top level of a git work tree, and
+// whether that work tree is a linked worktree. A directory git reads as no
+// repository, or as a folder inside one (a workspace inside a versioned
+// ~/Workspaces), is neither.
+func TopLevel(git gitx.Runner, dir string) (top, linked bool) {
+	out, err := git.Run(dir, nil, "rev-parse", "--show-toplevel")
+	if err != nil || realPath(strings.TrimSpace(out)) != realPath(dir) {
+		return false, false
+	}
+	of, err := worktreeOf(git, dir)
+	return true, err == nil && of != ""
+}
+
 // removeWorktree removes the linked worktree at dir through its checkout, so the
 // checkout forgets it and its branch is free to be checked out again. reap has
 // decided by now, so --force is given twice: once for its changes, once for a
