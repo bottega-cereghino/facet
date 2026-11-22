@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +75,36 @@ func TestCensusHoldsWhatNoRemoteHas(t *testing.T) {
 		if !censusNames(held, want) {
 			t.Errorf("the census lets %s go: %v", want, held)
 		}
+	}
+}
+
+// A pushed Git LFS pointer names content; it does not show that any LFS store
+// has it. A push with --no-verify, or from a clone with no pre-push hook,
+// sends the pointer and never the object, and facet reads no store, so a file
+// only its pointer accounts for holds, saying how to clear it (#397). The
+// same file left as its pointer (a checkout that skipped the smudge) is the
+// pushed blob itself and goes.
+func TestCensusHoldsLFSContentOnlyItsPointerAccountsFor(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	content := "a render, made today, uploaded nowhere\n"
+	pointer := fmt.Sprintf("version https://git-lfs.github.com/spec/v1\noid sha256:%x\nsize %d\n",
+		sha256.Sum256([]byte(content)), len(content))
+	pointerFile := filepath.Join(t.TempDir(), "pointer")
+	writeTestFile(t, pointerFile, pointer)
+	writeTestFile(t, filepath.Join(clone, ".gitattributes"), "*.bin filter=media\n")
+	mustGit(t, clone, "config", "filter.media.clean", "cat '"+pointerFile+"'")
+	mustGit(t, clone, "config", "filter.media.smudge", "cat")
+	gitOut(t, clone, "add", ".gitattributes")
+	commitFile(t, clone, "render.bin", content, "render")
+	mustGit(t, clone, "push", "-q", "--no-verify", "origin", "HEAD:refs/heads/render")
+	held := censusOf(t, ws)
+	if len(held) != 1 || !censusNames(held, "repo/render.bin") || !strings.Contains(held[0], "git lfs push") {
+		t.Fatalf("the census should hold render.bin alone, saying how to push its object: %v", held)
+	}
+
+	writeTestFile(t, filepath.Join(clone, "render.bin"), pointer)
+	if held := censusOf(t, ws); len(held) != 0 {
+		t.Fatalf("a file that is its pushed pointer holds: %v", held)
 	}
 }
 
