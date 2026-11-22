@@ -59,9 +59,20 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 		t.Fatalf("agents = %+v", cfg.Agents)
 	}
 	for _, a := range cfg.Agents {
-		if !commandHasPrompt(a.Command) {
-			t.Errorf("agent %q has no {prompt}: %q", a.Label, a.Command)
+		if !commandHasPrompt(a.Command) || !strings.Contains(strings.Join(a.Command, " "), "{effort}") {
+			t.Errorf("agent %q command = %q, want {prompt} and {effort}", a.Label, a.Command)
 		}
+	}
+	if cfg.Effort != "medium" {
+		t.Fatalf("example effort = %q", cfg.Effort)
+	}
+	low, err := cfg.effortFor([]string{"next", "Fix"})
+	if err != nil || low != "low" {
+		t.Fatalf("fix effort = %q, %v", low, err)
+	}
+	same, err := cfg.effortFor([]string{"feat", "design"})
+	if err != nil || same != "medium" {
+		t.Fatalf("feat effort = %q, %v", same, err)
 	}
 }
 
@@ -78,6 +89,12 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	}
 	if !strings.Contains(ok.Prompt, "Merge when the checks are green") {
 		t.Fatalf("default prompt = %q", ok.Prompt)
+	}
+	if ok.Effort != defaultQueueEffort {
+		t.Fatalf("default effort = %q", ok.Effort)
+	}
+	if got, err := ok.effortFor(nil); err != nil || got != defaultQueueEffort {
+		t.Fatalf("effort with no labels = %q, %v", got, err)
 	}
 
 	cases := []struct {
@@ -99,6 +116,11 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 		{"bad wait", `{"wait": "soon", "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "duration"},
 		{"extra value", `{"repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]} {}`, "extra data"},
 		{"missing priorities", `{"priorities": "missing.txt", "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "priorities"},
+		{"empty effort", `{"effort": {"default": " "}, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "empty"},
+		{"empty effort label", `{"effort": {"labels": {"": "low"}}, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "empty"},
+		{"effort is the queue label", `{"effort": {"labels": {"next": "low"}}, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "queue label"},
+		{"duplicate effort label", `{"effort": {"labels": {"Fix": "low", "fix": "high"}}, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "two effort"},
+		{"unknown effort field", `{"effort": {"rank": "low"}, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "rank"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,6 +141,36 @@ func TestExpandDoesNotRescanAValue(t *testing.T) {
 	want := "T={workspace} W=/ws P=kept {title}"
 	if got != want {
 		t.Fatalf("expand = %q, want %q", got, want)
+	}
+}
+
+func TestQueueEffortFor(t *testing.T) {
+	cfg := queueConfig{
+		Effort: "medium",
+		effortLabels: map[string]string{
+			"chore": "low", "fix": "low", "deps": "low",
+			"feat": "medium", "design": "medium",
+		},
+	}
+	cases := []struct {
+		labels []string
+		want   string
+	}{
+		{nil, "medium"},
+		{[]string{"next", "p1", "codex"}, "medium"},
+		{[]string{"Fix"}, "low"},
+		{[]string{"deps", "chore"}, "low"},
+		{[]string{"design"}, "medium"},
+	}
+	for _, tc := range cases {
+		got, err := cfg.effortFor(tc.labels)
+		if err != nil || got != tc.want {
+			t.Errorf("labels %q: effort %q, %v; want %s", tc.labels, got, err, tc.want)
+		}
+	}
+	_, err := cfg.effortFor([]string{"fix", "feat"})
+	if err == nil || !strings.Contains(err.Error(), "fix:") || !strings.Contains(err.Error(), "low") || !strings.Contains(err.Error(), "medium") {
+		t.Fatalf("disagreement: %v", err)
 	}
 }
 
@@ -436,6 +488,56 @@ func TestQueueMovesOnWhenTheHighestProjectHasNoNextIssue(t *testing.T) {
 	s.stop(t)
 	if got, want := readLines(t, out), []string{"1", "2"}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("start order = %v, want %v", got, want)
+	}
+}
+
+func TestQueuePassesTheEffortForTheIssueLabel(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.effortLabels = map[string]string{"fix": "low", "feat": "medium"}
+	cfg.Agents = []queueAgent{{Command: []string{appendScript(t), out, "{effort}"}}}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{labelled(4, "2026-01-01T00:00:00Z", "Leak", "next", "fix", "codex")}, nil
+		},
+	})
+	waitFor(t, "the agent", func() bool { return len(readLines(t, out)) >= 1 })
+	s.stop(t)
+	if got, want := readLines(t, out), []string{"low"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("effort arg = %v, want %v", got, want)
+	}
+	if !strings.Contains(s.buf.String(), "effort low") {
+		t.Fatalf("log = %q, want the effort", s.buf.String())
+	}
+}
+
+func TestQueueWaitsWhenEffortLabelsDisagree(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.effortLabels = map[string]string{"fix": "low", "feat": "medium"}
+	cfg.Agents = []queueAgent{{Command: []string{appendScript(t), out, "{effort}"}}}
+	var spawned atomic.Int32
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{labelled(4, "2026-01-01T00:00:00Z", "Both", "next", "fix", "feat")}, nil
+		},
+		spawn: func(string, int) (string, error) {
+			spawned.Add(1)
+			return os.MkdirTemp(dir, "ws")
+		},
+	})
+	time.Sleep(150 * time.Millisecond)
+	s.stop(t)
+	if spawned.Load() != 0 {
+		t.Fatalf("spawned %d time(s) while the effort labels disagree", spawned.Load())
+	}
+	if len(readLines(t, out)) != 0 {
+		t.Fatalf("agent ran: %q", readLines(t, out))
+	}
+	if !strings.Contains(s.buf.String(), "fix:") {
+		t.Fatalf("log = %q, want the refusal", s.buf.String())
 	}
 }
 

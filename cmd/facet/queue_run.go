@@ -294,6 +294,14 @@ func (r *queueRunner) runOne(ctx context.Context, iss queuedIssue) {
 	if ctx.Err() != nil {
 		return
 	}
+	// Resolve the effort before spawning. A disagreement between labels is
+	// not an issue to start, and a workspace would only sit there.
+	effort, err := r.cfg.effortFor(iss.Issue.LabelNames())
+	if err != nil {
+		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
+		r.deferRetry(iss)
+		return
+	}
 	ws, err := r.env.spawn(iss.Repo, iss.Issue.Number)
 	if err != nil {
 		r.logf("queue: spawn %s#%d: %v", iss.Repo, iss.Issue.Number, err)
@@ -307,13 +315,13 @@ func (r *queueRunner) runOne(ctx context.Context, iss queuedIssue) {
 	if err != nil || held {
 		return
 	}
-	argv, who, err := r.argvFor(iss, ws)
+	argv, who, err := r.argvFor(iss, ws, effort)
 	if err != nil {
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
 		r.deferRetry(iss)
 		return
 	}
-	r.logf("queue: %s#%d agent %s in %s", iss.Repo, iss.Issue.Number, who, ws)
+	r.logf("queue: %s#%d agent %s effort %s in %s", iss.Repo, iss.Issue.Number, who, effort, ws)
 	err = r.env.run(ctx, ws, argv)
 	if err == nil {
 		r.logf("queue: %s#%d agent exited", iss.Repo, iss.Issue.Number)
@@ -337,7 +345,7 @@ func (r *queueRunner) runOne(ctx context.Context, iss queuedIssue) {
 	r.deferRetry(iss)
 }
 
-func (r *queueRunner) argvFor(iss queuedIssue, ws string) ([]string, string, error) {
+func (r *queueRunner) argvFor(iss queuedIssue, ws, effort string) ([]string, string, error) {
 	label, cmd, err := r.cfg.commandFor(iss.Issue.LabelNames())
 	if err != nil {
 		return nil, "", err
@@ -349,6 +357,7 @@ func (r *queueRunner) argvFor(iss queuedIssue, ws string) ([]string, string, err
 		"workspace": ws,
 		"label":     r.cfg.Label,
 		"url":       iss.Issue.URL,
+		"effort":    effort,
 	}
 	// prompt is expanded first, then dropped in as a single value, so a title
 	// is not scanned for further placeholders.

@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	defaultQueueMax   = 6
-	defaultQueueWait  = 30 * time.Second
-	defaultQueueLabel = "next"
+	defaultQueueMax    = 6
+	defaultQueueWait   = 30 * time.Second
+	defaultQueueLabel  = "next"
+	defaultQueueEffort = "medium"
 )
 
 // defaultQueuePrompt is what an agent is told when the config leaves prompt
@@ -25,15 +26,17 @@ const defaultQueuePrompt = "Do {repo}#{number}: {title}. The workspace is {works
 
 // queueConfig is a validated queue file. Durations and defaults are resolved.
 type queueConfig struct {
-	Max        int
-	Hold       string
-	Gate       []string
-	Wait       time.Duration
-	Label      string
-	Priorities string
-	Repos      []string
-	Prompt     string
-	Agents     []queueAgent
+	Max          int
+	Hold         string
+	Gate         []string
+	Wait         time.Duration
+	Label        string
+	Priorities   string
+	Repos        []string
+	Prompt       string
+	Agents       []queueAgent
+	Effort       string
+	effortLabels map[string]string
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -43,17 +46,25 @@ type queueAgent struct {
 	Command []string `json:"command"`
 }
 
+// queueEffortFile is the JSON shape of the effort map, before checks.
+// Default is the effort when the issue carries none of Labels.
+type queueEffortFile struct {
+	Default string            `json:"default"`
+	Labels  map[string]string `json:"labels"`
+}
+
 // queueFile is the JSON shape, before defaults and checks.
 type queueFile struct {
-	Max        *int         `json:"max"`
-	Hold       string       `json:"hold"`
-	Gate       []string     `json:"gate"`
-	Wait       string       `json:"wait"`
-	Label      string       `json:"label"`
-	Priorities string       `json:"priorities"`
-	Repos      []string     `json:"repos"`
-	Prompt     string       `json:"prompt"`
-	Agents     []queueAgent `json:"agents"`
+	Max        *int            `json:"max"`
+	Hold       string          `json:"hold"`
+	Gate       []string        `json:"gate"`
+	Wait       string          `json:"wait"`
+	Label      string          `json:"label"`
+	Priorities string          `json:"priorities"`
+	Repos      []string        `json:"repos"`
+	Prompt     string          `json:"prompt"`
+	Agents     []queueAgent    `json:"agents"`
+	Effort     queueEffortFile `json:"effort"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -65,7 +76,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, priorities, repos, prompt, agents", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, priorities, repos, prompt, agents, effort", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -116,6 +127,12 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	for i := range cfg.Agents {
 		cfg.Agents[i].Label = strings.TrimSpace(cfg.Agents[i].Label)
 	}
+	effort, labels, err := normalizeEffort(cfg.Label, f.Effort)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	cfg.Effort = effort
+	cfg.effortLabels = labels
 	if err := cfg.validate(); err != nil {
 		return queueConfig{}, err
 	}
@@ -136,6 +153,71 @@ func (c queueConfig) validate() error {
 		return err
 	}
 	return validateQueueAgents(c.Label, c.Agents)
+}
+
+// normalizeEffort resolves the default and the label map. Label keys are
+// matched later without regard to case, so two keys that differ only by
+// case are the same label and are refused here.
+func normalizeEffort(queueLabel string, raw queueEffortFile) (string, map[string]string, error) {
+	effort := defaultQueueEffort
+	if raw.Default != "" {
+		effort = strings.TrimSpace(raw.Default)
+		if effort == "" {
+			return "", nil, fmt.Errorf("queue config: effort default is empty\nfix: set default to a word such as medium, or omit it")
+		}
+	}
+	labels := make(map[string]string, len(raw.Labels))
+	for name, value := range raw.Labels {
+		n := strings.TrimSpace(name)
+		v := strings.TrimSpace(value)
+		if n == "" || v == "" {
+			return "", nil, fmt.Errorf("queue config: an effort entry is empty\nfix: each labels entry is a label and an effort, such as \"fix\": \"low\"")
+		}
+		if strings.EqualFold(n, queueLabel) {
+			return "", nil, fmt.Errorf("queue config: effort label %q is the queue label\nfix: the queue label is on every queued issue, so it cannot choose an effort; use a label such as fix or feat", n)
+		}
+		key := strings.ToLower(n)
+		if _, ok := labels[key]; ok {
+			return "", nil, fmt.Errorf("queue config: two effort labels are %q\nfix: keep one entry per label", n)
+		}
+		labels[key] = v
+	}
+	return effort, labels, nil
+}
+
+// effortFor is the effort the issue's labels ask for. Labels that are not
+// in the map are ignored. Two that name different efforts are a refusal:
+// guessing would hide one of them. None matching uses the default.
+func (c queueConfig) effortFor(labels []string) (string, error) {
+	var (
+		effort string
+		from   string
+	)
+	for _, label := range labels {
+		key := strings.ToLower(strings.TrimSpace(label))
+		if key == "" {
+			continue
+		}
+		got, ok := c.effortLabels[key]
+		if !ok {
+			continue
+		}
+		if effort == "" {
+			effort = got
+			from = strings.TrimSpace(label)
+			continue
+		}
+		if !strings.EqualFold(effort, got) {
+			return "", fmt.Errorf("labels %s and %s ask for effort %s and %s\nfix: map those labels to one effort, or take one of them off the issue", from, strings.TrimSpace(label), effort, got)
+		}
+	}
+	if effort == "" {
+		if c.Effort == "" {
+			return defaultQueueEffort, nil
+		}
+		return c.Effort, nil
+	}
+	return effort, nil
 }
 
 func validateQueueRepos(repos []string) error {

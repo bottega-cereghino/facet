@@ -7,18 +7,28 @@
   "priorities": "priorities.example.txt",
   "repos": ["acme/widgets", "acme/other"],
   "prompt": "Do {repo}#{number}: {title}. The workspace is {workspace}. Do the work the issue describes. Merge when the checks are green. Comment the result on the issue. Remove the {label} label when the issue is done. Then exit.",
+  "effort": {
+    "default": "medium",
+    "labels": {
+      "chore": "low",
+      "fix": "low",
+      "deps": "low",
+      "feat": "medium",
+      "design": "medium"
+    }
+  },
   "agents": [
     {
       "label": "codex",
-      "command": ["agent", "--for", "codex", "{prompt}"]
+      "command": ["agent", "--for", "codex", "--effort", "{effort}", "{prompt}"]
     },
     {
       "label": "gemini",
-      "command": ["agent", "--for", "gemini", "{prompt}"]
+      "command": ["agent", "--for", "gemini", "--effort", "{effort}", "{prompt}"]
     },
     {
       "label": "",
-      "command": ["agent", "{prompt}"]
+      "command": ["agent", "--effort", "{effort}", "{prompt}"]
     }
   ]
 }

@@ -424,8 +424,9 @@ never passed through a shell.
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
-| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}`. |
-| `agents` | one command per label. `{prompt}` is the task text. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}`. |
+| `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. |
+| `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 
 The order is fixed. When `priorities` is set, the queue reads that file
 again before each start. A line is a repository name (`widgets` for
@@ -443,6 +444,14 @@ broken by repository name, then by issue number. The match ignores case,
 and `p10` is not `p1`. These labels do not choose the agent unless an
 agents entry uses the same label. A milestone does not move an issue.
 `docs/priorities.example.txt` is an example of the file.
+
+`effort.labels` maps an issue label to a word, and `{effort}` in the command
+is where that word goes. The queue does not interpret the word. A label
+matches without regard to case. Labels that are not in the map, including
+the queue label and `p1`, do not count. When none of the issue's labels are
+in the map, `effort.default` is used, and omitted means `medium`. Two labels
+that name different efforts are a refusal: the queue logs that and waits,
+and does not guess. Each start is logged with the effort it used.
 
 The agent starts in the workspace directory. The `CLAUDE.md` there is the one
 `facet spawn` wrote, with the issue text quoted. The queue does not reap
@@ -465,6 +474,8 @@ The stop is the hold file, or an interrupt. Remove the file and start
 `TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
 `TestQueueTakesTheOldestIssueFirst`,
 `TestQueueTakesP1BeforeAnOlderIssue`,
+`TestQueuePassesTheEffortForTheIssueLabel`,
+`TestQueueWaitsWhenEffortLabelsDisagree`,
 `TestQueueStaysWithTheHighestProject`,
 `TestQueueMovesOnWhenTheHighestProjectHasNoNextIssue`,
 `TestQueueDoesNotHandTheSameIssueOutTwice`,
