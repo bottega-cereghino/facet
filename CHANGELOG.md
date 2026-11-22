@@ -6,6 +6,20 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.11.0](https://github.com/bottega-cereghino/facet/compare/v0.10.0...v0.11.0) (2026-11-22)
+
+
+### Added
+
+* **queue:** let hold name a list of stop files ([#424](https://github.com/bottega-cereghino/facet/issues/424)) ([7429af0](https://github.com/bottega-cereghino/facet/commit/7429af0eebc705c92a174da4853717736cdc84d0)), refs [#422](https://github.com/bottega-cereghino/facet/issues/422)
+
+
+### Fixed
+
+* **queue:** do not start an issue whose branch has an open pull request ([#425](https://github.com/bottega-cereghino/facet/issues/425)) ([2048568](https://github.com/bottega-cereghino/facet/commit/2048568085125ab0cac8e288b938503d21d4db19)), refs [#421](https://github.com/bottega-cereghino/facet/issues/421)
+* **queue:** give a free slot to the next project down ([#419](https://github.com/bottega-cereghino/facet/issues/419)) ([5f2fae8](https://github.com/bottega-cereghino/facet/commit/5f2fae86c13fa7ee51dc749bef711d2c6675aca3))
+* **queue:** run each agent in a process group of its own ([#423](https://github.com/bottega-cereghino/facet/issues/423)) ([a35115e](https://github.com/bottega-cereghino/facet/commit/a35115e3eca592188fb8b81fb1bbf14531af81ca)), refs [#420](https://github.com/bottega-cereghino/facet/issues/420)
+
 ## [0.10.0](https://github.com/bottega-cereghino/facet/compare/v0.9.0...v0.10.0) (2026-11-22)
 
 
