@@ -304,7 +304,10 @@ their targets are untouched.
 
 `facet reap --reapable` deletes every workspace at the root that `reap` would
 delete now. It lists them with the disk each frees and the total, asks once,
-and leaves every held workspace alone. It never forces, and it checks each
+and leaves every held workspace alone. The held ones are listed too, one line
+each, grouped by what holds them (unpushed commits, uncommitted changes,
+ignored files nothing rebuilds, with the first of those files named);
+`facet reap <name>` says all that holds one. It never forces, and it checks each
 workspace again just before deleting it, so work started while the prompt
 waited is not lost. It never guesses either: a workspace with a remote it could
 not fetch is left alone and named, since a branch deleted upstream would still
@@ -520,7 +523,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   names cannot miss the next one (`TestReapHoldsACommitOnlyALocalRefReaches`).
   A local ref that points at a tree or a blob holds, since nothing tells
   whether a remote has it (`TestReapHoldsALocalRefThatIsNotACommit`); the stash
-  holds as a stash (`TestReapDoesNotCountRefsOutsideLocalWork`). Unlike
+  holds as a stash (`TestReapDoesNotCountRefsOutsideLocalWork`), even once its
+  reflog is expired and `git stash list` prints nothing
+  (`TestReapHoldsAStashWhoseReflogWasExpired`). Unlike
   `@{u}..HEAD`, that also catches a branch which was never
   pushed at all — the branch most easily lost. Only the refs of a configured
   remote count, refreshed by the fetch below, so a ref left under

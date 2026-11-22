@@ -874,10 +874,10 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 	if !own {
 		return c
 	}
-	if out, err := git.Run(p, nil, "stash", "list"); err != nil {
-		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git stash list failed: %v", err))
+	if count, err := gitDirStash(git, p); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not count its stash: %v", err))
 	} else {
-		c.Stashed = countLines(strings.TrimSpace(out))
+		c.Stashed = count
 	}
 
 	return c
@@ -1089,14 +1089,6 @@ func remoteDefaultBranch(git gitx.Runner, dir string) string {
 	return ""
 }
 
-// countLines counts newline-separated entries in already-trimmed output.
-func countLines(s string) int {
-	if s == "" {
-		return 0
-	}
-	return strings.Count(s, "\n") + 1
-}
-
 // ListIssues inspects every issue workspace under the workspaces root. One that
 // cannot be inspected (a broken manifest) is not listed, but named in unchecked
 // with the reason, so a listing never reads as complete when it is not.
@@ -1170,7 +1162,9 @@ func isUnder(root, path string) bool {
 	if err != nil {
 		return false
 	}
-	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
+	// A name that only starts with ".." (`..wt`) is inside: only ".." itself,
+	// or a path through it, leads out.
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // removeAllForce deletes a tree that may hold directories without write
