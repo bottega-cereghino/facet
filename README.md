@@ -745,7 +745,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   they do not hold it. It removes the worktree through git, so the checkout
   forgets it, and never touches the checkout's own files or branches
   (`TestWorktreeCloneIsNotHeldByWhatTheCheckoutKeeps`,
-  `TestReapRemovesTheWorktreeAndLeavesTheCheckout`).
+  `TestReapRemovesTheWorktreeAndLeavesTheCheckout`). A clone entry that is a
+  symlink is a link: even `--force` unlinks it and leaves the worktree it
+  points at (`TestReapForceUnlinksASymlinkedCloneAndKeepsItsTarget`).
 - **`reap` never deletes a checkout.** Given a directory with no manifest, it
   acts only when that is a linked worktree, and removes it through git, which
   keeps the repository and every branch (`TestInspectWorktreeRefusesACheckout`,
