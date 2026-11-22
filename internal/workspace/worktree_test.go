@@ -658,3 +658,36 @@ func TestRemoveWorktreeFallbackKeepsOtherWorktreeEntries(t *testing.T) {
 		t.Errorf("the fallback pruned %s, another worktree whose directory is away:\n%s", away, list)
 	}
 }
+
+// A plain worktree named through a symlink is inspected at its real path: a
+// walk does not descend into a symlink at its root, so a fork with an
+// unpushed commit in an ignored node_modules went unseen through the link
+// (#381).
+func TestReapHoldsARepositoryInAWorktreeNamedThroughASymlink(t *testing.T) {
+	root := t.TempDir()
+	origin := originRepo(t, filepath.Join(root, "origin"))
+	checkout := filepath.Join(root, "checkout")
+	gitOut(t, "", "clone", "-q", origin, checkout)
+	wt := filepath.Join(root, "wt")
+	gitOut(t, checkout, "worktree", "add", "-q", "--detach", wt, "origin/main")
+	writeTestFile(t, filepath.Join(wt, ".gitignore"), "node_modules/\n")
+	gitOut(t, wt, "add", ".gitignore")
+	gitOut(t, wt, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "ignore")
+	gitOut(t, wt, "push", "-q", "origin", "HEAD:refs/heads/ignore")
+	fork := filepath.Join(wt, "node_modules", "lib")
+	gitOut(t, "", "clone", "-q", origin, fork)
+	commitFile(t, fork, "patch.txt", "a patch that exists only here\n", "patch")
+
+	alias := filepath.Join(t.TempDir(), "wt-link")
+	if err := os.Symlink(wt, alias); err != nil {
+		t.Fatal(err)
+	}
+	st, err := InspectWorktree(alias, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireHeld(t, st, "the worktree named through a symlink holds the fork's only copy")
+	if want := realPath(wt); st.Dir != want {
+		t.Errorf("Dir = %q, want the real path %q", st.Dir, want)
+	}
+}

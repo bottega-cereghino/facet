@@ -748,7 +748,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   folder of such a clone, is refused or judged as what it is
   (`TestReapRefusesACloneWhoseRepositoryCommitsAManifest`,
   `TestReapInspectsAWorktreeWithACommittedManifestAsAWorktree`,
-  `TestReapRefusesAFolderOfACloneThatTracksAManifest`).
+  `TestReapRefusesAFolderOfACloneThatTracksAManifest`). It judges and deletes
+  where the path leads, so a clone named through a symlink outside its
+  workspace is refused as well, and a worktree named through one is walked in
+  full (`TestReapRefusesAWorkspacesCloneNamedThroughASymlink`,
+  `TestReapHoldsARepositoryInAWorktreeNamedThroughASymlink`).
 - **`reap` checks again after its prompt**, so work that started while it
   waited holds the workspace, with `--force` too: force covers the holders it
   showed, never new ones (`TestReapChecksAgainAfterThePrompt`,

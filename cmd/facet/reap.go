@@ -318,7 +318,19 @@ func reapTarget(path string, args []string) (string, error) {
 // workspace someone ran `git init` in, never a workspace reap may delete. The
 // enclosing workspace and the worktree are checked first, so a manifest a
 // repository commits does not make its clone or worktree a workspace (#313).
+// It inspects dir's real path, which is what reap deletes.
 func inspectTarget(dir string, git gitx.Runner, live workspace.LiveChecker) (*workspace.IssueState, error) {
+	// What reap deletes is where the path leads: a clone named through a
+	// symlink outside its workspace is still inside it (#384), and a walk
+	// does not descend into a symlink at its root (#381).
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil, fmt.Errorf("could not resolve %s: %w", dir, err)
+	}
+	if resolved, err = filepath.Abs(resolved); err != nil {
+		return nil, err
+	}
+	dir = resolved
 	if ws := enclosingWorkspace(git, dir); ws != "" {
 		return nil, fmt.Errorf("%s is inside the workspace %s; reap the workspace instead\nfix: facet reap %s", dir, ws, ws)
 	}
