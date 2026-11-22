@@ -1157,7 +1157,9 @@ func isUnder(root, path string) bool {
 	if err != nil {
 		return false
 	}
-	return rel == "." || (!strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel))
+	// A name that only starts with ".." (`..wt`) is inside: only ".." itself,
+	// or a path through it, leads out.
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // removeAllForce deletes a tree that may hold directories without write
