@@ -419,12 +419,12 @@ never passed through a shell.
 | --- | --- |
 | `max` | how many agents run at once. Omitted means 6. |
 | `hold` | a file path. When it exists, the queue starts nothing and stops. An agent already running is left to finish. |
-| `gate` | a command run before each start. A non-zero exit waits `wait` and tries later. Omitted means there is no gate. |
+| `gate` | a command run before each start. Its arguments are expanded with the issue about to start (`{repo}` `{number}` `{title}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`). `{workspace}` is empty, because the gate runs before a workspace is spawned, and `{prompt}` is not substituted. A non-zero exit waits `wait` and tries later. Omitted means there is no gate. |
 | `wait` | how long to wait before looking again. Omitted means 30s. |
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
-| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}`. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`. `{labels}` is the issue's labels, comma-separated. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 
@@ -484,7 +484,20 @@ returns exactly that many, the queue says so: any beyond the cap are unseen.
 The stop is the hold file, or an interrupt. Remove the file and start
 `facet queue` again to resume.
 
+`facet queue --dry-run` prints the runs the next starts would take, up to
+`max`, and does not spawn a workspace or start an agent. It runs the gate.
+A gate that fails is printed as a start that would not happen, and later
+issues are not listed behind it: the queue would wait on that issue. A
+lower project is not listed while a higher one still has an open issue
+with the queue label. The hold file prints that nothing would start, and
+the issues are not listed.
+
 `TestQueueStopsWhenTheHoldFileExists`, `TestQueueWaitsWhenTheGateFails`,
+`TestQueueGateSeesTheIssue`, `TestQueueGateDoesNotRunWhenEffortLabelsDisagree`,
+`TestQueueDryRunPrintsTheNextRunsAndDoesNotSpawn`,
+`TestQueueDryRunStopsWhenTheGateFails`,
+`TestQueueDryRunStopsOnTheHoldFileWithoutListing`,
+`TestQueueDryRunStaysWithTheHighestProject`,
 `TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
 `TestQueueTakesTheOldestIssueFirst`,
 `TestQueueTakesP1BeforeAnOlderIssue`,

@@ -16,7 +16,10 @@ import (
 // binary neither names an agent nor passes that text through a shell.
 // The queue does not reap. Deleting a workspace is a separate, deliberate act.
 func newQueueCmd() *cobra.Command {
-	var configPath string
+	var (
+		configPath string
+		dryRun     bool
+	)
 	cmd := &cobra.Command{
 		Use:   "queue",
 		Short: "Run a configured agent on each queued issue",
@@ -37,9 +40,14 @@ func newQueueCmd() *cobra.Command {
 			"the same repository. Omitted means 1 and the maximum is 5. An issue\n" +
 			"labelled feat or research is always a run of one. The workspace is the\n" +
 			"first issue's. Each start is logged with the bundle size.\n\n" +
-			"Before each start it runs the gate command, when one is set. A non-zero exit\n" +
-			"waits and tries later. When the hold file exists, it starts nothing and stops;\n" +
-			"an agent already running is left to finish.\n\n" +
+			"Before each start it runs the gate command, when one is set. The gate's\n" +
+			"arguments are expanded with the issue about to start. {workspace} is empty,\n" +
+			"because the gate runs before a workspace is spawned, and {prompt} is not\n" +
+			"substituted. A non-zero exit waits and tries later. When the hold file\n" +
+			"exists, it starts nothing and stops; an agent already running is left to finish.\n\n" +
+			"--dry-run prints the runs the next starts would take, up to max, and does\n" +
+			"not spawn a workspace or start an agent. It runs the gate, so a gate that\n" +
+			"would refuse a start is reported instead of a start.\n\n" +
 			"It does not reap workspaces. A workspace already on disk for the issue is\n" +
 			"reused, not spawned again.",
 		Args: cobra.NoArgs,
@@ -54,10 +62,15 @@ func newQueueCmd() *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return runQueue(ctx, cfg, realQueueEnv())
+			env := realQueueEnv()
+			if dryRun {
+				return dryQueue(ctx, cfg, env)
+			}
+			return runQueue(ctx, cfg, env)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "queue config JSON file (default: FACET_QUEUE)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what the next starts would take, without spawning or starting an agent")
 	return cmd
 }
 

@@ -113,7 +113,9 @@ names the executable:
 commands the config file names, so no package names an executable for them.
 `runArgv` in `cmd/facet` is the one place that starts those commands, and it
 does not go through a shell: the issue title is substituted into the prompt,
-and a title is someone else's text.
+and a title is someone else's text. The gate's arguments get the same
+substitution, except `{prompt}`, and `{workspace}` is empty because the gate
+runs before a workspace is spawned.
 
 **Fake the narrowest thing that works.** `gitx.Runner` has one method, so faking
 all of it is trivial and callers take `gitx.Runner` directly. `ghx.Client` covers

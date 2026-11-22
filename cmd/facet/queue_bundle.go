@@ -130,17 +130,7 @@ func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string) ([]string, s
 	if err != nil {
 		return nil, "", err
 	}
-	vars := map[string]string{
-		"repo":      iss.Repo,
-		"number":    strconv.Itoa(iss.Issue.Number),
-		"title":     iss.Issue.Title,
-		"workspace": ws,
-		"label":     r.cfg.Label,
-		"url":       iss.Issue.URL,
-		"effort":    effort,
-		"issues":    issuesText(run),
-		"bundle":    strconv.Itoa(len(run)),
-	}
+	vars := queueVars(r.cfg, run, ws, effort)
 	// prompt is expanded first, then dropped in as a single value, so a title
 	// is not scanned for further placeholders.
 	prompt := expand(r.cfg.Prompt, vars)
@@ -154,6 +144,38 @@ func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string) ([]string, s
 		who = "default"
 	}
 	return out, who, nil
+}
+
+// queueVars is the placeholders one run substitutes. {prompt} is added by
+// the caller after the prompt itself has been expanded, so a value is not
+// scanned for further placeholders. labels is comma-separated; a label
+// does not contain a comma.
+func queueVars(cfg queueConfig, run []queuedIssue, ws, effort string) map[string]string {
+	iss := run[0]
+	return map[string]string{
+		"repo":      iss.Repo,
+		"number":    strconv.Itoa(iss.Issue.Number),
+		"title":     iss.Issue.Title,
+		"workspace": ws,
+		"label":     cfg.Label,
+		"url":       iss.Issue.URL,
+		"effort":    effort,
+		"issues":    issuesText(run),
+		"bundle":    strconv.Itoa(len(run)),
+		"labels":    strings.Join(iss.Issue.LabelNames(), ","),
+	}
+}
+
+// gateArgv expands the gate command for the run about to start. The gate
+// runs before spawn, so {workspace} is empty: there is no directory yet.
+// {prompt} is not a gate placeholder. The prompt is the agent's text.
+func gateArgv(cfg queueConfig, run []queuedIssue, effort string) []string {
+	vars := queueVars(cfg, run, "", effort)
+	out := make([]string, len(cfg.Gate))
+	for i, a := range cfg.Gate {
+		out[i] = expand(a, vars)
+	}
+	return out
 }
 
 // issuesText is the {issues} value: one line per issue, repo#n: title.
