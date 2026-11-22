@@ -117,3 +117,38 @@ func TestReapHoldsACloneThatBorrowsObjectsFromTheWorkspace(t *testing.T) {
 		t.Fatalf("the clone borrows objects from inside the workspace, yet the hold does not say so: %v", st.Blockers())
 	}
 }
+
+// git-annex (and datalad over it) commits a symlink into the git directory
+// and keeps the content there until `git annex copy` sends it somewhere; Git
+// LFS keeps objects there too, of files not checked out as much as of those
+// that are. The pushed blob is the symlink or the pointer, and the census
+// skips a judged repository's git directory, so the content went unread. A
+// file in either store holds, with the push that copies it out (#398); an
+// empty store, after `git annex drop`, does not.
+func TestReapHoldsContentInAGitDirObjectStore(t *testing.T) {
+	for name, tc := range map[string]struct{ store, fix string }{
+		"annex": {filepath.Join(".git", "annex", "objects", "Xk", "Pq", "SHA256E-s13--abc.csv"), "git annex copy"},
+		"lfs":   {filepath.Join(".git", "lfs", "objects", "ab", "cd"), "git lfs push --all"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ws, clone := issueWorkspace(t)
+			mkdirs(t, filepath.Join(clone, tc.store))
+			if b := blockersOf(t, ws); len(b) != 0 {
+				t.Fatalf("an empty object store holds: %v", b)
+			}
+			rel := filepath.Join(tc.store, "SHA256E-s13--abc.csv")
+			writeTestFile(t, filepath.Join(clone, rel), "measurements\n")
+			if name == "annex" {
+				if err := os.Symlink(rel, filepath.Join(clone, "data.csv")); err != nil {
+					t.Fatal(err)
+				}
+				gitOut(t, clone, "add", "data.csv")
+				gitOut(t, clone, "commit", "-qm", "data")
+				gitOut(t, clone, "push", "-q", "origin", "HEAD:refs/heads/data")
+			}
+			if b := blockersOf(t, ws); !blockersMention(b, tc.fix) {
+				t.Fatalf("reap would delete content only the git directory's %s store has: %v", name, b)
+			}
+		})
+	}
+}

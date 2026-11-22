@@ -613,7 +613,13 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   directory has `info/grafts`, the older local rewrite that nothing turns off,
   holds (`TestReapHoldsAGraftFile`), and so does one whose alternates lead into
   the workspace, since the objects it borrows go with it
-  (`TestReapHoldsACloneThatBorrowsObjectsFromTheWorkspace`). The landing proof names the
+  (`TestReapHoldsACloneThatBorrowsObjectsFromTheWorkspace`). So does one with
+  a file in `annex/objects` or `lfs/objects` of its git directory, content
+  that git-annex or Git LFS keeps there while the pushed blob is only a
+  symlink or a pointer, and that facet cannot see on any remote: copy it out
+  (`git annex copy --to <remote>`, `git lfs push --all <remote>`), then reap
+  the workspace by name with `--force`
+  (`TestReapHoldsContentInAGitDirObjectStore`). The landing proof names the
   default branch by its full ref, so a local branch called `origin/main` is not
   taken for it (`TestReapHoldsALocalBranchNamedOriginMain`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
