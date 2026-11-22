@@ -467,8 +467,16 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 	if held := ownRepository(ws, enclosing); held != "" {
 		return "", []string{held}
 	}
+	// A repository beside the clones (a hand clone, a checkout `facet rm`
+	// dropped) holds whatever the enclosing repository says of it: `git add -A`
+	// records it as a gitlink, the sha of its HEAD and none of its commits, and
+	// status then reads clean while HEAD matches.
+	names, repos := splitRepositories(ws, names)
+	for _, n := range repos {
+		loose = append(loose, fmt.Sprintf("%s is a repository of its own -- its commits, branches and stashes are nowhere else; push what it holds and move it out of the workspace (or `facet add clone` it), then reap again", n))
+	}
 	if len(names) == 0 {
-		return enclosing, nil
+		return enclosing, capList(loose, "files not committed anywhere")
 	}
 	if enclosing == "" {
 		for _, n := range names {
@@ -476,7 +484,9 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		}
 		return "", capList(loose, "files not committed anywhere")
 	}
-	args := append(append([]string{}, honestStatus...), "status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=all", "--")
+	// --ignore-submodules=none: diff.ignoreSubmodules in the enclosing
+	// repository's config must not hide a gitlinked entry that moved on.
+	args := append(append([]string{}, honestStatus...), "status", "--porcelain=v1", "-z", "--ignored=matching", "--untracked-files=all", "--ignore-submodules=none", "--")
 	args = append(args, names...)
 	out, err := git.Run(ws, nil, args...)
 	if err != nil {
@@ -552,6 +562,20 @@ func githubRepo(url string) string {
 		return ""
 	}
 	return owner + "/" + name
+}
+
+// splitRepositories separates the names in ws that are a repository or a
+// checkout of one (see isCheckout: git, any other VCS, a bare repository)
+// from the rest.
+func splitRepositories(ws string, names []string) (rest, repos []string) {
+	for _, n := range names {
+		if isCheckout(filepath.Join(ws, n)) {
+			repos = append(repos, n)
+		} else {
+			rest = append(rest, n)
+		}
+	}
+	return rest, repos
 }
 
 // enclosingRepo returns the top level of the repository ws sits inside, or ""

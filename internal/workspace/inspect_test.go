@@ -386,3 +386,52 @@ func TestReapHoldsARepositoryInAnIgnoredDirectory(t *testing.T) {
 		})
 	}
 }
+
+// A hand clone beside the clones, in a ~/Workspaces committed with
+// `git add -A`, is recorded as a gitlink: the sha of its HEAD and none of its
+// commits. Status then read clean, and reap deleted the only copy (#319).
+func TestReapHoldsAHandCloneTheEnclosingRepoHasAsAGitlink(t *testing.T) {
+	root := t.TempDir()
+	ws, _ := longLivedWorkspace(t, root)
+	enc := enclosingRepoIn(t, root)
+	hand := filepath.Join(ws, "hand")
+	mustGit(t, "", "init", "-q", "-b", "main", hand)
+	commitFile(t, hand, "fix.txt", "never pushed\n", "fix")
+	rel, err := filepath.Rel(enc, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, enc, "add", "--", filepath.Join(rel, "hand"), filepath.Join(rel, ".workspace.json"))
+	mustGit(t, enc, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "track")
+	if b := blockersOf(t, ws); !blockersMention(b, "hand is a repository of its own") {
+		t.Fatalf("hand/, whose commit the enclosing repository records only by sha, does not hold: %v", b)
+	}
+}
+
+// diff.ignoreSubmodules=all in the enclosing repository hid a gitlinked hand
+// clone that moved on, with a new commit and an untracked file. Every
+// repository beside the clones holds now; the status that judges the other
+// names ignores no submodule either (#319).
+func TestReapHoldsAGitlinkedHandCloneThatMovedOn(t *testing.T) {
+	root := t.TempDir()
+	ws, _ := longLivedWorkspace(t, root)
+	enc := enclosingRepoIn(t, root)
+	remote := filepath.Join(root, "hand.git")
+	mustGit(t, "", "init", "-q", "--bare", remote)
+	hand := filepath.Join(ws, "hand")
+	mustGit(t, "", "clone", "-q", "--", remote, hand)
+	commitFile(t, hand, "a.txt", "pushed\n", "a")
+	mustGit(t, hand, "push", "-q", "origin", "HEAD:refs/heads/main")
+	rel, err := filepath.Rel(enc, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, enc, "add", "--", filepath.Join(rel, "hand"), filepath.Join(rel, ".workspace.json"))
+	mustGit(t, enc, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "track")
+	mustGit(t, enc, "config", "diff.ignoreSubmodules", "all")
+	commitFile(t, hand, "more.txt", "never pushed\n", "more")
+	writeTestFile(t, filepath.Join(hand, "untracked.txt"), "only copy\n")
+	if b := blockersOf(t, ws); !blockersMention(b, "hand is a repository of its own") {
+		t.Fatalf("hand/ with a new commit and an untracked file, under diff.ignoreSubmodules=all, does not hold: %v", b)
+	}
+}
