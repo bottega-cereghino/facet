@@ -435,3 +435,53 @@ func TestReapHoldsAGitlinkedHandCloneThatMovedOn(t *testing.T) {
 		t.Fatalf("hand/ with a new commit and an untracked file, under diff.ignoreSubmodules=all, does not hold: %v", b)
 	}
 }
+
+// A repository of another VCS, or a bare one, in a directory the clone
+// ignores was walked past: only a .git counted. A bare backup the clone pushes
+// to also made its commits read as pushed, so reap deleted both copies (#336).
+func TestReapHoldsAnyRepositoryInAnIgnoredDirectory(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(t *testing.T, clone, dir string)
+	}{
+		{"bare git backup", func(t *testing.T, clone, dir string) {
+			mustGit(t, "", "init", "-q", "--bare", dir)
+			mustGit(t, clone, "remote", "add", "backup", dir)
+			commitFile(t, clone, "work.txt", "pushed only to the backup\n", "work")
+			mustGit(t, clone, "push", "-q", "backup", "HEAD:refs/heads/wip")
+		}},
+		{"mercurial checkout", func(t *testing.T, _, dir string) {
+			mkdirs(t, filepath.Join(dir, ".hg", "store"))
+			writeTestFile(t, filepath.Join(dir, ".hg", "store", "00changelog.i"), "history\n")
+			writeTestFile(t, filepath.Join(dir, "fix.txt"), "a local fix\n")
+		}},
+		{"fossil repository file", func(t *testing.T, _, dir string) {
+			mkdirs(t, dir)
+			writeTestFile(t, filepath.Join(dir, "notes.fossil"), "SQLite format 3\n")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws, clone := longLivedWorkspace(t, t.TempDir())
+			excludeIn(t, clone, "vendor/")
+			dir := filepath.Join(clone, "vendor", "lib")
+			tc.build(t, clone, dir)
+			if got := gitOut(t, clone, "status", "--porcelain"); got != "" {
+				t.Fatalf("the clone should read clean, vendor/ being ignored: %q", got)
+			}
+			st, err := Inspect(ws, gitx.Git{}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasBlocker(st, filepath.Join("vendor", "lib")) {
+				t.Fatalf("reap would delete vendor/lib: %v", st.Blockers())
+			}
+		})
+	}
+}
+
+func mkdirs(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}

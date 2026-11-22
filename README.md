@@ -596,10 +596,13 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsARealDirectoryAtALinkName`), and `facet add link` refuses a
   name a directory already holds, before it writes the manifest
   (`TestAddLinkRefusesARealDirectoryAtItsName`).
-- **`reap` refuses while a git repository sits in a directory a clone
+- **`reap` refuses while a repository sits in a directory a clone
   ignores**, such as a fork cloned into `vendor/` to patch: its commits are
   invisible to the checks above, and it goes with the clone
-  (`TestReapHoldsARepositoryInAnIgnoredDirectory`).
+  (`TestReapHoldsARepositoryInAnIgnoredDirectory`). Any VCS counts, and so
+  does a bare repository, which has no `.git` (a backup the clone pushes to
+  there would make its commits read as pushed)
+  (`TestReapHoldsAnyRepositoryInAnIgnoredDirectory`).
 - **What `reap` does not protect:** other files git ignores inside a clone (`.env`,
   `node_modules`, build output: holding on them would hold every workspace), and
   commits reachable only from a local tag (a clone carries every upstream tag,
