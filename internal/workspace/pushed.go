@@ -113,7 +113,13 @@ func remoteCounts(git gitx.Runner, url, dir, gone string) bool {
 			return false
 		}
 	}
-	inside, err := alternateInside(filepath.Join(realPath(dirs[1]), "objects"), gone)
+	// The objects directory itself may be a link into the workspace (#382),
+	// as an alternate may.
+	objects := filepath.Join(realPath(dirs[1]), "objects")
+	if isUnder(root, realPath(objects)) {
+		return false
+	}
+	inside, err := alternateInside(objects, gone)
 	return err == nil && inside == ""
 }
 

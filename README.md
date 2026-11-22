@@ -532,8 +532,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   resolved as git reads it: a directory outside whose `.git` is a gitfile or a
   symlink into the clone is the clone
   (`TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone`), and a backup that
-  borrows the clone's objects through its alternates (`git clone --shared`)
-  holds none of them
+  borrows the clone's objects through its alternates (`git clone --shared`),
+  or whose `objects` directory is a link into the clone
+  (`TestReapHoldsWorkPushedToABackupWhoseObjectsAreTheClones`), holds none of
+  them
   (`TestReapHoldsWorkPushedToABackupThatBorrowsTheClonesObjects`). In a worktree
   clone, whose branches are the checkout's and stay with it, HEAD and the
   worktree's own refs count (`refs/worktree/*`, `refs/bisect/*`, and
