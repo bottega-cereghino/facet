@@ -6,6 +6,18 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.12.0](https://github.com/bottega-cereghino/facet/compare/v0.11.0...v0.12.0) (2026-11-22)
+
+
+### Added
+
+* **queue:** let the gate skip one run with exit 3 and move on ([#431](https://github.com/bottega-cereghino/facet/issues/431)) ([22cea59](https://github.com/bottega-cereghino/facet/commit/22cea59d6eb1ca8bad308f3494ec49cab07f38b2)), refs [#430](https://github.com/bottega-cereghino/facet/issues/430)
+
+
+### Fixed
+
+* **queue:** have --dry-run check that spawn can route each start ([#428](https://github.com/bottega-cereghino/facet/issues/428)) ([e53f879](https://github.com/bottega-cereghino/facet/commit/e53f879cf930dd8b155f48ceb5a43fe25126bbc6)), refs [#427](https://github.com/bottega-cereghino/facet/issues/427)
+
 ## [0.11.0](https://github.com/bottega-cereghino/facet/compare/v0.10.0...v0.11.0) (2026-11-22)
 
 
