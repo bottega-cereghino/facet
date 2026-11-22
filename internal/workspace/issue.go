@@ -40,7 +40,7 @@ type CloneState struct {
 	// the worktree is removed, so only what removing it loses is judged: its
 	// uncommitted files and the commits only its HEAD reaches.
 	WorktreeOf string
-	// Unpushed counts commits reachable from HEAD or any local branch that no
+	// Unpushed counts commits reachable from a local ref (walkedRefs) that no
 	// remote has *and* whose content is not proven to have already landed on
 	// the remote's default branch (see proofLanded). This deliberately covers
 	// branches with no upstream at all, and commits made on a detached HEAD:
@@ -785,21 +785,23 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell which remotes hold its commits: %v", err))
 	}
 
-	// Commits reachable from HEAD or any local branch but from no remote-tracking
-	// branch. HEAD is named explicitly so a commit made on a detached HEAD -- on
-	// no branch at all -- is counted too; a branch that was never pushed has all
-	// of its commits counted. This is a cheap fast-path check: the common case
-	// is 0, and only then is the more expensive per-ref landing proof run.
+	// Commits reachable from a local ref but from no counted remote. Every ref
+	// is local except refs/remotes, refs/tags, refs/notes and the stash, which
+	// is counted below (walkedRefs): HEAD, so a commit on a detached HEAD
+	// counts, the branches, the per-worktree refs, refs/replace, and any
+	// namespace git or a tool adds later. This is a cheap fast-path check: the
+	// common case is 0, and only then is the more expensive per-ref landing
+	// proof run.
 	//
-	// In a worktree, --branches would be the checkout's branches, which outlive
-	// the worktree, so only HEAD is counted there. The per-worktree refs are
-	// counted in both: they live in the worktree's own admin directory and go
-	// with it.
-	perWorktree := perWorktreeGlobs()
-	countArgs := append([]string{"rev-list", "--count", "HEAD", "--branches"}, perWorktree...)
-	if !own {
-		countArgs = append([]string{"rev-list", "--count", "HEAD"}, perWorktree...)
+	// In a worktree the shared refs are the checkout's, which outlive the
+	// worktree, so only HEAD and the per-worktree refs are counted there: they
+	// live in the worktree's own admin directory and go with it.
+	refs, err := walkedRefs(git, p, own)
+	if err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not list its refs: %v", err))
 	}
+	c.Unverifiable = append(c.Unverifiable, refs.odd...)
+	countArgs := append([]string{"rev-list", "--count"}, refs.countArgs...)
 	countArgs = append(countArgs, pushed.not()...)
 	if out, err := git.Run(p, nil, countArgs...); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git rev-list failed: %v", err))
@@ -814,7 +816,7 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 		if pr != nil {
 			commitPR, _ = pr.(CommitPRLookup)
 		}
-		if unpushed, landed, defUnresolved, err := unpushedLanding(git, p, repo, commitPR, !own, pushed); err != nil {
+		if unpushed, landed, defUnresolved, err := unpushedLanding(git, p, repo, commitPR, refs.names, pushed); err != nil {
 			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not verify unpushed commits: %v", err))
 		} else {
 			c.Unpushed = unpushed
@@ -836,24 +838,8 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 	return c
 }
 
-// perWorktreeRefs are the namespaces git keeps per worktree, in its own admin
-// directory: refs/worktree, refs/bisect, and refs/rewritten, where an
-// interrupted `rebase --rebase-merges` keeps its labels. A commit only one of
-// them reaches goes with the worktree.
-var perWorktreeRefs = []string{"refs/worktree", "refs/bisect", "refs/rewritten"}
-
-// perWorktreeGlobs names perWorktreeRefs as rev-list arguments.
-func perWorktreeGlobs() []string {
-	globs := make([]string, 0, len(perWorktreeRefs))
-	for _, ns := range perWorktreeRefs {
-		globs = append(globs, "--glob="+ns+"/*")
-	}
-	return globs
-}
-
-// unpushedLanding walks every local ref -- each branch tip, plus a detached
-// HEAD -- and decides, per ref, whether its not-yet-remote commits are
-// genuinely unpushed or have already landed on the remote's default branch
+// unpushedLanding walks the local refs names lists (walkedRefs) and decides,
+// per ref, whether its not-yet-remote commits are genuinely unpushed or have already landed on the remote's default branch
 // under a different sha (the squash-merge, auto-delete-on-merge shape
 // facet#66 is about). It replaces an earlier per-commit patch-identity design
 // (`git cherry`): that design could never recognize a multi-commit branch
@@ -876,48 +862,23 @@ func perWorktreeGlobs() []string {
 // classification is still per ref, because "landed" is a property of the ref
 // that was proven, not of an individual sha; only the accounting is a set.
 //
-// headOnly walks HEAD alone, with the per-worktree refs: in a linked worktree
-// the local branches are the checkout's, and they outlive the worktree.
-func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup, headOnly bool, pushed pushedRefs) (unpushed, landed int, defUnresolved bool, err error) {
+// names are full ref names, and "HEAD" when HEAD's branch is not listed, so no
+// branch or tag of the same name stands in for a ref.
+func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup, names []string, pushed pushedRefs) (unpushed, landed int, defUnresolved bool, err error) {
 	// Only a counted origin's default branch proves anything landed.
 	def := ""
 	if pushed.origin {
 		def = remoteDefaultBranch(git, dir)
 	}
 
-	current, detached, err := currentRef(git, dir)
+	current, _, err := currentRef(git, dir)
 	if err != nil {
 		return 0, 0, false, err
 	}
-	var refs []string
-	switch {
-	case headOnly && detached:
-		refs = []string{"HEAD"}
-	case headOnly:
-		refs = []string{current}
-	default:
-		refsOut, err := git.Run(dir, nil, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-		if err != nil {
-			return 0, 0, false, err
-		}
-		refs = strings.Fields(refsOut)
-		if detached {
-			refs = append(refs, "HEAD")
-		}
-	}
-	// Per-worktree refs live in the worktree's own admin directory, which goes
-	// with it, whether it is a linked worktree or the main one; in a linked
-	// worktree for-each-ref lists only its own. Full names, so no branch or tag
-	// of the same name stands in.
-	perWorktree, err := git.Run(dir, nil, append([]string{"for-each-ref", "--format=%(refname)"}, perWorktreeRefs...)...)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	refs = append(refs, strings.Fields(perWorktree)...)
 
 	unpushedShas := map[string]struct{}{}
 	landedShas := map[string]struct{}{}
-	for _, ref := range refs {
+	for _, ref := range names {
 		out, err := git.Run(dir, nil, append([]string{"rev-list", ref}, pushed.not()...)...)
 		if err != nil {
 			return 0, 0, false, err
@@ -938,7 +899,7 @@ func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup,
 			return 0, 0, false, err
 		}
 		tip := strings.TrimSpace(shaOut)
-		isHead := ref == current || (detached && ref == "HEAD")
+		isHead := ref == current || ref == "HEAD"
 		into := unpushedShas
 		if proofLanded(git, dir, tip, repo, def, commitPR, isHead) {
 			into = landedShas
@@ -1049,7 +1010,7 @@ func proofLanded(git gitx.Runner, dir, sha, repo, def string, commitPR CommitPRL
 // currentRef reports the checked-out branch name, or detached=true if HEAD is
 // not on any branch.
 func currentRef(git gitx.Runner, dir string) (branch string, detached bool, err error) {
-	out, err := git.Run(dir, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
+	out, err := git.Run(dir, nil, "symbolic-ref", "--quiet", "HEAD")
 	if err != nil {
 		// Exit 1 here means "detached", not a failure -- HEAD simply is not a
 		// symbolic ref. Anything else is a genuine problem reading the repo.

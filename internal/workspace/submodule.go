@@ -205,13 +205,18 @@ func inspectGitDir(git gitx.Runner, name, g, gone string) CloneState {
 	if err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell which remotes hold its commits: %v", err))
 	}
-	countArgs := append(append([]string{"rev-list", "--count", "HEAD", "--branches"}, perWorktreeGlobs()...), pushed.not()...)
+	refs, err := walkedRefs(git, g, true)
+	if err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not list its refs: %v", err))
+	}
+	c.Unverifiable = append(c.Unverifiable, refs.odd...)
+	countArgs := append(append([]string{"rev-list", "--count"}, refs.countArgs...), pushed.not()...)
 	if out, err := git.Run(g, nil, countArgs...); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git rev-list failed: %v", err))
 	} else if count, err := strconv.Atoi(strings.TrimSpace(out)); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not read the unpushed-commit count: %v", err))
 	} else if count > 0 {
-		if unpushed, landed, defUnresolved, err := unpushedLanding(git, g, "", nil, false, pushed); err != nil {
+		if unpushed, landed, defUnresolved, err := unpushedLanding(git, g, "", nil, refs.names, pushed); err != nil {
 			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not verify unpushed commits: %v", err))
 		} else {
 			c.Unpushed = unpushed
