@@ -507,7 +507,9 @@ func looseFiles(git gitx.Runner, ws string, m *manifest.Manifest) (enclosing str
 		if _, ok := m.Links[n]; ok && e.Type()&os.ModeSymlink != 0 {
 			continue
 		}
-		if ownFiles[n] || (n == claudeMD && spawnsClaudeMD(ws, m)) {
+		// An own name is facet's only as a regular file: a directory or a
+		// repository at one is judged like any loose entry (#401).
+		if (ownFiles[n] && e.Type().IsRegular()) || (n == claudeMD && spawnsClaudeMD(ws, m)) {
 			continue
 		}
 		names = append(names, n)
