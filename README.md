@@ -497,7 +497,10 @@ The stop is the hold file, or an interrupt. Remove the file and start
 `facet queue --dry-run` prints the runs the next starts would take, up to
 `max`, and does not spawn a workspace or start an agent. It runs the gate.
 A gate that fails is printed as a start that would not happen, and later
-issues are not listed behind it: the queue would wait on that issue. A
+issues are not listed behind it: the queue would wait on that issue. It
+also runs spawn's routing checks: an issue whose repository the routing
+file does not map, or marks `spawnable: false`, is printed as a start that
+would not happen, and the next run is listed, as the queue would move on. A
 slot the higher projects cannot fill is listed for the next project down,
 as the queue would start it. The hold file prints that nothing would
 start, and the issues are not listed.

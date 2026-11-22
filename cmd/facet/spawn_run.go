@@ -44,22 +44,9 @@ func runSpawn(o spawnOpts) error {
 	// named up front. It warns rather than refuses; a credential that cannot
 	// reach GitHub at all fails at the issue lookup, before anything is created.
 	auth := warnPreflight(os.Stderr, "spawn")
-	route, err := routing.Load(roots.Routing)
+	route, homeKey, err := spawnRoute(o.Repo)
 	if err != nil {
 		return err
-	}
-	homeKey := route.KeyForRepo(o.Repo)
-	if homeKey == "" {
-		return fmt.Errorf("%s is not in %s's ownerRepoToKey", o.Repo, roots.Routing)
-	}
-	// Checked before the issue lookup, same as the scope check above:
-	// a repo marked spawnable:false (the workspaces root itself, cloned into
-	// itself, is the case this exists for) should never reach the forge on the
-	// way to a refusal.
-	if !route.Repos[homeKey].IsSpawnable() {
-		return fmt.Errorf("%s (%s) is marked spawnable:false in %s\n"+
-			"fix: work it directly -- it already has a standing checkout -- or add it to a workspace by hand with `facet new`/`facet add`, not `facet spawn`",
-			o.Repo, homeKey, roots.Routing)
 	}
 
 	iss, err := gh.ViewIssue(o.Repo, o.Number)
@@ -578,4 +565,28 @@ func writeBackScope(gh ghx.Client, repo string, number int, keys []string, rep w
 	}
 	rep.Created("issue body: Repos in scope = %s", strings.Join(keys, ", "))
 	return nil
+}
+
+// spawnRoute loads the routing file and returns it with the key of repo,
+// the issue's home. It refuses a repo the file does not map and one marked
+// spawnable:false. It reads no network, so spawn runs it before the issue
+// lookup and `facet queue --dry-run` runs it for each start it lists.
+func spawnRoute(repo string) (*routing.Routing, string, error) {
+	route, err := routing.Load(roots.Routing)
+	if err != nil {
+		return nil, "", err
+	}
+	homeKey := route.KeyForRepo(repo)
+	if homeKey == "" {
+		return nil, "", fmt.Errorf("%s is not in %s's ownerRepoToKey\nfix: add it to ownerRepoToKey and repos in that file", repo, roots.Routing)
+	}
+	// A repo marked spawnable:false (the workspaces root itself, cloned into
+	// itself, is the case this exists for) should never reach the forge on
+	// the way to a refusal.
+	if !route.Repos[homeKey].IsSpawnable() {
+		return nil, "", fmt.Errorf("%s (%s) is marked spawnable:false in %s\n"+
+			"fix: work it directly -- it already has a standing checkout -- or add it to a workspace by hand with `facet new`/`facet add`, not `facet spawn`",
+			repo, homeKey, roots.Routing)
+	}
+	return route, homeKey, nil
 }

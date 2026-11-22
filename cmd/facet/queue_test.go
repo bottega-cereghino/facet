@@ -1673,3 +1673,41 @@ func TestQueueConfigTakesOneHoldFileOrAList(t *testing.T) {
 		t.Fatalf("hold 3: %v", err)
 	}
 }
+
+func TestQueueDryRunSkipsARunSpawnCannotRoute(t *testing.T) {
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other", "acme/third"})
+	cfg.Max = 2
+	cfg.Priorities = writePriorities(t, "widgets\nother\nthird\n")
+	var buf bytes.Buffer
+	err := dryQueue(context.Background(), cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			switch repo {
+			case "acme/widgets":
+				return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
+			case "acme/other":
+				return []ghx.Issue{openIssue(2, "2026-01-01T00:00:00Z")}, nil
+			case "acme/third":
+				return []ghx.Issue{openIssue(3, "2026-01-01T00:00:00Z")}, nil
+			default:
+				return nil, fmt.Errorf("unexpected repo %s", repo)
+			}
+		},
+		route: func(repo string) error {
+			if repo == "acme/other" {
+				return errors.New("acme/other is not in routing.json's ownerRepoToKey")
+			}
+			return nil
+		},
+		out: &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "would start acme/widgets#1") ||
+		!strings.Contains(got, "would not start acme/other#2: spawn: acme/other is not in") ||
+		!strings.Contains(got, "would start acme/third#3") ||
+		strings.Contains(got, "would start acme/other#2") {
+		t.Fatalf("dry-run =\n%s", got)
+	}
+}
