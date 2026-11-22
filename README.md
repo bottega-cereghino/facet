@@ -392,6 +392,72 @@ only when it is on that issue. A comment id names a comment anywhere in the
 repository, so an id copied from the wrong thread is refused, with the issue it
 is really on.
 
+## One agent per queued issue
+
+`facet queue` watches the open issues that carry a label (by default `next`),
+spawns a workspace for the next one, and starts an agent there. When that
+agent exits, it takes the next issue. Several can run at once, up to `max`
+across every repository in the config. The default is 6.
+
+```sh
+facet queue --config queue.json
+```
+
+`--config` is a JSON file. With the flag omitted, `FACET_QUEUE` names it.
+`docs/queue.example.json` is a complete file: the commands in it are
+placeholders, and you replace them with the argument list you actually run.
+Nothing in the binary names an agent. An issue's labels pick the entry; the
+first match wins; the entry whose label is empty runs when none of the others
+match. Labels match without regard to case.
+
+The command is an argument list, not a shell command. One argument contains
+`{prompt}`, and that is where the task text goes. The issue title is
+substituted into the text, and a title is someone else's words, so it is
+never passed through a shell.
+
+| field | |
+| --- | --- |
+| `max` | how many agents run at once. Omitted means 6. |
+| `hold` | a file path. When it exists, the queue starts nothing and stops. An agent already running is left to finish. |
+| `gate` | a command run before each start. A non-zero exit waits `wait` and tries later. Omitted means there is no gate. |
+| `wait` | how long to wait before looking again. Omitted means 30s. |
+| `order` | `oldest` (the default) or `milestone`. |
+| `label` | which label marks an issue as queued. Omitted means `next`. |
+| `repos` | the `owner/name` repositories to read. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}`. |
+| `agents` | one command per label. `{prompt}` is the task text. |
+
+`oldest` takes the earliest `createdAt`. `milestone` takes an issue that is
+in a milestone before one that is not, a milestone with a due date before one
+without, earlier due dates first, and within a milestone the oldest issue.
+The same created time is broken by repository name, then by issue number.
+
+The agent starts in the workspace directory. The `CLAUDE.md` there is the one
+`facet spawn` wrote, with the issue text quoted. The queue does not reap
+workspaces. When it stops, the directories stay, and the next time it takes
+that issue it uses the workspace already on disk instead of spawning another.
+
+An issue this process has already handed to an agent is not handed out again,
+including one whose agent exited with a non-zero status. A spawn that failed,
+and a command that never started, are retried after `wait`. Remove the queue
+label when the work is done; the next run of `facet queue` starts an agent
+for whatever still carries it.
+
+At most 1000 open issues per repository are considered. When a repository
+returns exactly that many, the queue says so: any beyond the cap are unseen.
+
+The stop is the hold file, or an interrupt. Remove the file and start
+`facet queue` again to resume.
+
+`TestQueueStopsWhenTheHoldFileExists`, `TestQueueWaitsWhenTheGateFails`,
+`TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
+`TestQueueTakesTheOldestIssueFirst`,
+`TestQueueOrdersAMilestoneBeforeAnUnscheduledIssue`,
+`TestQueueDoesNotHandTheSameIssueOutTwice`,
+`TestQueueRetriesASpawnThatFailed`,
+`TestQueueRetriesWhenTheAgentCannotStart` and
+`TestQueueUsesAWorkspaceThatAlreadyExists` hold this.
+
 ## The credential preflight
 
 Everything facet does on the forge rides one `gh` credential, shared with

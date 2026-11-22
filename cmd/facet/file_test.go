@@ -28,6 +28,12 @@ type fakeGH struct {
 	searchErr  error       // what SearchIssues fails with
 	searches   int         // SearchIssues calls
 
+	// open is what OpenIssues returns for a repo. Nil means none, so tests
+	// that are not about the queue do not have to script a list.
+	open      map[string][]ghx.Issue
+	openErr   error
+	openCalls []string
+
 	issueIDs  map[string]int64 // "owner/repo#n" -> id
 	issueErrs map[string]error // "owner/repo#n" -> error from IssueID
 
@@ -78,6 +84,17 @@ func (f *fakeGH) SetIssueBody(_ string, _ int, _ string) error       { return ni
 func (f *fakeGH) SearchIssues(_, _ string) ([]ghx.Issue, error) {
 	f.searches++
 	return f.searchHits, f.searchErr
+}
+
+func (f *fakeGH) OpenIssues(repo, label string) ([]ghx.Issue, error) {
+	f.openCalls = append(f.openCalls, repo+" "+label)
+	if f.openErr != nil {
+		return nil, f.openErr
+	}
+	if f.open == nil {
+		return nil, nil
+	}
+	return append([]ghx.Issue(nil), f.open[repo]...), nil
 }
 
 func (f *fakeGH) CreateIssue(_, _, _ string, labels []string) (string, error) {

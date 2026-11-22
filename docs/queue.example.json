@@ -1,0 +1,24 @@
+{
+  "max": 6,
+  "hold": "facet-queue.hold",
+  "gate": ["gate"],
+  "wait": "30s",
+  "order": "oldest",
+  "label": "next",
+  "repos": ["acme/widgets"],
+  "prompt": "Do {repo}#{number}: {title}. The workspace is {workspace}. Do the work the issue describes. Merge when the checks are green. Comment the result on the issue. Remove the {label} label when the issue is done. Then exit.",
+  "agents": [
+    {
+      "label": "codex",
+      "command": ["agent", "--for", "codex", "{prompt}"]
+    },
+    {
+      "label": "gemini",
+      "command": ["agent", "--for", "gemini", "{prompt}"]
+    },
+    {
+      "label": "",
+      "command": ["agent", "{prompt}"]
+    }
+  ]
+}
