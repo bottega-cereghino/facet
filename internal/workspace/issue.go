@@ -1134,7 +1134,17 @@ func Reap(st *IssueState, git gitx.Runner) error {
 		if c.WorktreeOf == "" {
 			continue
 		}
-		if err := removeWorktree(git, c.WorktreeOf, filepath.Join(st.Dir, c.Dir)); err != nil {
+		p := filepath.Join(st.Dir, c.Dir)
+		// A clone entry that is a symlink is a link, not a clone: git would
+		// follow it and remove the worktree it points at, outside the
+		// workspace. removeAllForce below unlinks it and follows nothing.
+		if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		if !isUnder(realPath(st.Dir), realPath(p)) {
+			return fmt.Errorf("the clone %s leads to %s, outside the workspace; left alone\nfix: remove the link by hand, then reap again", p, realPath(p))
+		}
+		if err := removeWorktree(git, c.WorktreeOf, p); err != nil {
 			return err
 		}
 	}

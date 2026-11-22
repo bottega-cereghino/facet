@@ -64,3 +64,36 @@ func TestReapRefusesAWorkspacesClone(t *testing.T) {
 		t.Fatalf("inspectTarget(clone) = %v; want a refusal naming the workspace", err)
 	}
 }
+
+// A clone entry that is a symlink to a worktree elsewhere is a link, not a
+// clone: even --force unlinks it and leaves the worktree it points at, ignored
+// files included (#323).
+func TestReapForceUnlinksASymlinkedCloneAndKeepsItsTarget(t *testing.T) {
+	root, _, _ := reapableRoot(t)
+	checkout, wt := branchSetup(t)
+	putFile(t, filepath.Join(checkout, ".git", "info", "exclude"), ".env\n")
+	env := filepath.Join(wt, ".env")
+	putFile(t, env, "API_KEY=only-copy\n")
+
+	ws := filepath.Join(root, "facet-test-link")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origin := gitIn(t, checkout, "remote", "get-url", "origin")
+	if err := (&manifest.Manifest{Name: "link", Clones: map[string]string{"app": origin}}).Write(ws); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(wt, filepath.Join(ws, "app")); err != nil {
+		t.Fatal(err)
+	}
+	if err := runReap(t, nil, filepath.Base(ws), "--yes", "--force"); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, env) {
+		t.Fatalf("reap --force of %s deleted %s, a worktree outside it reached through a symlink", ws, wt)
+	}
+	if exists(t, ws) {
+		t.Errorf("the workspace %s is still there", ws)
+	}
+	gitIn(t, wt, "status", "--porcelain")
+}
