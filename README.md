@@ -529,7 +529,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   names cannot miss the next one (`TestReapHoldsACommitOnlyALocalRefReaches`).
   A local ref that points at a tree or a blob holds, since nothing tells
   whether a remote has it (`TestReapHoldsALocalRefThatIsNotACommit`); the stash
-  holds as a stash (`TestReapDoesNotCountRefsOutsideLocalWork`). Unlike
+  holds as a stash (`TestReapDoesNotCountRefsOutsideLocalWork`), even once its
+  reflog is expired and `git stash list` prints nothing
+  (`TestReapHoldsAStashWhoseReflogWasExpired`). Unlike
   `@{u}..HEAD`, that also catches a branch which was never
   pushed at all — the branch most easily lost. Only the refs of a configured
   remote count, refreshed by the fetch below, so a ref left under
@@ -540,9 +542,14 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). The repository is
   resolved as git reads it: a directory outside whose `.git` is a gitfile or a
   symlink into the clone is the clone
-  (`TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone`), and a backup that
-  borrows the clone's objects through its alternates (`git clone --shared`)
-  holds none of them
+  (`TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone`); a URL that names a
+  file counts only when the file is a bundle, since git follows a gitfile
+  there too (`TestReapHoldsWorkWhoseRemoteURLIsAGitfileIntoTheClone`,
+  `TestReapCountsWorkInABundleOutsideTheWorkspaceAsPushed`); and a backup that
+  borrows the clone's objects through its alternates (`git clone --shared`),
+  or whose `objects` directory is a link into the clone
+  (`TestReapHoldsWorkPushedToABackupWhoseObjectsAreTheClones`), holds none of
+  them
   (`TestReapHoldsWorkPushedToABackupThatBorrowsTheClonesObjects`). In a worktree
   clone, whose branches are the checkout's and stay with it, HEAD and the
   worktree's own refs count (`refs/worktree/*`, `refs/bisect/*`, and
@@ -590,7 +597,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   changes what it stores, such as git-crypt's, holds the file. A clone whose
   `core.worktree` points elsewhere holds, since git would read that directory
   instead of the one reap deletes
-  (`TestReapSeesFilesWhenCoreWorktreePointsElsewhere`).
+  (`TestReapSeesFilesWhenCoreWorktreePointsElsewhere`). A rebase, merge,
+  cherry-pick or revert stopped partway holds, since its state lives only in
+  the git directory: a rebase stopped at a `break` leaves a clean tree while
+  the edits it autostashed are named by no ref
+  (`TestReapHoldsARebaseInProgress`).
 - **`reap` reads the repository on disk, not what the environment tells git.**
   Every git call drops `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the
   other variables that point git at another repository, index or config (git

@@ -28,4 +28,8 @@ func TestHoldKinds(t *testing.T) {
 	if len(st.Blockers()) == 0 {
 		t.Error("a state with kinds has no blockers")
 	}
+	stopped := &IssueState{Clone: []CloneState{{Dir: "a", InProgress: []string{"a rebase"}}}}
+	if got := stopped.HoldKinds(); !reflect.DeepEqual(got, []string{"uncommitted changes"}) {
+		t.Errorf("a rebase stopped partway is kind %v, want uncommitted changes", got)
+	}
 }
