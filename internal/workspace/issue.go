@@ -349,8 +349,8 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 		if repo == "" {
 			clonePR = nil
 		}
-		st.Clone = append(st.Clone, inspectClone(git, dir, p, repo, clonePR))
-		st.Clone = append(st.Clone, submoduleStates(git, dir, p)...)
+		st.Clone = append(st.Clone, inspectClone(git, dir, p, ws, repo, clonePR))
+		st.Clone = append(st.Clone, submoduleStates(git, dir, p, ws)...)
 	}
 
 	st.Enclosing, st.Loose = looseFiles(git, ws, m)
@@ -651,7 +651,10 @@ func capList(list []string, what string) []string {
 // not masquerade as a clean, empty tree. repo is the issue's home repo
 // ("owner/name"), used for the squash-merge landing proof's PR lookup; pr may
 // be nil to skip that lookup (the ancestor check alone still runs).
-func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState {
+// inspectClone judges the repository whose work tree is p, named dir. gone is
+// the directory reap deletes: a remote whose repository lies inside it is no
+// copy at all.
+func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) CloneState {
 	c := CloneState{Dir: dir}
 
 	// A probe that fails leaves WorktreeOf empty, so the clone is judged as a
@@ -730,6 +733,10 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 	} else {
 		c.StaleRemotes = stale
 	}
+	pushed, err := countedRemotes(git, p, gone)
+	if err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell which remotes hold its commits: %v", err))
+	}
 
 	// Commits reachable from HEAD or any local branch but from no remote-tracking
 	// branch. HEAD is named explicitly so a commit made on a detached HEAD -- on
@@ -746,7 +753,7 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 	if !own {
 		countArgs = append([]string{"rev-list", "--count", "HEAD"}, perWorktree...)
 	}
-	countArgs = append(countArgs, "--not", "--remotes")
+	countArgs = append(countArgs, pushed.not()...)
 	if out, err := git.Run(p, nil, countArgs...); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git rev-list failed: %v", err))
 	} else if _, err := strconv.Atoi(strings.TrimSpace(out)); err != nil {
@@ -760,7 +767,7 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 		if pr != nil {
 			commitPR, _ = pr.(CommitPRLookup)
 		}
-		if unpushed, landed, defUnresolved, err := unpushedLanding(git, p, repo, commitPR, !own); err != nil {
+		if unpushed, landed, defUnresolved, err := unpushedLanding(git, p, repo, commitPR, !own, pushed); err != nil {
 			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not verify unpushed commits: %v", err))
 		} else {
 			c.Unpushed = unpushed
@@ -809,8 +816,12 @@ func inspectClone(git gitx.Runner, dir, p, repo string, pr PRLookup) CloneState 
 //
 // headOnly walks HEAD alone, with the per-worktree refs: in a linked worktree
 // the local branches are the checkout's, and they outlive the worktree.
-func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup, headOnly bool) (unpushed, landed int, defUnresolved bool, err error) {
-	def := remoteDefaultBranch(git, dir)
+func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup, headOnly bool, pushed pushedRefs) (unpushed, landed int, defUnresolved bool, err error) {
+	// Only a counted origin's default branch proves anything landed.
+	def := ""
+	if pushed.origin {
+		def = remoteDefaultBranch(git, dir)
+	}
 
 	current, detached, err := currentRef(git, dir)
 	if err != nil {
@@ -845,7 +856,7 @@ func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup,
 	unpushedShas := map[string]struct{}{}
 	landedShas := map[string]struct{}{}
 	for _, ref := range refs {
-		out, err := git.Run(dir, nil, "rev-list", ref, "--not", "--remotes")
+		out, err := git.Run(dir, nil, append([]string{"rev-list", ref}, pushed.not()...)...)
 		if err != nil {
 			return 0, 0, false, err
 		}

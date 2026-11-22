@@ -27,8 +27,8 @@ import (
 // Untracked and ignored repositories are not looked for here: git status
 // shows the first, and ignoredRepos finds the second. A listing that fails is
 // recorded on a state of its own, so it blocks.
-func submoduleStates(git gitx.Runner, dir, p string) []CloneState {
-	n := &innerRepos{git: git, seen: map[string]bool{}}
+func submoduleStates(git gitx.Runner, dir, p, gone string) []CloneState {
+	n := &innerRepos{git: git, gone: gone, seen: map[string]bool{}}
 	if gd, err := absGitDir(git, p); err == nil {
 		n.seen[gd] = true
 	}
@@ -41,6 +41,7 @@ func submoduleStates(git gitx.Runner, dir, p string) []CloneState {
 // judged again from the modules directory.
 type innerRepos struct {
 	git    gitx.Runner
+	gone   string // the directory reap deletes
 	seen   map[string]bool
 	states []CloneState
 }
@@ -71,7 +72,7 @@ func (n *innerRepos) workTree(name, p string) {
 			continue
 		}
 		n.seen[gd] = true
-		n.states = append(n.states, inspectClone(n.git, subName, sub, "", nil))
+		n.states = append(n.states, inspectClone(n.git, subName, sub, n.gone, "", nil))
 		n.workTree(subName, sub)
 	}
 
@@ -103,7 +104,7 @@ func (n *innerRepos) modules(name, clone, mods string) {
 			where = filepath.Join(name, r)
 		}
 		label := fmt.Sprintf("%s (not checked out; its repository is %s)", filepath.Join(name, rel), where)
-		n.states = append(n.states, inspectGitDir(n.git, label, g))
+		n.states = append(n.states, inspectGitDir(n.git, label, g, n.gone))
 		n.modules(filepath.Join(name, rel), clone, filepath.Join(g, "modules"))
 	}
 }
@@ -187,7 +188,7 @@ func absGitDir(git gitx.Runner, p string) (string, error) {
 // directory g: a submodule switched away from or deinitialised. It has no
 // files to be dirty; its commits, linked worktrees and stash are judged as a
 // clone's, against its remotes fetched first.
-func inspectGitDir(git gitx.Runner, name, g string) CloneState {
+func inspectGitDir(git gitx.Runner, name, g, gone string) CloneState {
 	c := CloneState{Dir: name}
 	if stale, err := fetchRemotes(git, g); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not list its remotes: %v", err))
@@ -200,13 +201,17 @@ func inspectGitDir(git gitx.Runner, name, g string) CloneState {
 		c.Worktrees = linkedWorktrees(out)
 	}
 
-	countArgs := []string{"rev-list", "--count", "HEAD", "--branches", "--glob=refs/worktree/*", "--glob=refs/bisect/*", "--not", "--remotes"}
+	pushed, err := countedRemotes(git, g, gone)
+	if err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell which remotes hold its commits: %v", err))
+	}
+	countArgs := append([]string{"rev-list", "--count", "HEAD", "--branches", "--glob=refs/worktree/*", "--glob=refs/bisect/*"}, pushed.not()...)
 	if out, err := git.Run(g, nil, countArgs...); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git rev-list failed: %v", err))
 	} else if count, err := strconv.Atoi(strings.TrimSpace(out)); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not read the unpushed-commit count: %v", err))
 	} else if count > 0 {
-		if unpushed, landed, defUnresolved, err := unpushedLanding(git, g, "", nil, false); err != nil {
+		if unpushed, landed, defUnresolved, err := unpushedLanding(git, g, "", nil, false, pushed); err != nil {
 			c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not verify unpushed commits: %v", err))
 		} else {
 			c.Unpushed = unpushed
