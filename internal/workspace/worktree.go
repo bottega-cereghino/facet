@@ -222,6 +222,7 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 	// The worktree comes first: Reap removes it through Clone[0].WorktreeOf.
 	clones := append([]CloneState{c}, submoduleStates(git, filepath.Base(dir), dir, dir)...)
 	st := &IssueState{Dir: dir, Name: filepath.Base(dir), Worktree: true, Clone: clones}
+	st.Unaccounted, st.UnaccountedCount = census(git, dir, dir, "", cloneDirs(filepath.Dir(dir), clones), nil)
 	if clonePR != nil && c.Branch != "" && c.Branch != "HEAD" {
 		// As for an issue workspace: a lookup that fails is not "no PR".
 		if found, err := clonePR.ViewPR(repo, c.Branch); err == nil {

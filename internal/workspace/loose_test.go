@@ -109,6 +109,7 @@ func TestReapAccountsOnlyForCommittedBytes(t *testing.T) {
 	writeTestFile(t, filepath.Join(ws, "docs", "plan.md"), "the plan\n")
 	mustGit(t, enc, "add", "--", filepath.Join(rel, "docs", "plan.md"))
 	mustGit(t, enc, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "plan")
+	pushEnclosing(t, enc)
 	if b := blockersOf(t, ws); blockersMention(b, "plan.md") {
 		t.Fatalf("docs/plan.md is committed with these bytes, yet it holds: %v", b)
 	}
