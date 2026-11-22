@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/bottega-cereghino/facet/internal/ghx"
@@ -50,11 +51,23 @@ func (e *queueEnv) fill() {
 // before this is called, and a title is someone else's text: a shell would
 // turn it into a command. An empty dir keeps the current working directory,
 // which is what the gate wants; an agent is given its workspace.
+//
+// The command runs in a process group of its own. An agent, or something it
+// starts, that signals its own group would otherwise stop the queue too:
+// under launchd the queue then logged "stopping" after each agent and was
+// restarted (#420). Stopping the queue still stops the command: the cancel
+// sends SIGTERM to the whole group, and SIGKILL follows if it has not exited
+// within queueStopGrace.
 func runArgv(ctx context.Context, dir string, argv []string) error {
 	if len(argv) == 0 || argv[0] == "" {
 		return fmt.Errorf("empty command\nfix: set the command in the queue config")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	}
+	cmd.WaitDelay = queueStopGrace
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -62,6 +75,10 @@ func runArgv(ctx context.Context, dir string, argv []string) error {
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
+
+// queueStopGrace is how long a command has to exit after the queue stops
+// it, before it is killed.
+const queueStopGrace = 10 * time.Second
 
 type queueRunner struct {
 	cfg      queueConfig
