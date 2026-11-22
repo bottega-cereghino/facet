@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -204,11 +205,11 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 2, "2026-01-02T00:00:00Z", "Hinge", "next", "fix"),
 		qIssue("acme/widgets", 3, "2026-01-03T00:00:00Z", "Bolt", "next", "chore"),
 	}
-	run, held := bundleFor(cfg, orderQueued(small, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#1", "acme/widgets#2", "acme/widgets#3")
+	run := bundleFor(cfg, orderQueued(small, nil), open)
+	wantRun(t, run, "acme/widgets#1", "acme/widgets#2", "acme/widgets#3")
 
-	run, held = bundleFor(bundleConfig(2), orderQueued(small, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#1", "acme/widgets#2")
+	run = bundleFor(bundleConfig(2), orderQueued(small, nil), open)
+	wantRun(t, run, "acme/widgets#1", "acme/widgets#2")
 
 	// A feature stops the run even when its effort matches the small issues.
 	// The later fix does not jump ahead of it.
@@ -217,45 +218,45 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 4, "2026-01-02T00:00:00Z", "Panel", "next", "Feat"),
 		qIssue("acme/widgets", 3, "2026-01-03T00:00:00Z", "Bolt", "next", "fix"),
 	}
-	run, held = bundleFor(cfg, orderQueued(stopped, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#1")
+	run = bundleFor(cfg, orderQueued(stopped, nil), open)
+	wantRun(t, run, "acme/widgets#1")
 
 	alone := []queuedIssue{
 		qIssue("acme/widgets", 5, "2020-01-01T00:00:00Z", "Study", "next", "Research"),
 		small[0],
 		small[1],
 	}
-	run, held = bundleFor(cfg, orderQueued(alone, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#5")
+	run = bundleFor(cfg, orderQueued(alone, nil), open)
+	wantRun(t, run, "acme/widgets#5")
 
 	// feature is not feat. Same effort, so the two share a run.
 	word := []queuedIssue{
 		qIssue("acme/widgets", 6, "2026-01-01T00:00:00Z", "Named", "next", "fix", "feature"),
 		small[1],
 	}
-	run, held = bundleFor(cfg, orderQueued(word, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#6", "acme/widgets#2")
+	run = bundleFor(cfg, orderQueued(word, nil), open)
+	wantRun(t, run, "acme/widgets#6", "acme/widgets#2")
 
 	repos := []queuedIssue{
 		small[0],
 		qIssue("acme/other", 7, "2026-01-02T00:00:00Z", "Other", "next", "fix"),
 	}
-	run, held = bundleFor(cfg, orderQueued(repos, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#1")
+	run = bundleFor(cfg, orderQueued(repos, nil), open)
+	wantRun(t, run, "acme/widgets#1")
 
 	agents := []queuedIssue{
 		small[0],
 		qIssue("acme/widgets", 8, "2026-01-02T00:00:00Z", "Codex", "next", "fix", "codex"),
 	}
-	run, held = bundleFor(cfg, orderQueued(agents, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#1")
+	run = bundleFor(cfg, orderQueued(agents, nil), open)
+	wantRun(t, run, "acme/widgets#1")
 
 	effort := []queuedIssue{
 		small[0],
 		qIssue("acme/widgets", 9, "2026-01-02T00:00:00Z", "Design", "next", "design"),
 	}
-	run, held = bundleFor(cfg, orderQueued(effort, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#1")
+	run = bundleFor(cfg, orderQueued(effort, nil), open)
+	wantRun(t, run, "acme/widgets#1")
 
 	// An issue whose labels disagree is not bundled past, and it is not taken.
 	bad := []queuedIssue{
@@ -263,34 +264,31 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 10, "2026-01-02T00:00:00Z", "Both", "next", "fix", "design"),
 		small[2],
 	}
-	run, held = bundleFor(cfg, orderQueued(bad, nil), nil, open)
-	wantRun(t, run, held, "", "acme/widgets#1")
+	run = bundleFor(cfg, orderQueued(bad, nil), open)
+	wantRun(t, run, "acme/widgets#1")
 
 	// An issue already in flight is skipped. The next one that fits still joins.
-	run, held = bundleFor(cfg, orderQueued(small, nil), nil, func(iss queuedIssue) bool {
+	run = bundleFor(cfg, orderQueued(small, nil), func(iss queuedIssue) bool {
 		return iss.Issue.Number == 2
 	})
-	wantRun(t, run, held, "", "acme/widgets#1", "acme/widgets#3")
+	wantRun(t, run, "acme/widgets#1", "acme/widgets#3")
 
-	run, held = bundleFor(cfg, orderQueued(small, nil), nil, func(queuedIssue) bool { return true })
-	wantRun(t, run, held, "acme/widgets")
+	run = bundleFor(cfg, orderQueued(small, nil), func(queuedIssue) bool { return true })
+	wantRun(t, run)
 
 	projects := []string{"widgets", "other"}
 	ranked := orderQueued([]queuedIssue{
 		qIssue("acme/widgets", 1, "2026-06-01T00:00:00Z", "Plain", "next", "fix"),
 		qIssue("acme/other", 2, "2020-01-01T00:00:00Z", "Urgent", "next", "fix", "p1"),
 	}, projects)
-	run, held = bundleFor(cfg, ranked, projects, func(iss queuedIssue) bool {
+	run = bundleFor(cfg, ranked, func(iss queuedIssue) bool {
 		return iss.Repo == "acme/widgets"
 	})
-	wantRun(t, run, held, "acme/widgets")
+	wantRun(t, run, "acme/other#2")
 }
 
-func wantRun(t *testing.T, run []queuedIssue, held, wantHeld string, want ...string) {
+func wantRun(t *testing.T, run []queuedIssue, want ...string) {
 	t.Helper()
-	if held != wantHeld {
-		t.Errorf("held = %q, want %q", held, wantHeld)
-	}
 	if got := strings.Join(keys(run), ","); got != strings.Join(want, ",") {
 		t.Errorf("run = %s, want %s", got, strings.Join(want, ","))
 	}
@@ -570,31 +568,44 @@ func TestQueueTakesTheOldestIssueFirst(t *testing.T) {
 	}
 }
 
-func TestQueueStaysWithTheHighestProject(t *testing.T) {
-	dir := t.TempDir()
-	out := filepath.Join(dir, "out")
-	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
-	cfg.Max = 2
-	cfg.Priorities = writePriorities(t, "widgets\nother\n")
-	cfg.Agents = []queueAgent{{Command: []string{blockScript(t), out, "{number}", "{prompt}"}}}
-	s := startQueue(t, cfg, queueEnv{
-		list: func(repo, _ string) ([]ghx.Issue, error) {
-			switch repo {
-			case "acme/widgets":
-				return []ghx.Issue{labelled(1, "2026-06-01T00:00:00Z", "plain", "next")}, nil
-			case "acme/other":
-				// Older, and p1, and a free slot: still not this project.
-				return []ghx.Issue{labelled(2, "2026-01-01T00:00:00Z", "urgent", "next", "p1")}, nil
-			default:
-				return nil, fmt.Errorf("unexpected repo %s", repo)
-			}
-		},
-	})
-	waitFor(t, "the higher project", func() bool { return len(readLines(t, out)) >= 1 })
-	time.Sleep(200 * time.Millisecond)
-	s.stop(t)
-	if got, want := readLines(t, out), []string{"1"}; strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("started %v, want only the higher project", got)
+func TestQueueGivesAFreeSlotToTheNextProjectDown(t *testing.T) {
+	for _, tc := range []struct {
+		max  int
+		want string
+	}{
+		// One slot: the higher project, though the lower issue is older and p1.
+		{1, "1"},
+		// A second slot the higher project cannot fill goes down. Both agents
+		// run at once, so the order they write in is not the start order:
+		// the max 1 case and the dry-run test hold the order.
+		{2, "1,2"},
+	} {
+		dir := t.TempDir()
+		out := filepath.Join(dir, "out")
+		cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+		cfg.Max = tc.max
+		cfg.Priorities = writePriorities(t, "widgets\nother\n")
+		cfg.Agents = []queueAgent{{Command: []string{blockScript(t), out, "{number}", "{prompt}"}}}
+		s := startQueue(t, cfg, queueEnv{
+			list: func(repo, _ string) ([]ghx.Issue, error) {
+				switch repo {
+				case "acme/widgets":
+					return []ghx.Issue{labelled(1, "2026-06-01T00:00:00Z", "plain", "next")}, nil
+				case "acme/other":
+					return []ghx.Issue{labelled(2, "2026-01-01T00:00:00Z", "urgent", "next", "p1")}, nil
+				default:
+					return nil, fmt.Errorf("unexpected repo %s", repo)
+				}
+			},
+		})
+		waitFor(t, "the starts", func() bool { return len(readLines(t, out)) >= tc.max })
+		time.Sleep(200 * time.Millisecond)
+		s.stop(t)
+		got := readLines(t, out)
+		sort.Strings(got)
+		if strings.Join(got, ",") != tc.want {
+			t.Fatalf("max %d: started %s, want %s", tc.max, got, tc.want)
+		}
 	}
 }
 
@@ -1083,18 +1094,20 @@ func TestQueueDryRunStopsOnTheHoldFileWithoutListing(t *testing.T) {
 	}
 }
 
-func TestQueueDryRunStaysWithTheHighestProject(t *testing.T) {
-	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+func TestQueueDryRunGivesAFreeSlotToTheNextProjectDown(t *testing.T) {
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other", "acme/third"})
 	cfg.Max = 4
-	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Priorities = writePriorities(t, "widgets\nother\nthird\n")
 	var buf bytes.Buffer
 	err := dryQueue(context.Background(), cfg, queueEnv{
 		list: func(repo, _ string) ([]ghx.Issue, error) {
 			switch repo {
 			case "acme/widgets":
-				return []ghx.Issue{openIssue(1, "2026-01-02T00:00:00Z")}, nil
+				return []ghx.Issue{openIssue(1, "2026-01-03T00:00:00Z")}, nil
 			case "acme/other":
-				return []ghx.Issue{openIssue(2, "2026-01-01T00:00:00Z")}, nil
+				return []ghx.Issue{openIssue(2, "2026-01-02T00:00:00Z"), openIssue(3, "2026-01-01T00:00:00Z")}, nil
+			case "acme/third":
+				return []ghx.Issue{openIssue(4, "2026-01-01T00:00:00Z"), openIssue(5, "2026-01-02T00:00:00Z")}, nil
 			default:
 				return nil, fmt.Errorf("unexpected repo %s", repo)
 			}
@@ -1104,11 +1117,18 @@ func TestQueueDryRunStaysWithTheHighestProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := buf.String()
-	if !strings.Contains(got, "would start acme/widgets#1") ||
-		!strings.Contains(got, "not starting a lower project") ||
-		strings.Contains(got, "acme/other#2") {
-		t.Fatalf("dry-run =\n%s", got)
+	var starts []string
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.HasPrefix(line, "dry-run: would start ") {
+			starts = append(starts, strings.Fields(line)[3])
+		}
+	}
+	want := "acme/widgets#1,acme/other#3,acme/other#2,acme/third#4"
+	if got := strings.Join(starts, ","); got != want {
+		t.Fatalf("starts = %s, want %s\n%s", got, want, buf.String())
+	}
+	if !strings.Contains(buf.String(), "reached max 4; acme/third#5 waits") {
+		t.Fatalf("dry-run =\n%s", buf.String())
 	}
 }
 
