@@ -6,6 +6,17 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.5](https://github.com/bottega-cereghino/facet/compare/v0.7.4...v0.7.5) (2026-11-22)
+
+
+### Fixed
+
+* **prune:** count a rebuild file beside a .venv or node_modules only when it declares a package ([#339](https://github.com/bottega-cereghino/facet/issues/339)) ([f50b9a7](https://github.com/bottega-cereghino/facet/commit/f50b9a7dbe03bb2da3d51562404f721ae9659838)), refs [#302](https://github.com/bottega-cereghino/facet/issues/302)
+* **prune:** keep a directory holding a repository of any VCS, not only git ([#335](https://github.com/bottega-cereghino/facet/issues/335)) ([6079e50](https://github.com/bottega-cereghino/facet/commit/6079e501ce1164b6ec4a8f1363516baab4c4e142)), refs [#300](https://github.com/bottega-cereghino/facet/issues/300)
+* **reap:** count commits a worktree's own refs reach ([#340](https://github.com/bottega-cereghino/facet/issues/340)) ([ad7ed19](https://github.com/bottega-cereghino/facet/commit/ad7ed19378a35127fdbaeaa00d48486bb2998f85)), refs [#315](https://github.com/bottega-cereghino/facet/issues/315)
+* **reap:** hold a workspace that is itself a git repository ([#338](https://github.com/bottega-cereghino/facet/issues/338)) ([276ee26](https://github.com/bottega-cereghino/facet/commit/276ee26fbb447d7cd2c1327bc9735063cb0ed4ec)), refs [#312](https://github.com/bottega-cereghino/facet/issues/312)
+* **reap:** see edits git status hides behind index marks, clean filters, fsmonitor and core.worktree ([#337](https://github.com/bottega-cereghino/facet/issues/337)) ([b6c0160](https://github.com/bottega-cereghino/facet/commit/b6c0160030b1c06d266a6bf8718b3180334bf13e)), refs [#318](https://github.com/bottega-cereghino/facet/issues/318)
+
 ## [0.7.4](https://github.com/bottega-cereghino/facet/compare/v0.7.3...v0.7.4) (2026-11-22)
 
 
