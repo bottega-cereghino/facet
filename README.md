@@ -523,8 +523,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   repository is outside the workspace, so the clone itself, a bare backup in
   it or a sibling clone is no copy
   (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). A worktree's own refs
-  (`refs/worktree/*`, `refs/bisect/*`) count too, since they go with it
-  (`TestReapHoldsACommitOnlyAPerWorktreeRefReaches`). It fetches every remote with
+  (`refs/worktree/*`, `refs/bisect/*`, and `refs/rewritten/*`, where an
+  interrupted `rebase -r` keeps its labels) count too, since they go with it
+  (`TestReapHoldsACommitOnlyAPerWorktreeRefReaches`,
+  `TestReapHoldsACommitOnlyARebaseLabelReaches`). It fetches every remote with
   `--prune` first, not only `origin`, so a branch deleted from a fork since it
   was pushed there no longer reads as pushed; a remote it cannot fetch is named
   (`TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed`,

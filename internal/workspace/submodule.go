@@ -205,7 +205,7 @@ func inspectGitDir(git gitx.Runner, name, g, gone string) CloneState {
 	if err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell which remotes hold its commits: %v", err))
 	}
-	countArgs := append([]string{"rev-list", "--count", "HEAD", "--branches", "--glob=refs/worktree/*", "--glob=refs/bisect/*"}, pushed.not()...)
+	countArgs := append(append([]string{"rev-list", "--count", "HEAD", "--branches"}, perWorktreeGlobs()...), pushed.not()...)
 	if out, err := git.Run(g, nil, countArgs...); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git rev-list failed: %v", err))
 	} else if count, err := strconv.Atoi(strings.TrimSpace(out)); err != nil {

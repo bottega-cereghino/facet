@@ -556,7 +556,7 @@ func TestRemoveWorktreeLeavesAFolderItDoesNotList(t *testing.T) {
 // ref reaches goes with a worktree clone, so it holds like one HEAD reaches
 // (#315).
 func TestReapHoldsACommitOnlyAPerWorktreeRefReaches(t *testing.T) {
-	for _, ref := range []string{"refs/worktree/keep", "refs/bisect/bad"} {
+	for _, ref := range []string{"refs/worktree/keep", "refs/bisect/bad", "refs/rewritten/side"} {
 		t.Run(ref, func(t *testing.T) {
 			roots, ws, _, _ := worktreeSetup(t)
 			if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
@@ -576,4 +576,36 @@ func TestReapHoldsACommitOnlyAPerWorktreeRefReaches(t *testing.T) {
 			}
 		})
 	}
+}
+
+// refs/rewritten/* is the third per-worktree namespace, where an interrupted
+// `rebase --rebase-merges` keeps its labels. A commit rewritten during that
+// rebase (a conflict resolved, an amend) and labelled, then left behind by a
+// `reset`, has no other ref until the rebase reaches its `merge`; stopped
+// there, the clone reads clean. Reap counts it (facet#361).
+func TestReapHoldsACommitOnlyARebaseLabelReaches(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	gitOut(t, clone, "switch", "-q", "-c", "feature")
+	commitFile(t, clone, "a.txt", "a\n", "a")
+	gitOut(t, clone, "push", "-q", "origin", "feature") // feature itself is pushed
+
+	todo := filepath.Join(t.TempDir(), "todo")
+	writeTestFile(t, todo, "label onto\nreset onto\npick feature\n"+
+		"exec echo 'resolved by hand' > resolved.txt && git add resolved.txt && git commit -q --amend --no-edit\n"+
+		"label side\nreset onto\nbreak\n")
+	t.Setenv("GIT_SEQUENCE_EDITOR", "cp "+todo)
+	for _, kv := range [][2]string{{"GIT_AUTHOR_NAME", "t"}, {"GIT_AUTHOR_EMAIL", "t@example.com"}, {"GIT_COMMITTER_NAME", "t"}, {"GIT_COMMITTER_EMAIL", "t@example.com"}} {
+		t.Setenv(kv[0], kv[1])
+	}
+	gitOut(t, clone, "rebase", "-q", "-i", "-r", "refs/remotes/origin/main")
+	side := gitOut(t, clone, "rev-parse", "refs/rewritten/side")
+	if got := gitOut(t, clone, "branch", "-a", "--contains", side); got != "" {
+		t.Fatalf("the rewritten commit should be on no branch: %q", got)
+	}
+
+	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireHeld(t, st, "resolved.txt is committed only on refs/rewritten/side")
 }

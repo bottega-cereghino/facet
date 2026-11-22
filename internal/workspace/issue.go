@@ -745,10 +745,10 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 	// is 0, and only then is the more expensive per-ref landing proof run.
 	//
 	// In a worktree, --branches would be the checkout's branches, which outlive
-	// the worktree, so only HEAD is counted there. The per-worktree refs
-	// (refs/worktree/*, refs/bisect/*) are counted in both: they live in the
-	// worktree's own admin directory and go with it.
-	perWorktree := []string{"--glob=refs/worktree/*", "--glob=refs/bisect/*"}
+	// the worktree, so only HEAD is counted there. The per-worktree refs are
+	// counted in both: they live in the worktree's own admin directory and go
+	// with it.
+	perWorktree := perWorktreeGlobs()
 	countArgs := append([]string{"rev-list", "--count", "HEAD", "--branches"}, perWorktree...)
 	if !own {
 		countArgs = append([]string{"rev-list", "--count", "HEAD"}, perWorktree...)
@@ -787,6 +787,21 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 	}
 
 	return c
+}
+
+// perWorktreeRefs are the namespaces git keeps per worktree, in its own admin
+// directory: refs/worktree, refs/bisect, and refs/rewritten, where an
+// interrupted `rebase --rebase-merges` keeps its labels. A commit only one of
+// them reaches goes with the worktree.
+var perWorktreeRefs = []string{"refs/worktree", "refs/bisect", "refs/rewritten"}
+
+// perWorktreeGlobs names perWorktreeRefs as rev-list arguments.
+func perWorktreeGlobs() []string {
+	globs := make([]string, 0, len(perWorktreeRefs))
+	for _, ns := range perWorktreeRefs {
+		globs = append(globs, "--glob="+ns+"/*")
+	}
+	return globs
 }
 
 // unpushedLanding walks every local ref -- each branch tip, plus a detached
@@ -843,11 +858,11 @@ func unpushedLanding(git gitx.Runner, dir, repo string, commitPR CommitPRLookup,
 			refs = append(refs, "HEAD")
 		}
 	}
-	// Per-worktree refs (refs/worktree/*, refs/bisect/*) live in the
-	// worktree's own admin directory, which goes with it, whether it is a
-	// linked worktree or the main one; in a linked worktree for-each-ref lists
-	// only its own. Full names, so no branch or tag of the same name stands in.
-	perWorktree, err := git.Run(dir, nil, "for-each-ref", "--format=%(refname)", "refs/worktree", "refs/bisect")
+	// Per-worktree refs live in the worktree's own admin directory, which goes
+	// with it, whether it is a linked worktree or the main one; in a linked
+	// worktree for-each-ref lists only its own. Full names, so no branch or tag
+	// of the same name stands in.
+	perWorktree, err := git.Run(dir, nil, append([]string{"for-each-ref", "--format=%(refname)"}, perWorktreeRefs...)...)
 	if err != nil {
 		return 0, 0, false, err
 	}
