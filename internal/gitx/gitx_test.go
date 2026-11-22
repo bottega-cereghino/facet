@@ -126,3 +126,42 @@ func TestCloneTakesAURLStartingWithDashesAsARepository(t *testing.T) {
 		t.Errorf("the URL ran as a command: %s exists", marker)
 	}
 }
+
+// environ drops what points git at another repository, index, config or
+// pathspec mode, keeps the rest, and lets a caller's entries come last.
+func TestEnvironDropsRepositoryVariables(t *testing.T) {
+	base := []string{
+		"HOME=/h", "GIT_DIR=/x/.git", "GIT_WORK_TREE=/x", "GIT_INDEX_FILE=/i",
+		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.worktree", "GIT_CONFIG_VALUE_0=/x",
+		"GIT_GLOB_PATHSPECS=1", "GIT_SSH_COMMAND=ssh -i k", "GIT_ASKPASS=/a",
+	}
+	got := environ(base, []string{"GIT_LFS_SKIP_SMUDGE=1"})
+	want := []string{
+		"HOME=/h", "GIT_SSH_COMMAND=ssh -i k", "GIT_ASKPASS=/a",
+		"GIT_NO_REPLACE_OBJECTS=1", "GIT_LITERAL_PATHSPECS=1", "GIT_LFS_SKIP_SMUDGE=1",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("environ =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A real git run under an inherited GIT_DIR still reads the repository it was
+// run in.
+func TestRunIgnoresAnInheritedGitDir(t *testing.T) {
+	g := Git{}
+	here, other := t.TempDir(), t.TempDir()
+	for _, d := range []string{here, other} {
+		if _, err := g.Run(d, nil, "init", "-q", "-b", "main"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	got, err := g.Run(here, nil, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(filepath.Join(here, ".git"))
+	if got != want {
+		t.Fatalf("git dir = %s, want %s", got, want)
+	}
+}
