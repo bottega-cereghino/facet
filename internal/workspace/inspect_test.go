@@ -485,3 +485,50 @@ func mkdirs(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 }
+
+// A note committed as Notes.md and renamed to notes.md on a case-insensitive
+// disk (macOS's default) matched neither the index entry nor an untracked
+// file as the pathspec notes.md, so its later edits were deleted unseen
+// (#320). TestUnderNameFoldsCase holds the matching on every disk.
+func TestReapHoldsAnEditedNoteRenamedInCaseOnly(t *testing.T) {
+	root := t.TempDir()
+	ws, _ := longLivedWorkspace(t, root)
+	writeTestFile(t, filepath.Join(root, "Probe"), "")
+	if _, err := os.Stat(filepath.Join(root, "probe")); err != nil {
+		t.Skip("needs a case-insensitive disk (the macOS job runs it)")
+	}
+	enc := enclosingRepoIn(t, root)
+	rel, err := filepath.Rel(enc, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(ws, "Notes.md"), "committed\n")
+	mustGit(t, enc, "add", "--", filepath.Join(rel, "Notes.md"))
+	mustGit(t, enc, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "notes")
+	if err := os.Rename(filepath.Join(ws, "Notes.md"), filepath.Join(ws, "notes.md")); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(ws, "notes.md"), "committed\nedited since, only copy\n")
+	if b := blockersOf(t, ws); !blockersMention(b, "otes.md is not committed") {
+		t.Fatalf("notes.md, edited after a rename in case only, does not hold: %v", b)
+	}
+}
+
+func TestUnderNameFoldsCase(t *testing.T) {
+	names := []string{"notes.md", "docs"}
+	for path, want := range map[string]bool{
+		"delivery/Notes.md":      true,
+		"Delivery/notes.md":      true,
+		"delivery/docs/a.md":     true,
+		"delivery/DOCS/b/c.md":   true,
+		"delivery/notes.md.bak":  false,
+		"delivery/repo/notes.md": false,
+		"other/notes.md":         false,
+		"delivery":               false,
+		"deliveryx/notes.md":     false,
+	} {
+		if got := underName(path, "delivery/", names); got != want {
+			t.Errorf("underName(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
