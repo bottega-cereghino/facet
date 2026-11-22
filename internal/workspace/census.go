@@ -127,7 +127,7 @@ func (w *censusWalk) walk(abs string, repo *censusRepo) {
 		if repo != nil && repo.judged && abs == repo.top && e.Name() == ".git" {
 			continue
 		}
-		if rel, ok := relUnder(repo, w.root, p); ok && rebuilt(rel) {
+		if rel, ok := relUnder(repo, w.root, p); ok && rebuiltEntry(rel, e.Type().IsRegular()) {
 			continue
 		}
 		switch t := e.Type(); {
@@ -146,6 +146,26 @@ func (w *censusWalk) walk(abs string, repo *censusRepo) {
 			w.hold(p, "is a %s, which no commit holds", kindOf(t))
 		}
 	}
+}
+
+// rebuiltEntry reports whether the entry at rel lies in what something
+// rebuilds, as rebuilt says, except that Finder's .DS_Store counts only as
+// the regular file Finder writes: a directory of that name holds what anyone
+// put there (#401).
+func rebuiltEntry(rel string, regular bool) bool {
+	steps := strings.Split(rel, "/")
+	for i, step := range steps {
+		if step == ".DS_Store" {
+			if i == len(steps)-1 && regular {
+				return true
+			}
+			continue
+		}
+		if rebuilt(step) {
+			return true
+		}
+	}
+	return false
 }
 
 // relUnder is p relative to the work tree of repo, or to root when there is
@@ -366,7 +386,9 @@ func cloneDirs(base string, clones []CloneState) []string {
 func topAccounted(ws string, m *manifest.Manifest) map[string]bool {
 	top := map[string]bool{}
 	for n := range ownFiles {
-		top[n] = true
+		if fi, err := os.Lstat(filepath.Join(ws, n)); err == nil && fi.Mode().IsRegular() {
+			top[n] = true
+		}
 	}
 	if spawnsClaudeMD(ws, m) {
 		top[claudeMD] = true

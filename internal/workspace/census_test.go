@@ -212,3 +212,26 @@ func TestCensusCapsItsList(t *testing.T) {
 		t.Fatalf("the blocker does not count the rest: %s", b)
 	}
 }
+
+// facet's own names are let go only as regular files: a directory at one,
+// even a repository with commits, is read like any loose entry (#401).
+func TestReapReadsWhatIsAtAnOwnFilesName(t *testing.T) {
+	for _, name := range []string{".seat", ".scope", ".DS_Store", syncLockName} {
+		t.Run(name, func(t *testing.T) {
+			ws, _ := issueWorkspace(t)
+			dir := filepath.Join(ws, name)
+			mustGit(t, "", "init", "-q", dir)
+			commitFile(t, dir, "notes.md", "a week of notes\n", "notes")
+			st, err := Inspect(ws, gitx.Git{}, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !blockersMention(st.Blockers(), name) {
+				t.Fatalf("a repository at %s is let go: %v", name, st.Blockers())
+			}
+			if st.UnaccountedCount == 0 {
+				t.Errorf("the census lets %s/ go unread", name)
+			}
+		})
+	}
+}
