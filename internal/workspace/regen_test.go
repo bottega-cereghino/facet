@@ -26,11 +26,11 @@ func prunableWorkspace(t *testing.T) (ws, clone string) {
 	writeMiB(t, filepath.Join(clone, ".terraform", "committed"))
 	mustGit(t, clone, "add", ".terraform")
 	// What rebuilds the two that prune may delete, tracked beside each.
-	writeTestFile(t, filepath.Join(clone, "package.json"), "{}\n")
+	writeTestFile(t, filepath.Join(clone, "package.json"), rebuildBody("package.json"))
 	if err := os.MkdirAll(filepath.Join(clone, "api"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeTestFile(t, filepath.Join(clone, "api", "pyproject.toml"), "[project]\n")
+	writeTestFile(t, filepath.Join(clone, "api", "pyproject.toml"), rebuildBody("pyproject.toml"))
 	mustGit(t, clone, "add", "package.json", "api/pyproject.toml")
 	mustGit(t, clone, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "tracked")
 
@@ -339,15 +339,28 @@ func rebuildClone(t *testing.T, dir, parent, tracked, untracked string) (ws, clo
 		t.Fatal(err)
 	}
 	if tracked != "" {
-		writeTestFile(t, filepath.Join(clone, parent, tracked), "{}\n")
+		writeTestFile(t, filepath.Join(clone, parent, tracked), rebuildBody(filepath.Base(tracked)))
 		mustGit(t, clone, "add", filepath.ToSlash(filepath.Join(parent, tracked)))
 	}
 	mustGit(t, clone, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "rebuild files")
 	if untracked != "" {
-		writeTestFile(t, filepath.Join(clone, parent, untracked), "{}\n")
+		writeTestFile(t, filepath.Join(clone, parent, untracked), rebuildBody(filepath.Base(untracked)))
 	}
 	writeMiB(t, filepath.Join(clone, parent, dir, "inside", "file"))
 	return ws, clone
+}
+
+// rebuildBody is the text of a rebuild file that does declare a package, so a
+// test about something else is not kept for want of one.
+func rebuildBody(name string) string {
+	switch name {
+	case "package.json":
+		return "{\"dependencies\": {\"left-pad\": \"1.3.0\"}}\n"
+	case "pyproject.toml":
+		return "[project]\nname = \"app\"\n"
+	default: // requirements*.txt
+		return "requests==2.32.3\n"
+	}
 }
 
 // Each directory prune deletes is rebuilt from a file the clone tracks beside
@@ -399,6 +412,146 @@ func TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds(t *testing.T) {
 			}
 			if len(st.Kept) != 1 || !strings.Contains(st.Kept[0], "repo/"+rel) || !strings.Contains(st.Kept[0], "nothing rebuilds it") {
 				t.Errorf("kept %v; want repo/%s named with why it was kept", st.Kept, rel)
+			}
+		})
+	}
+}
+
+// installClone makes a workspace whose one clone commits files at its root,
+// ignores dir there and holds a MiB in it. edits are then written over the
+// committed files without being staged.
+func installClone(t *testing.T, dir string, files, edits map[string]string) (ws, clone string) {
+	t.Helper()
+	ws, clone = longLivedWorkspace(t, t.TempDir())
+	writeTestFile(t, filepath.Join(clone, ".gitignore"), dir+"/\n")
+	mustGit(t, clone, "add", ".gitignore")
+	for name, body := range files {
+		writeTestFile(t, filepath.Join(clone, name), body)
+		mustGit(t, clone, "add", name)
+	}
+	mustGit(t, clone, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "project files")
+	for name, body := range edits {
+		writeTestFile(t, filepath.Join(clone, name), body)
+	}
+	writeMiB(t, filepath.Join(clone, dir, "lib", "site-packages", "hand_built", "__init__.py"))
+	return ws, clone
+}
+
+// A file is not a rebuild by its name alone. A setup.cfg holding only flake8's
+// settings, a pyproject.toml holding only ruff's, or a package.json that only
+// marks a directory as ES modules is common in a repository that is not a
+// package of that kind: `uv sync`, `pip install .` and `npm install` install
+// nothing from it, so a .venv or node_modules filled by hand beside one is
+// gone for good once deleted. It is kept, and the listing says why.
+func TestPruneKeepsADirectoryBesideAFileThatInstallsNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name, dir    string
+		files, edits map[string]string
+	}{
+		{name: "setup.cfg with only flake8", dir: ".venv",
+			files: map[string]string{"setup.cfg": "[flake8]\nmax-line-length = 100\n"}},
+		{name: "pyproject.toml with only ruff", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[tool.ruff]\nline-length = 100\n"}},
+		{name: "pyproject.toml with only a build system", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[build-system]\nrequires = [\"setuptools\"]\n"}},
+		{name: "a project table only quoted in a multi-line string", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[tool.template]\nbody = \"\"\"\n[project]\nname = \"x\"\n\"\"\"\n"}},
+		// pip install . needs a setup.py or a pyproject.toml beside it.
+		{name: "setup.cfg with metadata and nothing to build it", dir: ".venv",
+			files: map[string]string{"setup.cfg": "[metadata]\nname = app\n"}},
+		{name: "setup.cfg with metadata only in a continuation line", dir: ".venv",
+			files: map[string]string{"setup.cfg": "[flake8]\nexclude =\n  [metadata]\n", "pyproject.toml": "[tool.ruff]\n"}},
+		{name: "requirements.txt of comments", dir: ".venv",
+			files: map[string]string{"requirements.txt": "# nothing pinned yet\n\n"}},
+		// What a fresh clone rebuilds from is what the index holds.
+		{name: "pyproject.toml declaring a project only in an uncommitted edit", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[tool.ruff]\n"},
+			edits: map[string]string{"pyproject.toml": "[project]\nname = \"app\"\n"}},
+		// And what an install now reads is what is on disk.
+		{name: "pyproject.toml whose project an uncommitted edit removed", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[project]\nname = \"app\"\n"},
+			edits: map[string]string{"pyproject.toml": "[tool.ruff]\n"}},
+		{name: "package.json marking ES modules", dir: "node_modules",
+			files: map[string]string{"package.json": "{\"type\": \"module\"}\n"}},
+		{name: "package.json with empty dependencies", dir: "node_modules",
+			files: map[string]string{"package.json": "{\"dependencies\": {}, \"devDependencies\": {}}\n"}},
+		{name: "package.json that is not JSON", dir: "node_modules",
+			files: map[string]string{"package.json": "{\"dependencies\": {\"left-pad\": \"1.3.0\"}\n"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws, clone := installClone(t, tc.dir, tc.files, tc.edits)
+			handBuilt := filepath.Join(clone, tc.dir, "lib", "site-packages", "hand_built", "__init__.py")
+			st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Prune(st); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(handBuilt); err != nil {
+				t.Fatalf("prune deleted a %s beside a file that installs nothing: %v (found %v)", tc.dir, err, foundRels(st))
+			}
+			if len(st.Kept) != 1 || !strings.Contains(st.Kept[0], "repo/"+tc.dir) || !strings.Contains(st.Kept[0], "nothing rebuilds it") {
+				t.Errorf("kept %v; want repo/%s named with why it was kept", st.Kept, tc.dir)
+			}
+		})
+	}
+}
+
+// A file that does declare a package still rebuilds the directory beside it,
+// and a tool's cache still goes beside the configuration alone: the cache holds
+// only what the tool computes again, and that configuration is where ruff,
+// mypy and pytest write it.
+func TestPruneDeletesADirectoryBesideAFileThatInstallsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name, dir string
+		files     map[string]string
+	}{
+		{name: "pyproject.toml with a project", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[project]\nname = \"app\"\ndependencies = [\n  \"requests\",\n]\n"}},
+		{name: "pyproject.toml with only a project subtable, spaced", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[tool.ruff]\n[ project . optional-dependencies ] # extras\ndev = []\n"}},
+		{name: "pyproject.toml with poetry", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[tool.poetry]\nname = \"app\"\n"}},
+		{name: "pyproject.toml with a project after a multi-line string", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[tool.black]\nextend-exclude = '''\n/(build)/\n'''\n[project]\nname = \"app\"\n"}},
+		{name: "pyproject.toml of a uv workspace root, with its uv.lock", dir: ".venv",
+			files: map[string]string{"pyproject.toml": "[tool.uv.workspace]\nmembers = [\"packages/*\"]\n", "uv.lock": "version = 1\n"}},
+		{name: "setup.cfg with metadata beside a pyproject.toml", dir: ".venv",
+			files: map[string]string{"setup.cfg": "[metadata]\nname = app\n", "pyproject.toml": "[build-system]\nrequires = [\"setuptools\"]\n"}},
+		{name: "setup.cfg with options beside a setup.py", dir: ".venv",
+			files: map[string]string{"setup.cfg": "[options]\ninstall_requires = requests\n", "setup.py": "from setuptools import setup\nsetup()\n"}},
+		{name: "setup.py", dir: ".venv",
+			files: map[string]string{"setup.py": "from setuptools import setup\nsetup(name=\"app\")\n"}},
+		{name: "Pipfile", dir: ".venv",
+			files: map[string]string{"Pipfile": "[packages]\nrequests = \"*\"\n"}},
+		{name: "requirements file", dir: ".venv",
+			files: map[string]string{"requirements-dev.txt": "# pinned\nrequests==2.32.3\n"}},
+		{name: "package.json with dependencies", dir: "node_modules",
+			files: map[string]string{"package.json": "{\"devDependencies\": {\"left-pad\": \"1.3.0\"}}\n"}},
+		{name: "package.json of npm workspaces", dir: "node_modules",
+			files: map[string]string{"package.json": "{\"private\": true, \"workspaces\": [\"packages/*\"]}\n"}},
+		{name: "package.json of a pnpm workspace", dir: "node_modules",
+			files: map[string]string{"package.json": "{\"private\": true}\n", "pnpm-workspace.yaml": "packages:\n  - packages/*\n"}},
+		{name: "ruff cache beside ruff's settings", dir: ".ruff_cache",
+			files: map[string]string{"pyproject.toml": "[tool.ruff]\nline-length = 100\n"}},
+		{name: "pytest cache beside pytest's settings", dir: ".pytest_cache",
+			files: map[string]string{"setup.cfg": "[tool:pytest]\naddopts = -q\n"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws, clone := installClone(t, tc.dir, tc.files, nil)
+			st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(foundRels(st), ","); got != "repo/"+tc.dir {
+				t.Fatalf("found %q, kept %v; want repo/%s", got, st.Kept, tc.dir)
+			}
+			if err := Prune(st); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(clone, tc.dir)); !os.IsNotExist(err) {
+				t.Errorf("%s survived prune beside a file that rebuilds it (stat err %v)", tc.dir, err)
 			}
 		})
 	}

@@ -185,13 +185,12 @@ func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []strin
 		if n < minRegenBytes {
 			return filepath.SkipDir
 		}
-		rebuilt, err := tracked(pathDir(rel), regen.from)
+		rebuilt, err := tracked(pathDir(rel), regen)
 		if err != nil {
 			return err
 		}
 		if !rebuilt {
-			kept = append(kept, fmt.Sprintf("%s/%s has no %s tracked beside it, so nothing rebuilds it",
-				name, rel, orList(regen.from)))
+			kept = append(kept, keptUnbuilt(name, rel, regen))
 			return filepath.SkipDir
 		}
 		found = append(found, Regen{Clone: name, Rel: rel, Path: path, Rebuild: regen.rebuild, Bytes: n})
