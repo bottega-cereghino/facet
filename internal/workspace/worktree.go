@@ -147,29 +147,44 @@ func TopLevel(git gitx.Runner, dir string) (top, linked bool) {
 // removeWorktree removes the linked worktree at dir through its checkout, so the
 // checkout forgets it and its branch is free to be checked out again. reap has
 // decided by now, so --force is given twice: once for its changes, once for a
-// lock. When git still refuses (a worktree holding submodules cannot be
-// removed), the directory is deleted and the checkout pruned instead.
+// lock.
+//
+// Only what the checkout lists as one of its worktrees is removed, never a
+// folder that merely sits inside one, and the listing is read first: git goes
+// on after a delete that fails partway (a directory without write permission)
+// and drops the worktree's admin directory, so afterwards the checkout no
+// longer lists a worktree whose HEAD and index are gone (#316). Directories are
+// made writable before git runs, so it can empty them. When git still fails (a
+// worktree holding submodules cannot be removed), the rest is deleted by hand,
+// and the checkout's entry for this worktree alone is dropped.
 func removeWorktree(git gitx.Runner, checkout, dir string) error {
-	if _, err := git.Run(checkout, nil, "worktree", "remove", "--force", "--force", "--", dir); err == nil {
-		return nil
-	}
-	// Delete by hand only what the checkout names as one of its worktrees,
-	// never a folder that merely sits inside one.
 	list, err := git.Run(checkout, nil, "worktree", "list", "--porcelain")
 	if err != nil {
-		return fmt.Errorf("could not remove the worktree %s, and could not list %s's worktrees to check it: %w", dir, checkout, err)
+		return fmt.Errorf("could not list %s's worktrees to check %s: %w", checkout, dir, err)
 	}
 	if !listed(linkedWorktrees(list), dir) {
 		return fmt.Errorf("%s is not a worktree %s lists; left alone\nfix: `git -C %s worktree list` shows its worktrees", dir, checkout, checkout)
 	}
-	if err := removeAllForce(dir); err != nil {
-		return err
+	// Resolved now, while it exists: once deleted, /var no longer resolves to
+	// the /private/var git lists.
+	real := realPath(dir)
+	makeDirsWritable(dir)
+	if _, err := git.Run(checkout, nil, "worktree", "remove", "--force", "--force", "--", dir); err == nil {
+		return nil
 	}
-	if _, err := git.Run(checkout, nil, "worktree", "prune"); err != nil {
-		return fmt.Errorf("deleted the worktree %s, but %s still lists it: %w\nfix: run `git -C %s worktree prune`", dir, checkout, err, checkout)
+	if err := removeAllForce(dir); err != nil {
+		return fmt.Errorf("git removed part of the worktree %s, and the rest could not be deleted: %w\nfix: delete %s by hand, then run `git -C %s worktree remove --force --force %s`", dir, err, dir, checkout, dir)
 	}
 	if _, err := os.Lstat(dir); err == nil {
 		return fmt.Errorf("could not delete the worktree %s", dir)
+	}
+	// `git worktree prune` would also drop every other prunable worktree, one
+	// on a disk that is not mounted included. remove of a directory that is
+	// gone drops its entry alone.
+	if list, err := git.Run(checkout, nil, "worktree", "list", "--porcelain"); err != nil || listed(linkedWorktrees(list), real) {
+		if _, err := git.Run(checkout, nil, "worktree", "remove", "--force", "--force", "--", real); err != nil {
+			return fmt.Errorf("deleted the worktree %s, but %s still lists it: %w\nfix: run `git -C %s worktree remove --force --force %s`", dir, checkout, err, checkout, dir)
+		}
 	}
 	return nil
 }

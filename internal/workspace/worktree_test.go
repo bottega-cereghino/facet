@@ -203,9 +203,9 @@ func TestRemoveWorktreeRemovesALockedOne(t *testing.T) {
 }
 
 // A worktree git will not remove (here its .git file was damaged; older gits
-// also refuse one holding a submodule) is deleted by hand, and the checkout
-// pruned.
-func TestRemoveWorktreeFallsBackToPrune(t *testing.T) {
+// also refuse one holding a submodule) is deleted by hand, and the checkout's
+// entry for it dropped.
+func TestRemoveWorktreeFallsBackToDeletingByHand(t *testing.T) {
 	roots, ws, _, checkout := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func assertWorktreeGone(t *testing.T, checkout, clone string) {
 		t.Fatalf("worktree still there: %v", err)
 	}
 	if got := gitOut(t, checkout, "worktree", "list", "--porcelain"); strings.Count(got, "worktree ") != 1 {
-		t.Errorf("checkout still lists the worktree:\n%s", got)
+		t.Errorf("checkout still lists the worktree %s:\n%s", clone, got)
 	}
 }
 
@@ -608,4 +608,52 @@ func TestReapHoldsACommitOnlyARebaseLabelReaches(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireHeld(t, st, "resolved.txt is committed only on refs/rewritten/side")
+}
+
+// git cannot empty a directory without write permission (a Go module cache),
+// and goes on after the failed delete: it drops the worktree's admin
+// directory, so the checkout forgets a worktree whose HEAD and index are
+// gone. removeWorktree makes directories writable first and finishes the
+// delete either way (#316).
+func TestRemoveWorktreeEmptiesAReadOnlyDirectory(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	wt := plainWorktree(t, checkout, "topic")
+	ro := filepath.Join(wt, "cache", "mod")
+	if err := os.MkdirAll(ro, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ro, "go.mod"), []byte("module x\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ro, 0o755) })
+	assertWorktreeGone(t, checkout, wt)
+	gitOut(t, checkout, "rev-parse", "--verify", "refs/heads/topic")
+}
+
+// The fallback drops the checkout's entry for this worktree alone: `git
+// worktree prune` would drop every prunable one, a worktree on a disk that is
+// not mounted included (#316).
+func TestRemoveWorktreeFallbackKeepsOtherWorktreeEntries(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	away := plainWorktree(t, checkout, "away")
+	if err := os.RemoveAll(away); err != nil { // its disk, unmounted
+		t.Fatal(err)
+	}
+	wt := plainWorktree(t, checkout, "topic")
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: /nowhere\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeWorktree(gitx.Git{}, checkout, wt); err != nil {
+		t.Fatal(err)
+	}
+	list := gitOut(t, checkout, "worktree", "list", "--porcelain")
+	if n := len(linkedWorktrees(list)); n != 1 {
+		t.Errorf("the checkout lists %d worktrees, want 1 (%s):\n%s", n, away, list)
+	}
+	if !strings.Contains(list, filepath.Base(filepath.Dir(away))) {
+		t.Errorf("the fallback pruned %s, another worktree whose directory is away:\n%s", away, list)
+	}
 }
