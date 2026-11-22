@@ -20,6 +20,7 @@ reasons. Read the section of CODE.md you are about to touch.
 | `docs/design/` | design notes for single behaviours (reap's refusal) |
 | `scripts/release.sh` | cuts a release with release-please (section Releases) |
 | `scripts/release/` | `package.json` and `package-lock.json` pinning the release-please the script runs |
+| `scripts/test-change.sh` | the `test-change` check: does a PR weaken the tests |
 
 Code moves to `internal/` when a second caller needs it, not before.
 
@@ -27,7 +28,7 @@ Code moves to `internal/` when a second caller needs it, not before.
 
 | Command | What |
 | --- | --- |
-| `make check` | fmt, vet, lint, test, tidy, vuln: every gate CI's Linux job runs except `make build`. Run it before every push |
+| `make check` | fmt, vet, lint, shellcheck, test, tidy, vuln: every gate CI's Linux job runs except `make build`. Run it before every push |
 | `make test` | `go test ./... -race -shuffle=on -cover`; coverage is printed, never a target |
 | `make health` | functions over cognitive complexity 15 and Go files over 400 lines. A budget the review reads, never a gate |
 | `make fmt-fix` | `gofmt -s -w .` |
@@ -36,7 +37,10 @@ Code moves to `internal/` when a second caller needs it, not before.
 | `go test ./internal/routing -run '^$' -fuzz '^FuzzUpsertScope$' -fuzztime 60s` | fuzz one parser longer than `make test`, which runs only the seeds; commit what it finds under `internal/routing/testdata/fuzz` |
 
 golangci-lint and govulncheck are pinned in the Makefile and run with
-`go run`. Change a version there and nowhere else.
+`go run`. Change a version there and nowhere else. shellcheck is no Go
+program: CI installs the release `SHELLCHECK_VERSION` in `ci.yml` names,
+checked by its SHA-256, and locally the one on PATH runs
+(`brew install shellcheck`).
 
 ## CI
 
@@ -49,13 +53,16 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
   weekly) and zizmor on the workflows. A separate workflow, so its two jobs
   ("Committed secrets", "Workflow audit") are required by the ruleset by
   name rather than through `ci`.
-- `pr-title.yml`: the PR title is a Conventional Commit.
+- `pr-title.yml`, rerun when the PR's title or body is edited: `pr-title`,
+  the title is a Conventional Commit; `test-change`, a PR that weakens the
+  tests (`scripts/test-change.sh` says what counts) has a line
+  `Test-change: <why>` in its body.
 - `codeql.yml`: CodeQL on the Go code (`security-and-quality`), on PRs and
   main. The job only uploads; code scanning's own "CodeQL" check on the PR
   fails on a new alert of error severity or of high security severity and
   above. It was seen red on a planted command injection (#223). It is not a
   required check, so read it before merging.
-- The `main` ruleset requires `linux`, `macos`, `ci`, `pr-title`,
+- The `main` ruleset requires `linux`, `macos`, `ci`, `pr-title`, `test-change`,
   "Committed secrets" and "Workflow audit", a PR,
   linear history and an up-to-date branch. Squash is the only merge method,
   and the squash commit takes the PR title.
@@ -147,14 +154,14 @@ Tags up to v0.3.0 declare the module's old name, so for those it is
 Renovate (`renovate.json`) on `config:best-practices`, weekly between
 00:00 and 06:00 on Monday (Europe/Rome), and only releases at least 14 days old. It covers Go modules (then
 `go mod tidy`), action SHAs, the Renovate validator image in `ci.yml`, the Makefile tool pins,
-the gitleaks and zizmor versions in `security.yml`, and release-please in
+the gitleaks and zizmor versions in `security.yml`, shellcheck's in `ci.yml`, and release-please in
 `scripts/release/package.json` with its lockfile (the npm manager). The
-Makefile and `security.yml` pins are
+Makefile, `security.yml` and shellcheck pins are
 found through a `# renovate: datasource=… depName=…` comment on the line
 above the pin. Patch updates, and digest updates of Go modules, merge
 themselves once every check is green. An action's or image's digest changing
 under the same version means its tag was moved, so that waits for a look, as
-minors and majors wait for a person. A gitleaks or zizmor update stays red until its
+minors and majors wait for a person. A gitleaks, zizmor or shellcheck update stays red until its
 `*_SHA256` is updated in the same PR, because Renovate cannot fetch the
 checksum. The `go` directive in `go.mod` and setup-go's `go-version` move by
 hand, together. The `toolchain` line in `go.mod` is what every build uses,
