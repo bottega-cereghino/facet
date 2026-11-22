@@ -19,6 +19,13 @@ env:
   GIT_AUTHOR_EMAIL: ci@facet.invalid
   GIT_COMMITTER_NAME: facet CI
   GIT_COMMITTER_EMAIL: ci@facet.invalid
+  # shellcheck, the one linter that is no `go run` pin (see the Makefile): an
+  # exact release and the SHA-256 of its Linux x64 tarball, the release page's
+  # asset digest. Renovate moves the version and cannot move the checksum, so
+  # its pull request stays red until someone updates both.
+  # renovate: datasource=github-releases depName=koalaman/shellcheck extractVersion=^v(?<version>.+)$
+  SHELLCHECK_VERSION: 0.11.0
+  SHELLCHECK_SHA256: b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
 
 # Third-party actions are pinned to full-length commit SHAs, per GitHub's
 # hardening guidance. A tag is mutable: `@v4` is a promise the upstream owner
@@ -62,6 +69,13 @@ jobs:
       - run: make fmt
       - run: make vet
       - run: make lint
+      - name: Install shellcheck
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo shellcheck.tar.gz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.gz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.gz" | sha256sum --check --strict
+          tar -xzf shellcheck.tar.gz --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+      - run: make shellcheck SHELLCHECK="$RUNNER_TEMP/shellcheck"
       # The organisation-name guard (internal/privacy) must not carry an
       # employer's internal names in this public repo, so its word list is a
       # secret (Settings -> Secrets and variables -> Actions, comma-separated)

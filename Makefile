@@ -21,10 +21,16 @@ GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLA
 GOVULNCHECK_VERSION := v1.6.0
 GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
-.PHONY: check build fmt fmt-fix vet lint test tidy vuln health clean
+# shellcheck is no Go program, so it cannot be a `go run` pin. CI installs
+# one exact release, checked by SHA-256 (SHELLCHECK_VERSION in ci.yml), and
+# passes its path here; locally the shellcheck on PATH runs, and the target
+# prints its version.
+SHELLCHECK ?= shellcheck
+
+.PHONY: check build fmt fmt-fix vet lint shellcheck test tidy vuln health clean
 
 ## check: everything CI's first tier runs
-check: fmt vet lint test tidy vuln
+check: fmt vet lint shellcheck test tidy vuln
 
 ## build: compile the binary
 build:
@@ -49,6 +55,11 @@ vet:
 
 lint:
 	$(GOLANGCI) run ./...
+
+## shellcheck: the shell scripts, sourced files followed (-x)
+shellcheck:
+	@$(SHELLCHECK) --version | sed -n 2p
+	$(SHELLCHECK) -x $$(git ls-files '*.sh')
 
 ## test: -race because the suite drives real git repositories and a real tmux
 ## server; -shuffle because tests that depend on each other's order are a lie.
