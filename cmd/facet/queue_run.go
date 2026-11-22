@@ -175,25 +175,25 @@ func (r *queueRunner) finishIfStopped(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	if held {
-		r.logf("queue: hold file %s exists; starting nothing", r.cfg.Hold)
+	if held != "" {
+		r.logf("queue: hold file %s exists; starting nothing", held)
 		return true, nil
 	}
 	return false, nil
 }
 
-func holdFile(path string) (bool, error) {
-	if path == "" {
-		return false, nil
+// holdFile returns the first of paths that exists, or "" when none does.
+func holdFile(paths []string) (string, error) {
+	for _, path := range paths {
+		_, err := os.Stat(path)
+		if err == nil {
+			return path, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("hold file %s: %w\nfix: the queue stops when it cannot tell whether the hold file exists", path, err)
+		}
 	}
-	_, err := os.Stat(path)
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, fmt.Errorf("hold file %s: %w\nfix: the queue stops when it cannot tell whether the hold file exists", path, err)
+	return "", nil
 }
 
 // full reports that max agents are already running. inflight counts issues,
@@ -326,7 +326,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue) {
 		return
 	}
 	held, err := holdFile(r.cfg.Hold)
-	if err != nil || held {
+	if err != nil || held != "" {
 		return
 	}
 	argv, who, err := r.argvFor(run, ws, effort)

@@ -32,7 +32,7 @@ const defaultQueuePrompt = "Do each issue below, in order. The workspace is {wor
 // queueConfig is a validated queue file. Durations and defaults are resolved.
 type queueConfig struct {
 	Max          int
-	Hold         string
+	Hold         []string
 	Gate         []string
 	Wait         time.Duration
 	Label        string
@@ -67,10 +67,39 @@ type queueEffortFile struct {
 	Labels  map[string]string `json:"labels"`
 }
 
+// queueHolds is the hold field: one path, or a list of paths. A list lets a
+// stop for every tool and a stop for the queue alone both apply.
+type queueHolds []string
+
+func (h *queueHolds) UnmarshalJSON(b []byte) error {
+	var one string
+	if err := json.Unmarshal(b, &one); err == nil {
+		*h = queueHolds{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(b, &many); err != nil {
+		return fmt.Errorf("hold is a path or a list of paths: %w", err)
+	}
+	*h = many
+	return nil
+}
+
+// paths drops blank entries, so "" and [] both mean no hold file.
+func (h queueHolds) paths() []string {
+	var out []string
+	for _, p := range h {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // queueFile is the JSON shape, before defaults and checks.
 type queueFile struct {
 	Max        *int             `json:"max"`
-	Hold       string           `json:"hold"`
+	Hold       queueHolds       `json:"hold"`
 	Gate       []string         `json:"gate"`
 	Wait       string           `json:"wait"`
 	Label      string           `json:"label"`
@@ -101,7 +130,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg := queueConfig{
 		Max:    defaultQueueMax,
-		Hold:   strings.TrimSpace(f.Hold),
+		Hold:   f.Hold.paths(),
 		Gate:   f.Gate,
 		Wait:   defaultQueueWait,
 		Label:  defaultQueueLabel,
