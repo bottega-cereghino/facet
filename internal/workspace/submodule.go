@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,9 +23,9 @@ import (
 //   - its git directory's modules, where a submodule's repository stays when
 //     its work tree goes: switched to a commit without it, or deinitialised.
 //
-// Untracked and ignored repositories are not looked for here: git status
-// shows the first, and ignoredRepos finds the second. A listing that fails is
-// recorded on a state of its own, so it blocks.
+// Every other repository in the work tree holds, whatever it is
+// (unjudgedRepos). A listing that fails is recorded on a state of its own, so
+// it blocks.
 func submoduleStates(git gitx.Runner, dir, p, gone string) []CloneState {
 	n := &innerRepos{git: git, gone: gone, seen: map[string]bool{}}
 	if gd, err := absGitDir(git, p); err == nil {
@@ -115,22 +114,16 @@ func (n *innerRepos) modules(name, clone, mods string) {
 // ignored-directory walk seeing it. Sorted, so a repository comes before the
 // directories inside it.
 func gitEntryDirs(git gitx.Runner, p string) ([]string, error) {
-	out, err := git.Run(p, nil, "ls-files", "--stage", "-z")
+	idx, err := readIndex(git, p)
 	if err != nil {
 		return nil, err
 	}
 	dirs := map[string]bool{}
-	for _, entry := range strings.Split(out, "\x00") {
-		meta, file, ok := strings.Cut(entry, "\t")
-		if !ok {
-			continue
-		}
-		if strings.HasPrefix(meta, "160000 ") {
-			dirs[file] = true
-		}
-		for d := path.Dir(file); d != "." && !dirs[d]; d = path.Dir(d) {
-			dirs[d] = true
-		}
+	for d := range idx.dirs {
+		dirs[d] = true
+	}
+	for g := range idx.gitlinks {
+		dirs[g] = true
 	}
 	return sortedKeys(dirs), nil
 }

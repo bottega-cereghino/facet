@@ -621,13 +621,24 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsARealDirectoryAtALinkName`), and `facet add link` refuses a
   name a directory already holds, before it writes the manifest
   (`TestAddLinkRefusesARealDirectoryAtItsName`).
-- **`reap` refuses while a repository sits in a directory a clone
-  ignores**, such as a fork cloned into `vendor/` to patch: its commits are
-  invisible to the checks above, and it goes with the clone
-  (`TestReapHoldsARepositoryInAnIgnoredDirectory`). Any VCS counts, and so
-  does a bare repository, which has no `.git` (a backup the clone pushes to
-  there would make its commits read as pushed)
-  (`TestReapHoldsAnyRepositoryInAnIgnoredDirectory`).
+- **`reap` refuses while a repository it does not judge sits anywhere in a
+  clone's work tree**, such as a fork cloned into an ignored `vendor/` to
+  patch: its commits are invisible to the checks above, and it goes with the
+  clone (`TestReapHoldsARepositoryInAnIgnoredDirectory`). One walk reads the
+  whole tree, ignored directories included, never following a symlink; only a
+  git repository at a gitlink or in a tracked directory is judged, as a clone
+  (above). Any VCS counts, and so does a bare repository, which has no `.git`
+  (a backup the clone pushes to there would make its commits read as pushed)
+  (`TestReapHoldsAnyRepositoryInAnIgnoredDirectory`), an ignored directory
+  that is itself the marker, such as a hidden `.hg/` or Jujutsu colocated at
+  the clone's root (`TestReapHoldsARepositoryWhoseMarkerIsTheIgnoredDirectory`),
+  and another VCS beside a judged repository's `.git`
+  (`TestReapHoldsAnotherVCSBesideASubmodulesGit`). A marker git tracks, such as
+  a test fixture, is committed content and does not hold. A submodule's
+  directory that is not checked out holds when it is not empty: git status
+  never looks there, so its files are in no repository
+  (`TestReapHoldsFilesInASubmoduleDirectoryThatIsNotInitialised`,
+  `TestReapDoesNotHoldOnAnEmptySubmoduleOrATrackedMarker`).
 - **What `reap` does not protect:** other files git ignores inside a clone (`.env`,
   `node_modules`, build output: holding on them would hold every workspace);
   commits reachable only from a local tag (a clone carries every upstream tag,

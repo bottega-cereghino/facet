@@ -75,10 +75,16 @@ type CloneState struct {
 	DefaultBranchUnresolved bool
 	// Stashed counts `git stash` entries, which no push would ever carry.
 	Stashed int
-	// IgnoredRepos names the git repositories inside directories the clone
-	// ignores. Their commits are invisible to the checks here, and they go with
+	// InnerRepos names the repositories inside the clone's work tree that no
+	// check judges (unjudgedRepos): any VCS, bare or not, ignored or not, but a
+	// git repository at a gitlink or in a tracked directory, which is judged as
+	// a clone. Their commits are invisible to the checks here, and they go with
 	// the clone. Non-empty is a blocker.
-	IgnoredRepos []string
+	InnerRepos []string
+	// StrayGitlinks names the submodule directories, not checked out, that hold
+	// files: git status never looks inside them, and the files are in no
+	// repository. Non-empty is a blocker.
+	StrayGitlinks []string
 	// Unverifiable holds the reasons this clone's state could not be confirmed --
 	// a git command that failed, or a directory that is not a readable repo. A
 	// non-empty slice is itself a blocker: a clone we could not inspect must not
@@ -164,8 +170,11 @@ func (s *IssueState) Blockers() []string {
 		}
 	}
 	for _, c := range s.Clone {
-		for _, r := range c.IgnoredRepos {
-			out = append(out, fmt.Sprintf("%s has a git repository at %s, in a directory it ignores -- reap cannot see its work; push it or move it out of the clone", c.Dir, r))
+		for _, r := range c.InnerRepos {
+			out = append(out, fmt.Sprintf("%s has a repository at %s that reap does not judge (another VCS, a bare repository, or one in a directory it ignores) -- reap cannot see its work; push it or move it out of the clone", c.Dir, r))
+		}
+		for _, g := range c.StrayGitlinks {
+			out = append(out, fmt.Sprintf("%s has files in %s, a submodule's directory with no repository checked out -- git status never looks there, and they are in no repository; move them out of the clone, then reap again", c.Dir, g))
 		}
 	}
 	for _, c := range s.Clone {
@@ -708,10 +717,10 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 		c.Worktrees = nestedWorktrees(linkedWorktrees(out), p)
 	}
 
-	if repos, err := ignoredRepos(git, p, c.Worktrees); err != nil {
-		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for repositories in its ignored directories: %v", err))
+	if repos, stray, err := unjudgedRepos(git, p, c.Worktrees); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for repositories inside it: %v", err))
 	} else {
-		c.IgnoredRepos = repos
+		c.InnerRepos, c.StrayGitlinks = repos, stray
 	}
 
 	// The branch name is informational only, so a failure here is not a safety
