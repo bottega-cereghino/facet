@@ -42,17 +42,6 @@ type Issue struct {
 	// --json createdAt` reports it. Empty when this value came from a call
 	// that does not ask for the field.
 	CreatedAt string `json:"createdAt"`
-	// Milestone is set when the issue is in one and the caller asked for it.
-	Milestone *Milestone `json:"milestone"`
-}
-
-// Milestone is a GitHub milestone as `gh issue list --json milestone` returns
-// it. DueOn is a pointer because gh emits null when the milestone has no due
-// date, and a null into a string would fail the decode.
-type Milestone struct {
-	Number int     `json:"number"`
-	Title  string  `json:"title"`
-	DueOn  *string `json:"dueOn"`
 }
 
 // LabelNames returns the issue's labels as plain strings.

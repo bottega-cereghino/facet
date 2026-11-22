@@ -27,17 +27,15 @@ func TestOpenIssuesAsksOnlyForOpenIssuesWithTheLabel(t *testing.T) {
 	}
 }
 
-func TestOpenIssuesParsesCreatedAtAndMilestone(t *testing.T) {
-	due := "2026-04-01T00:00:00Z"
+func TestOpenIssuesParsesCreatedAtAndLabels(t *testing.T) {
 	stdout := `[
 	  {
 	    "number": 7,
 	    "title": "Fix the bell",
 	    "url": "https://github.com/acme/widgets/issues/7",
 	    "state": "OPEN",
-	    "labels": [{"id": "LA_x", "name": "next", "color": "ededed"}, {"name": "codex"}],
-	    "createdAt": "2026-01-02T03:04:05Z",
-	    "milestone": {"number": 3, "title": "One", "description": "", "dueOn": null}
+	    "labels": [{"id": "LA_x", "name": "next", "color": "ededed"}, {"name": "p1"}],
+	    "createdAt": "2026-01-02T03:04:05Z"
 	  },
 	  {
 	    "number": 8,
@@ -45,8 +43,7 @@ func TestOpenIssuesParsesCreatedAtAndMilestone(t *testing.T) {
 	    "url": "https://github.com/acme/widgets/issues/8",
 	    "state": "OPEN",
 	    "labels": [{"name": "next"}],
-	    "createdAt": "2026-02-02T03:04:05Z",
-	    "milestone": {"number": 4, "title": "Two", "description": "d", "dueOn": "` + due + `"}
+	    "createdAt": "2026-02-02T03:04:05Z"
 	  }
 	]`
 	fakeGh(t, stdout, "", 0)
@@ -60,15 +57,12 @@ func TestOpenIssuesParsesCreatedAtAndMilestone(t *testing.T) {
 	if got[0].Number != 7 || got[0].CreatedAt != "2026-01-02T03:04:05Z" || got[0].State != "OPEN" {
 		t.Errorf("first = %+v", got[0])
 	}
-	if got[0].Milestone == nil || got[0].Milestone.DueOn != nil || got[0].Milestone.Title != "One" || got[0].Milestone.Number != 3 {
-		t.Errorf("first milestone = %+v, want One with a null due date", got[0].Milestone)
-	}
 	names := got[0].LabelNames()
-	if len(names) != 2 || names[0] != "next" || names[1] != "codex" {
+	if len(names) != 2 || names[0] != "next" || names[1] != "p1" {
 		t.Errorf("labels = %q", names)
 	}
-	if got[1].Milestone == nil || got[1].Milestone.DueOn == nil || *got[1].Milestone.DueOn != due {
-		t.Errorf("second milestone = %+v, want due %s", got[1].Milestone, due)
+	if got[1].CreatedAt != "2026-02-02T03:04:05Z" || len(got[1].LabelNames()) != 1 {
+		t.Errorf("second = %+v", got[1])
 	}
 }
 

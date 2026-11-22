@@ -85,7 +85,7 @@ func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		retryAt:  map[string]time.Time{},
 		wake:     make(chan struct{}, 1),
 	}
-	r.logf("queue: up to %d agent(s), label %s, order %s", cfg.Max, cfg.Label, cfg.Order)
+	r.logf("queue: up to %d agent(s), label %s, order p1 then p2 then p3 then oldest", cfg.Max, cfg.Label)
 	err := r.loop(ctx)
 	r.wg.Wait()
 	return err
@@ -180,7 +180,7 @@ func (r *queueRunner) candidate() (*queuedIssue, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.env.now()
-	for _, iss := range orderQueued(issues, r.cfg.Order) {
+	for _, iss := range orderQueued(issues) {
 		if r.blocked(iss, now) {
 			continue
 		}

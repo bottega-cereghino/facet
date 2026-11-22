@@ -421,16 +421,18 @@ never passed through a shell.
 | `hold` | a file path. When it exists, the queue starts nothing and stops. An agent already running is left to finish. |
 | `gate` | a command run before each start. A non-zero exit waits `wait` and tries later. Omitted means there is no gate. |
 | `wait` | how long to wait before looking again. Omitted means 30s. |
-| `order` | `oldest` (the default) or `milestone`. |
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `repos` | the `owner/name` repositories to read. |
 | `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}`. |
 | `agents` | one command per label. `{prompt}` is the task text. |
 
-`oldest` takes the earliest `createdAt`. `milestone` takes an issue that is
-in a milestone before one that is not, a milestone with a due date before one
-without, earlier due dates first, and within a milestone the oldest issue.
-The same created time is broken by repository name, then by issue number.
+The order is fixed. An issue labelled `p1` is taken before `p2`, `p2` before
+`p3`, and `p3` before an issue with none of those labels. An issue that
+carries more than one of them is taken at the earliest. Within one of those
+groups the earliest `createdAt` is first. The same created time is broken by
+repository name, then by issue number. The match ignores case, and `p10` is
+not `p1`. These labels do not choose the agent unless an agents entry uses
+the same label. A milestone does not move an issue.
 
 The agent starts in the workspace directory. The `CLAUDE.md` there is the one
 `facet spawn` wrote, with the issue text quoted. The queue does not reap
@@ -452,7 +454,7 @@ The stop is the hold file, or an interrupt. Remove the file and start
 `TestQueueStopsWhenTheHoldFileExists`, `TestQueueWaitsWhenTheGateFails`,
 `TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
 `TestQueueTakesTheOldestIssueFirst`,
-`TestQueueOrdersAMilestoneBeforeAnUnscheduledIssue`,
+`TestQueueTakesP1BeforeAnOlderIssue`,
 `TestQueueDoesNotHandTheSameIssueOutTwice`,
 `TestQueueRetriesASpawnThatFailed`,
 `TestQueueRetriesWhenTheAgentCannotStart` and

@@ -20,25 +20,24 @@ func (q queuedIssue) key() string {
 	return q.Repo + "#" + strconv.Itoa(q.Issue.Number)
 }
 
-// orderQueued returns issues in the order the queue should start them.
-// oldest is createdAt, then repository, then number. milestone uses that
-// same order inside a milestone, and ranks a dated milestone before an
-// undated one, and any milestone before none.
-func orderQueued(issues []queuedIssue, order string) []queuedIssue {
+// orderQueued returns issues in the order the queue starts them.
+// An issue labelled p1 comes before p2, p2 before p3, and p3 before an
+// issue with none of those. Within one of those groups the oldest
+// createdAt is first, then the repository name, then the issue number.
+// The order is fixed: a milestone does not move an issue.
+func orderQueued(issues []queuedIssue) []queuedIssue {
 	out := append([]queuedIssue(nil), issues...)
 	// Stable, so a tie that issueBefore does not break stays in the order
 	// the issues were listed, which is the order of repos in the config.
 	sort.SliceStable(out, func(i, j int) bool {
-		return issueBefore(out[i], out[j], order)
+		return issueBefore(out[i], out[j])
 	})
 	return out
 }
 
-func issueBefore(a, b queuedIssue, order string) bool {
-	if order == queueOrderMilestone {
-		if c := compareMilestone(a.Issue.Milestone, b.Issue.Milestone); c != 0 {
-			return c < 0
-		}
+func issueBefore(a, b queuedIssue) bool {
+	if c := comparePriority(a.Issue, b.Issue); c != 0 {
+		return c < 0
 	}
 	if c := compareCreated(a.Issue.CreatedAt, b.Issue.CreatedAt); c != 0 {
 		return c < 0
@@ -49,53 +48,27 @@ func issueBefore(a, b queuedIssue, order string) bool {
 	return a.Issue.Number < b.Issue.Number
 }
 
-// compareMilestone reports whether a should be taken before b.
-// A nil milestone sorts last. A due date sorts before none, earlier first.
-// With the same due-date standing, the lower milestone number wins, then the title.
-func compareMilestone(a, b *ghx.Milestone) int {
-	if a == nil && b == nil {
-		return 0
-	}
-	if a == nil {
-		return 1
-	}
-	if b == nil {
-		return -1
-	}
-	ad, aok := milestoneDue(a)
-	bd, bok := milestoneDue(b)
-	switch {
-	case aok && bok:
-		if ad.Before(bd) {
-			return -1
-		}
-		if bd.Before(ad) {
-			return 1
-		}
-	case aok:
-		return -1
-	case bok:
-		return 1
-	}
-	if a.Number != b.Number {
-		if a.Number < b.Number {
-			return -1
-		}
-		return 1
-	}
-	return strings.Compare(a.Title, b.Title)
+// comparePriority ranks p1, then p2, then p3, then anything else.
+// An issue that carries more than one of those labels takes the earliest.
+// The match ignores case. A label such as p10 is not p1.
+func comparePriority(a, b ghx.Issue) int {
+	return priorityRank(a) - priorityRank(b)
 }
 
-func milestoneDue(m *ghx.Milestone) (time.Time, bool) {
-	if m == nil || m.DueOn == nil || *m.DueOn == "" {
-		return time.Time{}, false
+func priorityRank(iss ghx.Issue) int {
+	best := len(queuePriorities)
+	for _, name := range iss.LabelNames() {
+		for i, p := range queuePriorities {
+			if strings.EqualFold(name, p) && i < best {
+				best = i
+			}
+		}
 	}
-	t, err := time.Parse(time.RFC3339, *m.DueOn)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t, true
+	return best
 }
+
+// queuePriorities is the order the queue starts work, earliest first.
+var queuePriorities = []string{"p1", "p2", "p3"}
 
 func compareCreated(a, b string) int {
 	at, aerr := time.Parse(time.RFC3339, a)

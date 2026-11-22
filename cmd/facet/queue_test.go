@@ -42,7 +42,7 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Max != 6 || cfg.Order != queueOrderOldest || cfg.Label != "next" || cfg.Wait != 30*time.Second {
+	if cfg.Max != 6 || cfg.Label != "next" || cfg.Wait != 30*time.Second {
 		t.Fatalf("defaults from the example: %+v", cfg)
 	}
 	if cfg.Hold == "" || len(cfg.Gate) == 0 || len(cfg.Repos) != 1 || len(cfg.Agents) != 3 {
@@ -66,7 +66,7 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok.Max != defaultQueueMax || ok.Wait != defaultQueueWait || ok.Label != defaultQueueLabel || ok.Order != queueOrderOldest {
+	if ok.Max != defaultQueueMax || ok.Wait != defaultQueueWait || ok.Label != defaultQueueLabel {
 		t.Fatalf("defaults: %+v", ok)
 	}
 	if !strings.Contains(ok.Prompt, "Merge when the checks are green") {
@@ -80,7 +80,7 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	}{
 		{"unknown field", `{"maxAgents": 1, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "maxAgents"},
 		{"max zero", `{"max": 0, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "at least 1"},
-		{"bad order", `{"order": "newest", "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "oldest"},
+		{"order is not a field", `{"order": "oldest", "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "unknown field"},
 		{"bad repo", `{"repos": ["widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "owner/name"},
 		{"duplicate repo", `{"repos": ["acme/widgets", "acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "twice"},
 		{"no repos", `{"repos": [], "agents": [{"command": ["a", "{prompt}"]}]}`, "no repos"},
@@ -139,32 +139,31 @@ func TestQueueCommandFor(t *testing.T) {
 }
 
 func TestQueueOrdersIssues(t *testing.T) {
-	early := "2026-02-01T00:00:00Z"
-	late := "2026-06-01T00:00:00Z"
 	issues := []queuedIssue{
-		{Repo: "acme/widgets", Issue: openIssue(1, "2026-03-01T00:00:00Z", milestone(2, "Late", late))},
-		{Repo: "acme/widgets", Issue: openIssue(2, "2026-01-03T00:00:00Z", milestone(1, "Early", early))},
-		{Repo: "acme/other", Issue: openIssue(3, "2026-01-01T00:00:00Z", nil)},
-		{Repo: "acme/widgets", Issue: openIssue(4, "2026-01-02T00:00:00Z", &ghx.Milestone{Number: 9, Title: "Undated"})},
-		{Repo: "acme/widgets", Issue: openIssue(5, "not-a-date", nil)},
+		{Repo: "acme/widgets", Issue: labelled(1, "2026-01-01T00:00:00Z", "plain", "next")},
+		{Repo: "acme/widgets", Issue: labelled(2, "2026-06-01T00:00:00Z", "top", "next", "p1")},
+		{Repo: "acme/widgets", Issue: labelled(3, "2026-02-01T00:00:00Z", "low", "next", "p3")},
+		{Repo: "acme/widgets", Issue: labelled(4, "2026-03-01T00:00:00Z", "mid", "next", "p2")},
+		{Repo: "acme/widgets", Issue: labelled(5, "2026-04-01T00:00:00Z", "mid later", "next", "p2")},
+		{Repo: "acme/widgets", Issue: labelled(6, "2026-01-15T00:00:00Z", "both", "next", "p3", "P1")},
+		{Repo: "acme/widgets", Issue: labelled(7, "2026-01-02T00:00:00Z", "not p1", "next", "p10")},
+		{Repo: "acme/widgets", Issue: labelled(8, "not-a-date", "bad date", "next")},
 	}
-	if got, want := keys(orderQueued(issues, queueOrderMilestone)), []string{
-		"acme/widgets#2", "acme/widgets#1", "acme/widgets#4", "acme/other#3", "acme/widgets#5",
+	if got, want := keys(orderQueued(issues)), []string{
+		"acme/widgets#6", "acme/widgets#2",
+		"acme/widgets#4", "acme/widgets#5",
+		"acme/widgets#3",
+		"acme/widgets#1", "acme/widgets#7", "acme/widgets#8",
 	}; strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("milestone order = %v, want %v", got, want)
-	}
-	if got, want := keys(orderQueued(issues, queueOrderOldest)), []string{
-		"acme/other#3", "acme/widgets#4", "acme/widgets#2", "acme/widgets#1", "acme/widgets#5",
-	}; strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("oldest order = %v, want %v", got, want)
+		t.Errorf("order = %v, want %v", got, want)
 	}
 
 	same := []queuedIssue{
-		{Repo: "acme/widgets", Issue: openIssue(8, "2026-01-01T00:00:00Z", nil)},
-		{Repo: "acme/other", Issue: openIssue(9, "2026-01-01T00:00:00Z", nil)},
-		{Repo: "acme/widgets", Issue: openIssue(7, "2026-01-01T00:00:00Z", nil)},
+		{Repo: "acme/widgets", Issue: labelled(8, "2026-01-01T00:00:00Z", "a", "p2")},
+		{Repo: "acme/other", Issue: labelled(9, "2026-01-01T00:00:00Z", "b", "p2")},
+		{Repo: "acme/widgets", Issue: labelled(7, "2026-01-01T00:00:00Z", "c", "p2")},
 	}
-	if got, want := keys(orderQueued(same, queueOrderOldest)), []string{
+	if got, want := keys(orderQueued(same)), []string{
 		"acme/other#9", "acme/widgets#7", "acme/widgets#8",
 	}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("tie break = %v, want %v", got, want)
@@ -282,7 +281,7 @@ func TestQueueDoesNotStartWhenARepositoryCannotBeListed(t *testing.T) {
 			if repo == "acme/other" {
 				return nil, errors.New("temporary failure")
 			}
-			return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z", nil)}, nil
+			return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
 		},
 		spawn: func(string, int) (string, error) {
 			spawned.Add(1)
@@ -312,12 +311,12 @@ func TestQueueTakesTheOldestIssueFirst(t *testing.T) {
 			switch repo {
 			case "acme/widgets":
 				return []ghx.Issue{
-					openIssue(9, "2026-03-01T00:00:00Z", nil),
+					openIssue(9, "2026-03-01T00:00:00Z"),
 					closedIssue(1, "2020-01-01T00:00:00Z"),
-					openIssue(2, "2026-02-01T00:00:00Z", nil),
+					openIssue(2, "2026-02-01T00:00:00Z"),
 				}, nil
 			case "acme/other":
-				return []ghx.Issue{openIssue(5, "2026-01-01T00:00:00Z", nil)}, nil
+				return []ghx.Issue{openIssue(5, "2026-01-01T00:00:00Z")}, nil
 			default:
 				return nil, fmt.Errorf("unexpected repo %s", repo)
 			}
@@ -330,25 +329,23 @@ func TestQueueTakesTheOldestIssueFirst(t *testing.T) {
 	}
 }
 
-func TestQueueOrdersAMilestoneBeforeAnUnscheduledIssue(t *testing.T) {
+func TestQueueTakesP1BeforeAnOlderIssue(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "out")
 	script := appendScript(t)
 	cfg := oneAgentConfig([]string{"acme/widgets"})
-	cfg.Order = queueOrderMilestone
 	cfg.Agents = []queueAgent{{Command: []string{script, out, "{number}", "{prompt}"}}}
-	early := milestone(1, "Early", "2026-02-01T00:00:00Z")
-	late := milestone(2, "Late", "2026-06-01T00:00:00Z")
 	s := startQueue(t, cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
-			a := openIssue(1, "2026-01-01T00:00:00Z", late)
-			b := openIssue(2, "2026-01-03T00:00:00Z", early)
-			c := openIssue(3, "2026-01-01T00:00:00Z", nil)
-			return []ghx.Issue{a, b, c}, nil
+			return []ghx.Issue{
+				labelled(1, "2026-01-01T00:00:00Z", "old", "next"),
+				labelled(2, "2026-06-01T00:00:00Z", "top", "next", "p1"),
+				labelled(3, "2026-03-01T00:00:00Z", "mid", "next", "p2"),
+			}, nil
 		},
 	})
 	waitFor(t, "three agents", func() bool { return len(readLines(t, out)) >= 3 })
 	s.stop(t)
-	if got, want := readLines(t, out), []string{"2", "1", "3"}; strings.Join(got, ",") != strings.Join(want, ",") {
+	if got, want := readLines(t, out), []string{"2", "3", "1"}; strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("start order = %v, want %v", got, want)
 	}
 }
@@ -420,9 +417,9 @@ func TestQueueRunsAtMostMaxAgents(t *testing.T) {
 	s := startQueue(t, cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{
-				openIssue(1, "2026-01-01T00:00:00Z", nil),
-				openIssue(2, "2026-01-02T00:00:00Z", nil),
-				openIssue(3, "2026-01-03T00:00:00Z", nil),
+				openIssue(1, "2026-01-01T00:00:00Z"),
+				openIssue(2, "2026-01-02T00:00:00Z"),
+				openIssue(3, "2026-01-03T00:00:00Z"),
 			}, nil
 		},
 		spawn: func(string, int) (string, error) {
@@ -448,7 +445,7 @@ func TestQueueWaitsWhenTheGateFails(t *testing.T) {
 	var spawned atomic.Int32
 	s := startQueue(t, cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
-			return []ghx.Issue{openIssue(4, "2026-01-01T00:00:00Z", nil)}, nil
+			return []ghx.Issue{openIssue(4, "2026-01-01T00:00:00Z")}, nil
 		},
 		spawn: func(string, int) (string, error) {
 			spawned.Add(1)
@@ -473,7 +470,7 @@ func TestQueueDoesNotHandTheSameIssueOutTwice(t *testing.T) {
 	var spawned atomic.Int32
 	s := startQueue(t, cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
-			return []ghx.Issue{openIssue(6, "2026-01-01T00:00:00Z", nil)}, nil
+			return []ghx.Issue{openIssue(6, "2026-01-01T00:00:00Z")}, nil
 		},
 		spawn: func(string, int) (string, error) {
 			spawned.Add(1)
@@ -495,7 +492,7 @@ func TestQueueDoesNotRetryAnAgentThatExitsNonZero(t *testing.T) {
 	var spawned atomic.Int32
 	s := startQueue(t, cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
-			return []ghx.Issue{openIssue(10, "2026-01-01T00:00:00Z", nil)}, nil
+			return []ghx.Issue{openIssue(10, "2026-01-01T00:00:00Z")}, nil
 		},
 		spawn: func(string, int) (string, error) {
 			spawned.Add(1)
@@ -517,7 +514,7 @@ func TestQueueRetriesWhenTheAgentCannotStart(t *testing.T) {
 	var spawned atomic.Int32
 	s := startQueue(t, cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
-			return []ghx.Issue{openIssue(9, "2026-01-01T00:00:00Z", nil)}, nil
+			return []ghx.Issue{openIssue(9, "2026-01-01T00:00:00Z")}, nil
 		},
 		spawn: func(string, int) (string, error) {
 			spawned.Add(1)
@@ -536,7 +533,7 @@ func TestQueueRetriesASpawnThatFailed(t *testing.T) {
 	var calls atomic.Int32
 	s := startQueue(t, cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
-			return []ghx.Issue{openIssue(8, "2026-01-01T00:00:00Z", nil)}, nil
+			return []ghx.Issue{openIssue(8, "2026-01-01T00:00:00Z")}, nil
 		},
 		spawn: func(string, int) (string, error) {
 			if calls.Add(1) == 1 {
@@ -706,7 +703,6 @@ func oneAgentConfig(repos []string) queueConfig {
 	return queueConfig{
 		Max:    1,
 		Wait:   20 * time.Millisecond,
-		Order:  queueOrderOldest,
 		Label:  "next",
 		Repos:  repos,
 		Prompt: defaultQueuePrompt,
@@ -714,32 +710,27 @@ func oneAgentConfig(repos []string) queueConfig {
 	}
 }
 
-func openIssue(number int, created string, m *ghx.Milestone) ghx.Issue {
+func openIssue(number int, created string) ghx.Issue {
 	return ghx.Issue{
 		Number: number, Title: fmt.Sprintf("Issue %d", number), State: "OPEN",
-		CreatedAt: created, Milestone: m,
-		URL: fmt.Sprintf("https://github.com/acme/widgets/issues/%d", number),
+		CreatedAt: created,
+		URL:       fmt.Sprintf("https://github.com/acme/widgets/issues/%d", number),
 	}
 }
 
 func closedIssue(number int, created string) ghx.Issue {
-	iss := openIssue(number, created, nil)
+	iss := openIssue(number, created)
 	iss.State = "CLOSED"
 	return iss
 }
 
 func labelled(number int, created, title string, labels ...string) ghx.Issue {
-	iss := openIssue(number, created, nil)
+	iss := openIssue(number, created)
 	iss.Title = title
 	for _, l := range labels {
 		iss.Labels = append(iss.Labels, ghx.Label{Name: l})
 	}
 	return iss
-}
-
-func milestone(number int, title, due string) *ghx.Milestone {
-	m := &ghx.Milestone{Number: number, Title: title, DueOn: &due}
-	return m
 }
 
 func keys(issues []queuedIssue) []string {

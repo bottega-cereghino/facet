@@ -15,7 +15,7 @@ const OpenIssueLimit = 1000
 
 // OpenIssues lists open issues in repo that carry label.
 //
-// The JSON is gh's `--json` shape, including createdAt and milestone, so a
+// The JSON is gh's `--json` shape, including createdAt and labels, so a
 // caller can order the list itself. gh's own order is not part of the result.
 func (CLI) OpenIssues(repo, label string) ([]Issue, error) {
 	if _, _, err := splitRepo("OpenIssues", repo); err != nil {
@@ -42,6 +42,6 @@ func (CLI) OpenIssues(repo, label string) ([]Issue, error) {
 }
 
 // openIssueFields is the --json list OpenIssues asks for. createdAt and
-// milestone are what an ordering needs; the body is left out on purpose,
+// labels are what an ordering needs; the body is left out on purpose,
 // because a queue does not put someone else's issue text on a command line.
-const openIssueFields = "number,title,url,state,labels,createdAt,milestone"
+const openIssueFields = "number,title,url,state,labels,createdAt"

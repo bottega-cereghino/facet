@@ -10,11 +10,9 @@ import (
 )
 
 const (
-	queueOrderOldest    = "oldest"
-	queueOrderMilestone = "milestone"
-	defaultQueueMax     = 6
-	defaultQueueWait    = 30 * time.Second
-	defaultQueueLabel   = "next"
+	defaultQueueMax   = 6
+	defaultQueueWait  = 30 * time.Second
+	defaultQueueLabel = "next"
 )
 
 // defaultQueuePrompt is what an agent is told when the config leaves prompt
@@ -30,7 +28,6 @@ type queueConfig struct {
 	Hold   string
 	Gate   []string
 	Wait   time.Duration
-	Order  string
 	Label  string
 	Repos  []string
 	Prompt string
@@ -50,7 +47,6 @@ type queueFile struct {
 	Hold   string       `json:"hold"`
 	Gate   []string     `json:"gate"`
 	Wait   string       `json:"wait"`
-	Order  string       `json:"order"`
 	Label  string       `json:"label"`
 	Repos  []string     `json:"repos"`
 	Prompt string       `json:"prompt"`
@@ -66,7 +62,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, order, label, repos, prompt, agents", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, repos, prompt, agents", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -80,16 +76,12 @@ func (f queueFile) normalize() (queueConfig, error) {
 		Hold:   strings.TrimSpace(f.Hold),
 		Gate:   f.Gate,
 		Wait:   defaultQueueWait,
-		Order:  queueOrderOldest,
 		Label:  defaultQueueLabel,
 		Prompt: defaultQueuePrompt,
 		Agents: f.Agents,
 	}
 	if f.Max != nil {
 		cfg.Max = *f.Max
-	}
-	if strings.TrimSpace(f.Order) != "" {
-		cfg.Order = strings.TrimSpace(f.Order)
 	}
 	if strings.TrimSpace(f.Label) != "" {
 		cfg.Label = strings.TrimSpace(f.Label)
@@ -122,9 +114,6 @@ func (c queueConfig) validate() error {
 	}
 	if c.Wait <= 0 {
 		return fmt.Errorf("queue config: wait must be greater than zero\nfix: use a Go duration such as 30s, or a hold file to stop the queue")
-	}
-	if c.Order != queueOrderOldest && c.Order != queueOrderMilestone {
-		return fmt.Errorf("queue config: order %q is not known\nfix: use %q or %q", c.Order, queueOrderOldest, queueOrderMilestone)
 	}
 	if strings.Contains(c.Label, ",") {
 		return fmt.Errorf("queue config: label %q contains a comma\nfix: name one label; a comma would ask gh for several", c.Label)
