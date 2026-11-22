@@ -17,9 +17,13 @@ import (
 // no configured remote owns (its config section removed by hand) is refreshed
 // by nothing, so it proves nothing; nor does a ref of a remote that reap
 // deletes with the workspace (the clone itself, a sibling clone, a bare backup
-// inside it).
+// inside it). A symbolic ref there is left out too: it names whatever it
+// points at, a local branch as readily as a remote one, and fetch --prune
+// never deletes one (#399). The refs a fetch writes are never symbolic, so
+// origin/HEAD's target still counts as itself.
 type pushedRefs struct {
-	// globs are the rev-list arguments naming those refs.
+	// globs are the rev-list arguments naming those refs, each glob after
+	// an --exclude for every symbolic ref under refs/remotes.
 	globs []string
 	// origin is set when origin is one of the remotes counted, so its default
 	// branch can prove a squash-merge landed.
@@ -60,14 +64,37 @@ func countedRemotes(git gitx.Runner, dir, gone string) (pushedRefs, error) {
 			}
 		}
 	}
+	symrefs, err := remoteSymrefs(git, dir)
+	if err != nil {
+		return pushedRefs{}, err
+	}
 	var pushed pushedRefs
 	for _, name := range names {
 		if counted[name] {
+			// rev-list applies --exclude to the next --glob only.
+			for _, ref := range symrefs {
+				pushed.globs = append(pushed.globs, "--exclude="+ref)
+			}
 			pushed.globs = append(pushed.globs, "--glob=refs/remotes/"+name+"/*")
 			pushed.origin = pushed.origin || name == "origin"
 		}
 	}
 	return pushed, nil
+}
+
+// remoteSymrefs lists the symbolic refs under refs/remotes.
+func remoteSymrefs(git gitx.Runner, dir string) ([]string, error) {
+	out, err := git.Run(dir, nil, "for-each-ref", "--format=%(symref)%00%(refname)", "refs/remotes/")
+	if err != nil {
+		return nil, fmt.Errorf("list the refs under refs/remotes: %w", err)
+	}
+	var refs []string
+	for _, line := range strings.Split(out, "\n") {
+		if target, ref, ok := strings.Cut(line, "\x00"); ok && target != "" {
+			refs = append(refs, ref)
+		}
+	}
+	return refs, nil
 }
 
 // remoteCounts reports whether the remote at url is a copy that outlives
