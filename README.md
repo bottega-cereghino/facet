@@ -648,7 +648,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. It deletes only what it can
   account for: every entry at the top level is a declared clone, a declared
-  link, facet's own file, the `CLAUDE.md` spawn wrote, or a directory whose
+  link, facet's own file (a regular file at one of its names: a directory there
+  holds, `TestReapReadsWhatIsAtAnOwnFilesName`), the `CLAUDE.md` spawn wrote,
+  or a directory whose
   every file an enclosing repository (`~/Workspaces` usually is one) has
   committed at that exact path with the same bytes
   (`TestIssueWorkspaceHoldsFilesBesideItsClones`,
