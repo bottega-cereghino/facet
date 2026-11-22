@@ -575,3 +575,31 @@ func TestReapReapableHoldsAWorkspaceJudgedAgainstAFailedFetch(t *testing.T) {
 		}
 	}
 }
+
+// The dry run lists the held workspaces grouped by what holds them, one line
+// each, so the list reads at a glance.
+func TestReapReapableDryRunGroupsTheHeldByWhatHoldsThem(t *testing.T) {
+	root, free, held := reapableRoot(t)
+	second := filepath.Join(root, "facet-test-reapable-held-2")
+	if err := os.MkdirAll(second, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&manifest.Manifest{Name: filepath.Base(second)}).Write(second); err != nil {
+		t.Fatal(err)
+	}
+	putFile(t, filepath.Join(second, "notes.md"), "only copy\n")
+	var out bytes.Buffer
+	if err := reapReapable(&out, []string{free, held, second}, false, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := "\nheld (2), by what holds them:\n" +
+		"  files beside the clones (2)\n" +
+		"    facet-test-reapable-held\n" +
+		"    facet-test-reapable-held-2\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks the grouped held list %q:\n%s", want, out.String())
+	}
+	if !strings.Contains(out.String(), "2 held left alone") {
+		t.Errorf("output lacks the count:\n%s", out.String())
+	}
+}
