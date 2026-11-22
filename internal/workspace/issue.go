@@ -116,6 +116,12 @@ type IssueState struct {
 	// a note at the root are all loose. Non-empty is a blocker.
 	Loose []string
 	Clone []CloneState
+	// Unaccounted names, capped, the files under the workspace's real path
+	// the census cannot account for (census, #392): in no pushed commit, in
+	// no directory something rebuilds, and none of facet's own. Each says why.
+	// UnaccountedCount is how many there are in all. Non-zero is a blocker.
+	Unaccounted      []string
+	UnaccountedCount int
 	// PR is the pull request for the issue branch, or nil.
 	PR *ghx.PR
 	// PRUnknown is set when a pull-request lookup was attempted but failed, so an
@@ -208,6 +214,9 @@ func (s *IssueState) Blockers() []string {
 		for _, h := range c.Hidden {
 			out = append(out, fmt.Sprintf("%s: %s", c.Dir, h))
 		}
+	}
+	if s.UnaccountedCount > 0 {
+		out = append(out, s.unaccountedBlocker())
 	}
 	if s.PR != nil && strings.EqualFold(s.PR.State, "OPEN") {
 		out = append(out, fmt.Sprintf("pull request #%d is still open", s.PR.Number))
@@ -384,6 +393,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 	}
 
 	st.Enclosing, st.Loose = looseFiles(git, ws, m)
+	st.Unaccounted, st.UnaccountedCount = census(git, ws, ws, st.Enclosing, cloneDirs(ws, st.Clone), topAccounted(ws, m))
 	if pr != nil && m.Issue != nil && m.Issue.Branch != "" {
 		// A lookup that errors is not "no PR": auth expiry, a network blip, or a
 		// rate limit must not silently drop the open-PR guard. Record that the

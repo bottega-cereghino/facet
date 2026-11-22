@@ -131,7 +131,8 @@ func TestLsRootSizeSaysWhatReapWouldDo(t *testing.T) {
 	if r := rows["empty"]; !strings.HasSuffix(strings.TrimSpace(r), "reapable") {
 		t.Errorf("a workspace holding nothing of its own should be reapable; row %q in:\n%s", r, out.String())
 	}
-	if r := rows["notes"]; !strings.Contains(r, "held (1)") {
+	// Held twice: the file is loose, and the census finds it in no commit.
+	if r := rows["notes"]; !strings.Contains(r, "held (2)") {
 		t.Errorf("a workspace holding the only copy of a file should be held; row %q in:\n%s", r, out.String())
 	}
 	if !strings.Contains(out.String(), "1 reapable now") {

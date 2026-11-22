@@ -112,8 +112,8 @@ func TestFacetsOwnFilesAreNotLoose(t *testing.T) {
 }
 
 // ~/Workspaces is itself a repository that tracks long-lived workspaces. A
-// loose file committed there has another copy, so it does not hold the reap;
-// one modified since, or never added, does.
+// loose file committed and pushed there has another copy, so it does not hold
+// the reap; one modified since, or never added, does.
 func TestLooseFilesInAnEnclosingRepository(t *testing.T) {
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
@@ -125,6 +125,7 @@ func TestLooseFilesInAnEnclosingRepository(t *testing.T) {
 	writeTestFile(t, filepath.Join(ws, "CLAUDE.md"), "committed\n")
 	mustGit(t, enclosing, "add", ".")
 	mustGit(t, enclosing, "commit", "-q", "-m", "track the workspace")
+	pushEnclosing(t, enclosing)
 
 	st, err := Inspect(ws, gitx.Git{}, nil, nil)
 	if err != nil {

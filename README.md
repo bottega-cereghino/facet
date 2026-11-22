@@ -293,10 +293,16 @@ deleting would lose work, or delete a directory out from under something still
 running in it. A refusal lists every holder it can see, with a count, so
 clearing what it names and re-running should not turn up more.
 
+Last, `reap` takes a census: it hashes every file under the workspace's real
+path and deletes only when each one is in a commit a remote has, in a
+directory something rebuilds (`node_modules`, `.venv`, `target`, `dist` and
+the like), or is facet's own. Anything else holds, named, whatever the other
+checks found.
+
 A long-lived workspace can also hold files of its own beside its clones: notes,
-a `CLAUDE.md`. Any that are not committed in an enclosing repository (a
-versioned `~/Workspaces`, say) hold it as well, because the workspace is their
-only copy. A workspace that is itself a repository holds too, whatever is
+a `CLAUDE.md`. Any that are not committed and pushed in an enclosing
+repository (a versioned `~/Workspaces`, say) hold it as well, because the
+workspace is their only copy. A workspace that is itself a repository holds too, whatever is
 committed or pushed there: its `.git` goes with it. An issue workspace holds
 the same way, except for the `CLAUDE.md`
 spawn wrote, as long as it is unchanged. Links are removed, never followed, so
@@ -536,9 +542,14 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). The repository is
   resolved as git reads it: a directory outside whose `.git` is a gitfile or a
   symlink into the clone is the clone
-  (`TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone`), and a backup that
-  borrows the clone's objects through its alternates (`git clone --shared`)
-  holds none of them
+  (`TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone`); a URL that names a
+  file counts only when the file is a bundle, since git follows a gitfile
+  there too (`TestReapHoldsWorkWhoseRemoteURLIsAGitfileIntoTheClone`,
+  `TestReapCountsWorkInABundleOutsideTheWorkspaceAsPushed`); and a backup that
+  borrows the clone's objects through its alternates (`git clone --shared`),
+  or whose `objects` directory is a link into the clone
+  (`TestReapHoldsWorkPushedToABackupWhoseObjectsAreTheClones`), holds none of
+  them
   (`TestReapHoldsWorkPushedToABackupThatBorrowsTheClonesObjects`). In a worktree
   clone, whose branches are the checkout's and stay with it, HEAD and the
   worktree's own refs count (`refs/worktree/*`, `refs/bisect/*`, and
@@ -616,6 +627,23 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   inside its directory, such as Claude Code's `.claude/worktrees`, which goes
   with it (`TestWorktreeCloneIsHeldByAWorktreeNestedInIt`,
   `TestPlainWorktreeIsHeldByAWorktreeNestedInIt`).
+- **`reap` deletes only files it can account for.** After every other check it
+  takes a census of the real path it deletes, links never followed: each file
+  is hashed as git names a blob and must be in a commit a counted remote has,
+  in the repository whose work tree holds it (the enclosing repository for a
+  file beside the clones), or its Git LFS pointer must be; or it lies in a
+  directory something rebuilds; or it is facet's own file, the `CLAUDE.md`
+  spawn wrote, a declared link, or in the git directory of a repository
+  another check judges. Anything else holds: an untracked file, a commit no
+  remote has, a file in a `.Git` of another case, a fifo
+  (`TestCensusHoldsWhatNoRemoteHas`); a loose file committed in the enclosing
+  repository but never pushed
+  (`TestCensusHoldsALooseFileCommittedButNotPushed`); a repository nothing
+  judges, git directory included (`TestCensusHoldsAnUnjudgedRepository`). A
+  file is read as it is on disk, never through a filter; a file the `ident`
+  attribute expanded matches only when every keyword names its own pushed
+  blob, so a note written into one holds
+  (`TestCensusReadsTheIdentKeywordExactly`).
 - **`reap` refuses while anything beside the clones exists nowhere else**, in an
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. It deletes only what it can
@@ -720,7 +748,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   folder of such a clone, is refused or judged as what it is
   (`TestReapRefusesACloneWhoseRepositoryCommitsAManifest`,
   `TestReapInspectsAWorktreeWithACommittedManifestAsAWorktree`,
-  `TestReapRefusesAFolderOfACloneThatTracksAManifest`).
+  `TestReapRefusesAFolderOfACloneThatTracksAManifest`). It judges and deletes
+  where the path leads, so a clone named through a symlink outside its
+  workspace is refused as well, and a worktree named through one is walked in
+  full (`TestReapRefusesAWorkspacesCloneNamedThroughASymlink`,
+  `TestReapHoldsARepositoryInAWorktreeNamedThroughASymlink`).
 - **`reap` checks again after its prompt**, so work that started while it
   waited holds the workspace, with `--force` too: force covers the holders it
   showed, never new ones (`TestReapChecksAgainAfterThePrompt`,

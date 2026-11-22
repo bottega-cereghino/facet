@@ -29,7 +29,12 @@ func reapableRoot(t *testing.T) (root, free, held string) {
 	t.Helper()
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 	t.Setenv("TMUX", "")
-	root = t.TempDir()
+	// The real path: reap names what it deletes by where its path leads, and
+	// macOS's temp dir is under a symlink.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	free = filepath.Join(root, "facet-test-reapable-free")
 	held = filepath.Join(root, "facet-test-reapable-held")
 	for _, dir := range []string{free, held} {
@@ -593,7 +598,7 @@ func TestReapReapableDryRunGroupsTheHeldByWhatHoldsThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "\nheld (2), by what holds them:\n" +
-		"  files beside the clones (2)\n" +
+		"  files beside the clones, files no remote has (2)\n" +
 		"    facet-test-reapable-held\n" +
 		"    facet-test-reapable-held-2\n"
 	if !strings.Contains(out.String(), want) {

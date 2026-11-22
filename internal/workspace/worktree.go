@@ -195,8 +195,11 @@ func removeWorktree(git gitx.Runner, checkout, dir string) error {
 // uncommitted files and the commits only its HEAD reaches. Its branch's pull
 // request is looked up too, since a worktree is usually one pull request's
 // work. A directory that is a repository of its own is refused: reap never
-// deletes a checkout.
+// deletes a checkout. It is inspected, and deleted, at its real path.
 func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) (*IssueState, error) {
+	// The real path, so a worktree named through a symlink is walked: a walk
+	// does not descend into a symlink at its root (#381).
+	dir = realPath(dir)
 	of, err := worktreeOf(git, dir)
 	if err != nil {
 		return nil, fmt.Errorf("%s: cannot tell whether it is a worktree: %w", dir, err)
@@ -222,6 +225,7 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 	// The worktree comes first: Reap removes it through Clone[0].WorktreeOf.
 	clones := append([]CloneState{c}, submoduleStates(git, filepath.Base(dir), dir, dir)...)
 	st := &IssueState{Dir: dir, Name: filepath.Base(dir), Worktree: true, Clone: clones}
+	st.Unaccounted, st.UnaccountedCount = census(git, dir, dir, "", cloneDirs(filepath.Dir(dir), clones), nil)
 	if clonePR != nil && c.Branch != "" && c.Branch != "HEAD" {
 		// As for an issue workspace: a lookup that fails is not "no PR".
 		if found, err := clonePR.ViewPR(repo, c.Branch); err == nil {
