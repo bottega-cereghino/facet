@@ -6,6 +6,25 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.8.0](https://github.com/bottega-cereghino/facet/compare/v0.7.7...v0.8.0) (2026-11-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* **reap:** reap now refuses a workspace whose clones hold ignored files outside the rebuildable list; the README listed them as unprotected.
+
+### Fixed
+
+* **reap:** check the enclosing workspace and worktree first, and pin the target's path across the prompt ([#369](https://github.com/bottega-cereghino/facet/issues/369)) ([a98c9f2](https://github.com/bottega-cereghino/facet/commit/a98c9f239392241d507dbce4e86c6e005dd35101)), refs [#363](https://github.com/bottega-cereghino/facet/issues/363) [#313](https://github.com/bottega-cereghino/facet/issues/313)
+* **reap:** count commits any local ref reaches, not a list of namespaces ([#365](https://github.com/bottega-cereghino/facet/issues/365)) ([b45b077](https://github.com/bottega-cereghino/facet/commit/b45b07739019837a6fac4219ed80a1cfbab9692e))
+* **reap:** count commits only refs/rewritten reaches ([#362](https://github.com/bottega-cereghino/facet/issues/362)) ([7e68a04](https://github.com/bottega-cereghino/facet/commit/7e68a04259734ea87012450933e1f7d032402073)), refs [#361](https://github.com/bottega-cereghino/facet/issues/361)
+* **reap:** hold on an ignored file nothing rebuilds ([#370](https://github.com/bottega-cereghino/facet/issues/370)) ([ec6ffee](https://github.com/bottega-cereghino/facet/commit/ec6ffee2f8f7a8da6226e90f12a500847e62dd49))
+* **reap:** hold on any top-level file the enclosing repo has not committed byte for byte ([#366](https://github.com/bottega-cereghino/facet/issues/366)) ([336b599](https://github.com/bottega-cereghino/facet/commit/336b59948f4cc1cfe56f09cc5d08c7d8366a5a4a))
+* **reap:** hold on grafts and borrowed objects, and resolve a remote as git reads it ([#368](https://github.com/bottega-cereghino/facet/issues/368)) ([c60c30c](https://github.com/bottega-cereghino/facet/commit/c60c30c5c51ebec1a0560805dfecbe9eb02f1446)), refs [#358](https://github.com/bottega-cereghino/facet/issues/358) [#359](https://github.com/bottega-cereghino/facet/issues/359) [#360](https://github.com/bottega-cereghino/facet/issues/360)
+* **reap:** hold when lsof is missing or fails, instead of reading it as nothing running ([#351](https://github.com/bottega-cereghino/facet/issues/351)) ([e5a38b4](https://github.com/bottega-cereghino/facet/commit/e5a38b4eb21b204fa1f9cc2476821a1f2d0a699b)), refs [#303](https://github.com/bottega-cereghino/facet/issues/303)
+* **reap:** read the launchd jobs again for the check after the prompt ([#352](https://github.com/bottega-cereghino/facet/issues/352)) ([cbdda16](https://github.com/bottega-cereghino/facet/commit/cbdda16d5b982fb8508e58f09b334494f1eff16a)), refs [#324](https://github.com/bottega-cereghino/facet/issues/324)
+* **reap:** walk each clone's whole work tree for repositories no check judges ([#367](https://github.com/bottega-cereghino/facet/issues/367)) ([e6d914f](https://github.com/bottega-cereghino/facet/commit/e6d914fb63e0ac76cd49c6e7e689b1885c99b4b8)), refs [#356](https://github.com/bottega-cereghino/facet/issues/356) [#357](https://github.com/bottega-cereghino/facet/issues/357)
+
 ## [0.7.7](https://github.com/bottega-cereghino/facet/compare/v0.7.6...v0.7.7) (2026-11-22)
 
 
