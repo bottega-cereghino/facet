@@ -153,7 +153,8 @@ func lastGitUse(git gitx.Runner, clone string) (time.Time, error) {
 
 // findRegen walks one clone for regenerable directories. It returns them, the
 // ones kept because they hold a repository or nothing tracked rebuilds them,
-// and the newest install it saw (an install touches the directory it fills).
+// and the newest use it saw: the newest entry in each listed directory, since
+// an install or an edit writes deep inside it, not at its top.
 func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []string, last time.Time, err error) {
 	ignored, err := ignoredDirs(git, clone)
 	if err != nil {
@@ -181,7 +182,10 @@ func findRegen(git gitx.Runner, name, clone string) (found []Regen, kept []strin
 			kept = append(kept, fmt.Sprintf("%s/%s holds a repository at %s", name, rel, repo))
 			return filepath.SkipDir
 		}
-		n := freedBytes(path)
+		n, used := treeStats(path)
+		if used.After(last) {
+			last = used
+		}
 		if n < minRegenBytes {
 			return filepath.SkipDir
 		}

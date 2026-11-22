@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 // freedBytes is how much disk deleting root gives back: each file's allocated
@@ -18,9 +19,19 @@ import (
 // clones of one file that both sit inside root count nothing for it, which
 // makes the figure a lower bound there.
 func freedBytes(root string) int64 {
+	n, _ := treeStats(root)
+	return n
+}
+
+// treeStats is freedBytes, and the newest modification time of any entry in
+// the tree, from the same walk. pip installs into .venv/lib/.../site-packages
+// and a patch-package edit lands deep in node_modules: neither touches the top
+// directory, so only the newest entry dates the last use. Directories count
+// as well as files, since npm extracts files with a fixed old mtime and only
+// the directories it creates carry the time of the install.
+func treeStats(root string) (total int64, newest time.Time) {
 	type inode struct{ dev, ino uint64 }
 	seen := map[inode]int{}
-	var total int64
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -28,6 +39,9 @@ func freedBytes(root string) int64 {
 		fi, err := d.Info()
 		if err != nil {
 			return nil
+		}
+		if fi.ModTime().After(newest) {
+			newest = fi.ModTime()
 		}
 		st, ok := fi.Sys().(*syscall.Stat_t)
 		if !ok {
@@ -53,5 +67,5 @@ func freedBytes(root string) int64 {
 		}
 		return nil
 	})
-	return total
+	return total, newest
 }

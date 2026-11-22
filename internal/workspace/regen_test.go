@@ -556,3 +556,36 @@ func TestPruneDeletesADirectoryBesideAFileThatInstallsIt(t *testing.T) {
 		})
 	}
 }
+
+// pip writes into .venv/lib/.../site-packages, and an edit to an installed
+// package (the patch-package workflow, where that edit is the only copy until
+// patch-package runs) writes deep inside node_modules. Neither touches the top
+// directory, which was all prune dated: a directory installed into or edited
+// yesterday read as idle (#304).
+func TestPruneSeesAnInstallOrEditInsideTheDirectory(t *testing.T) {
+	for _, tc := range []struct{ dir, from, inner string }{
+		{".venv", "pyproject.toml", "lib/python3.12/site-packages/newpkg/__init__.py"},
+		{"node_modules", "package.json", "left-pad/index.js"},
+	} {
+		t.Run(tc.dir, func(t *testing.T) {
+			ws, clone := rebuildClone(t, tc.dir, ".", tc.from, "")
+			now := time.Now().Add(60 * 24 * time.Hour)
+			yesterday := now.Add(-24 * time.Hour)
+			inner := filepath.Join(clone, tc.dir, filepath.FromSlash(tc.inner))
+			writeMiB(t, inner)
+			for p := inner; p != filepath.Join(clone, tc.dir); p = filepath.Dir(p) {
+				if err := os.Chtimes(p, yesterday, yesterday); err != nil {
+					t.Fatal(err)
+				}
+			}
+			st, err := InspectPrune(ws, gitx.Git{}, nil, now, 14*24*time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(st.Held) == 0 {
+				t.Fatalf("a %s written into a day ago reads as idle (last used %v, found %v)",
+					tc.dir, st.LastUsed.Sub(now).Round(time.Hour), foundRels(st))
+			}
+		})
+	}
+}
