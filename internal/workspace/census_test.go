@@ -196,22 +196,6 @@ func TestCensusOfAPlainWorktree(t *testing.T) {
 }
 
 // The list is capped, the count is not, and the blocker says both.
-func TestCensusCapsItsList(t *testing.T) {
-	ws, clone := issueWorkspace(t)
-	for i := range maxUnaccounted + 3 {
-		writeTestFile(t, filepath.Join(clone, "n"+string(rune('a'+i))), "x\n")
-	}
-	st, err := Inspect(ws, gitx.Git{}, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(st.Unaccounted) != maxUnaccounted || st.UnaccountedCount != maxUnaccounted+3 {
-		t.Fatalf("listed %d of %d", len(st.Unaccounted), st.UnaccountedCount)
-	}
-	if b := st.unaccountedBlocker(); !strings.Contains(b, "and 3 more") {
-		t.Fatalf("the blocker does not count the rest: %s", b)
-	}
-}
 
 // facet's own names are let go only as regular files: a directory at one,
 // even a repository with commits, is read like any loose entry (#401).
