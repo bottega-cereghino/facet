@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // pushEnclosing gives the enclosing repository enc a bare remote and pushes
@@ -74,6 +75,55 @@ func TestCensusHoldsWhatNoRemoteHas(t *testing.T) {
 			t.Errorf("the census lets %s go: %v", want, held)
 		}
 	}
+}
+
+// What something rebuilds is named relative to the work tree of the
+// repository holding it, never across a repository's boundary (#400). A
+// clone named dist, target or node_modules is a repository, not a build
+// output, so the census looks inside it; so is a repository at a rebuilt name
+// inside a clone. A file only the census sees (one in a .Git of another case)
+// holds in each.
+func TestCensusLooksInsideRepositoriesAtRebuiltNames(t *testing.T) {
+	for _, name := range []string{"repo", "dist", "target", "node_modules"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			origin := originRepo(t, filepath.Join(root, "origin"))
+			ws := filepath.Join(root, "iss-repo-1-x")
+			mkdirs(t, ws)
+			m := &manifest.Manifest{
+				Name:   "iss-repo-1-x",
+				Clones: map[string]string{name: origin},
+				Issue:  &manifest.Issue{Repo: "o/repo", Number: 1, Branch: "1-x", Home: name},
+			}
+			if err := m.Write(ws); err != nil {
+				t.Fatal(err)
+			}
+			if err := Sync(testRoots(root), ws, gitx.Git{}, quiet(), SyncOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			mkdirs(t, filepath.Join(ws, name, "notes", ".Git"))
+			writeTestFile(t, filepath.Join(ws, name, "notes", ".Git", "todo.txt"), "only copy\n")
+			if held := censusOf(t, ws); !censusNames(held, name+"/notes/.Git/todo.txt") {
+				t.Fatalf("the census skips the clone %s: %v", name, held)
+			}
+		})
+	}
+
+	t.Run("a repository at a rebuilt name in a clone", func(t *testing.T) {
+		ws, clone := issueWorkspace(t)
+		excludeIn(t, clone, "node_modules/")
+		inner := filepath.Join(clone, "node_modules", "fork")
+		mkdirs(t, filepath.Join(clone, "node_modules"))
+		gitOut(t, "", "init", "-q", filepath.Join(clone, "node_modules"))
+		mkdirs(t, inner)
+		writeTestFile(t, filepath.Join(inner, "patch.js"), "a local fix, committed nowhere\n")
+		// Nothing judges the inner repository, so its git directory holds
+		// as well, and the capped list may not reach patch.js.
+		held := censusOf(t, ws)
+		if len(held) == 0 || !strings.HasPrefix(held[0], "repo/node_modules/") {
+			t.Fatalf("the census skips a repository named node_modules: %v", held)
+		}
+	})
 }
 
 // A loose file the enclosing repository committed but never pushed has no

@@ -32,7 +32,9 @@ import (
 //     tree holds it, or the Git LFS pointer of its content is; a file outside
 //     every work tree inside the directory counts against the repository
 //     enclosing it;
-//   - it lies in a directory something rebuilds (rebuilt);
+//   - it lies in a directory something rebuilds (rebuilt), named from the
+//     top of the work tree under the deleted root that holds it, never
+//     across a repository's boundary;
 //   - it is one of facet's own files at a workspace's top level, the CLAUDE.md
 //     spawn wrote, or a declared link or clone that is a symlink (top);
 //   - or it is in the git directory of a repository another check judges
@@ -84,7 +86,7 @@ func census(git gitx.Runner, dir, gone, enclosing string, judged []string, top m
 	if enclosing != "" {
 		repo = w.repo(realPath(enclosing))
 	}
-	w.walk(root, repo)
+	w.walk(root, repo, "")
 	return w.held, w.count
 }
 
@@ -101,8 +103,12 @@ func (w *censusWalk) hold(p, format string, a ...any) {
 }
 
 // walk accounts for everything in the directory abs, whose files count
-// against repo (nil: no repository holds them).
-func (w *censusWalk) walk(abs string, repo *censusRepo) {
+// against repo (nil: no repository holds them). base is the top of the work
+// tree under the deleted root that abs lies in, which what something rebuilds
+// is named relative to, or "" when there is none: outside such a work tree,
+// in the enclosing repository's files or below a .git git does not read,
+// nothing counts as rebuilt (#400).
+func (w *censusWalk) walk(abs string, repo *censusRepo, base string) {
 	entries, err := os.ReadDir(abs)
 	if err != nil {
 		w.hold(abs, "could not be read (%v)", err)
@@ -111,8 +117,11 @@ func (w *censusWalk) walk(abs string, repo *censusRepo) {
 	for _, e := range entries {
 		if e.Name() == ".git" {
 			// A work tree's top: its files count against its own repository.
+			// A .git git does not read leaves them to the enclosing one, and
+			// nothing below it is rebuilt.
+			base = ""
 			if r := w.workTree(abs); r != nil {
-				repo = r
+				repo, base = r, abs
 			}
 			break
 		}
@@ -125,12 +134,12 @@ func (w *censusWalk) walk(abs string, repo *censusRepo) {
 		if repo != nil && repo.judged && abs == repo.top && e.Name() == ".git" {
 			continue
 		}
-		if rel, ok := relUnder(repo, w.root, p); ok && rebuiltEntry(rel, e.Type().IsRegular()) {
+		if w.rebuilt(base, p, e) {
 			continue
 		}
 		switch t := e.Type(); {
 		case t.IsDir():
-			w.walk(p, repo)
+			w.walk(p, repo, base)
 		case t&fs.ModeSymlink != 0:
 			target, err := os.Readlink(p)
 			if err != nil {
@@ -166,18 +175,27 @@ func rebuiltEntry(rel string, regular bool) bool {
 	return false
 }
 
-// relUnder is p relative to the work tree of repo, or to root when there is
-// no repository, slash-separated.
-func relUnder(repo *censusRepo, root, p string) (string, bool) {
-	base := root
-	if repo != nil {
-		base = repo.top
+// rebuilt reports whether the entry e at p is accounted for as what
+// something rebuilds: Finder's .DS_Store file anywhere, and otherwise a path
+// rebuiltEntry names, relative to base, the work tree p lies in. A directory
+// holding a .git is a repository, never a build output, and is walked.
+func (w *censusWalk) rebuilt(base, p string, e fs.DirEntry) bool {
+	if e.Name() == ".DS_Store" && e.Type().IsRegular() {
+		return true
+	}
+	if base == "" {
+		return false
 	}
 	rel, err := filepath.Rel(base, p)
-	if err != nil {
-		return "", false
+	if err != nil || !rebuiltEntry(filepath.ToSlash(rel), e.Type().IsRegular()) {
+		return false
 	}
-	return filepath.ToSlash(rel), true
+	if e.IsDir() {
+		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // workTree returns the repository whose work tree's top is abs, or nil when

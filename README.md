@@ -632,7 +632,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   is hashed as git names a blob and must be in a commit a counted remote has,
   in the repository whose work tree holds it (the enclosing repository for a
   file beside the clones), or its Git LFS pointer must be; or it lies in a
-  directory something rebuilds; or it is facet's own file, the `CLAUDE.md`
+  directory something rebuilds, named from the top of the clone or worktree
+  holding it, so a clone called `dist` or a repository inside a clone at
+  `node_modules` is read like any other
+  (`TestCensusLooksInsideRepositoriesAtRebuiltNames`); or it is facet's own file, the `CLAUDE.md`
   spawn wrote, a declared link, or in the git directory of a repository
   another check judges. Anything else holds: an untracked file, a commit no
   remote has, a file in a `.Git` of another case, a fifo
