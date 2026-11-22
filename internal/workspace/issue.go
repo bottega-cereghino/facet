@@ -806,6 +806,11 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 	if err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell which remotes hold its commits: %v", err))
 	}
+	if holds, err := gitDirHolds(git, p, gone); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not read its git directory: %v", err))
+	} else {
+		c.Unverifiable = append(c.Unverifiable, holds...)
+	}
 
 	// Commits reachable from a local ref but from no counted remote. Every ref
 	// is local except refs/remotes, refs/tags, refs/notes and the stash, which
