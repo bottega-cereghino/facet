@@ -598,7 +598,7 @@ func TestReapReapableDryRunGroupsTheHeldByWhatHoldsThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "\nheld (2), by what holds them:\n" +
-		"  files beside the clones (2)\n" +
+		"  files beside the clones, files no remote has (2)\n" +
 		"    facet-test-reapable-held\n" +
 		"    facet-test-reapable-held-2\n"
 	if !strings.Contains(out.String(), want) {

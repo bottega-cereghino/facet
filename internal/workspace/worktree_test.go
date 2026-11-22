@@ -463,7 +463,8 @@ func TestWorktreeCloneIsHeldByAWorktreeNestedInIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := st.Blockers(); len(b) != 1 || !strings.Contains(b[0], "linked worktree at ") || !strings.Contains(b[0], filepath.Join("repo", ".claude", "worktrees", "side")+" -- ") {
+	// The census holds the nested worktree's files as well.
+	if b := st.Blockers(); len(b) == 0 || !strings.Contains(b[0], "linked worktree at ") || !strings.Contains(b[0], filepath.Join("repo", ".claude", "worktrees", "side")+" -- ") {
 		t.Fatalf("not held by the nested worktree: %v", st.Blockers())
 	}
 
@@ -491,7 +492,7 @@ func TestPlainWorktreeIsHeldByAWorktreeNestedInIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := st.Blockers(); len(b) != 1 || !strings.Contains(b[0], "linked worktree at ") || !strings.Contains(b[0], filepath.Join("wt", "inner")+" -- ") {
+	if b := st.Blockers(); len(b) == 0 || !strings.Contains(b[0], "linked worktree at ") || !strings.Contains(b[0], filepath.Join("wt", "inner")+" -- ") {
 		t.Fatalf("not held by the nested worktree: %v", st.Blockers())
 	}
 }

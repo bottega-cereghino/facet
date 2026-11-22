@@ -18,9 +18,10 @@ func (s *IssueState) HoldKinds() []string {
 		has[holdInnerRepo] = has[holdInnerRepo] || len(c.InnerRepos) > 0 || len(c.StrayGitlinks) > 0
 		has[holdIgnored] = has[holdIgnored] || len(c.IgnoredFiles) > 0
 		has[holdStash] = has[holdStash] || c.Stashed > 0
-		has[holdUncommitted] = has[holdUncommitted] || c.Dirty || len(c.Hidden) > 0
+		has[holdUncommitted] = has[holdUncommitted] || c.Dirty || len(c.Hidden) > 0 || len(c.InProgress) > 0
 	}
 	has[holdLoose] = len(s.Loose) > 0
+	has[holdUnaccounted] = s.UnaccountedCount > 0
 	has[holdOpenPR] = s.PR != nil && strings.EqualFold(s.PR.State, "OPEN")
 	has[holdRunning] = s.SessionLive || len(s.LiveRoots) > 0 || len(s.Jobs) > 0
 	var out []string
@@ -53,6 +54,7 @@ const (
 	holdIgnored
 	holdStash
 	holdUncommitted
+	holdUnaccounted
 	holdOpenPR
 	holdRunning
 	holdKindCount
@@ -67,6 +69,7 @@ var holdLabels = [holdKindCount]string{
 	holdIgnored:     "ignored files nothing rebuilds",
 	holdStash:       "stashes",
 	holdUncommitted: "uncommitted changes",
+	holdUnaccounted: "files no remote has",
 	holdOpenPR:      "open pull request",
 	holdRunning:     "something running",
 }

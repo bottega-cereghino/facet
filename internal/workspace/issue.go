@@ -24,6 +24,9 @@ type CloneState struct {
 	Branch string
 	// Dirty means uncommitted changes or untracked files.
 	Dirty bool
+	// InProgress names the git operations stopped partway (a rebase, a merge),
+	// whose state, an autostash among it, is only in the git directory.
+	InProgress []string
 	// Hidden names the tracked files that differ from what is committed while
 	// git status calls them unchanged: an index mark or a clean filter hides
 	// them (see hiddenEdits). Each entry says what hides it and how to show
@@ -113,6 +116,12 @@ type IssueState struct {
 	// a note at the root are all loose. Non-empty is a blocker.
 	Loose []string
 	Clone []CloneState
+	// Unaccounted names, capped, the files under the workspace's real path
+	// the census cannot account for (census, #392): in no pushed commit, in
+	// no directory something rebuilds, and none of facet's own. Each says why.
+	// UnaccountedCount is how many there are in all. Non-zero is a blocker.
+	Unaccounted      []string
+	UnaccountedCount int
 	// PR is the pull request for the issue branch, or nil.
 	PR *ghx.PR
 	// PRUnknown is set when a pull-request lookup was attempted but failed, so an
@@ -197,9 +206,17 @@ func (s *IssueState) Blockers() []string {
 		}
 	}
 	for _, c := range s.Clone {
+		for _, op := range c.InProgress {
+			out = append(out, fmt.Sprintf("%s has %s in progress -- its state, an autostash of uncommitted edits among it, is only in the git directory; finish or abort it, then reap again", c.Dir, op))
+		}
+	}
+	for _, c := range s.Clone {
 		for _, h := range c.Hidden {
 			out = append(out, fmt.Sprintf("%s: %s", c.Dir, h))
 		}
+	}
+	if s.UnaccountedCount > 0 {
+		out = append(out, s.unaccountedBlocker())
 	}
 	if s.PR != nil && strings.EqualFold(s.PR.State, "OPEN") {
 		out = append(out, fmt.Sprintf("pull request #%d is still open", s.PR.Number))
@@ -376,6 +393,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 	}
 
 	st.Enclosing, st.Loose = looseFiles(git, ws, m)
+	st.Unaccounted, st.UnaccountedCount = census(git, ws, ws, st.Enclosing, cloneDirs(ws, st.Clone), topAccounted(ws, m))
 	if pr != nil && m.Issue != nil && m.Issue.Branch != "" {
 		// A lookup that errors is not "no PR": auth expiry, a network blip, or a
 		// rate limit must not silently drop the open-PR guard. Record that the
@@ -753,6 +771,11 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git status failed: %v", err))
 	} else {
 		c.Dirty = strings.TrimSpace(out) != ""
+	}
+	if ops, err := opsInProgress(git, p); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell whether a rebase or merge is in progress: %v", err))
+	} else {
+		c.InProgress = ops
 	}
 	if hidden, err := hiddenEdits(git, p, nil); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for edits git status does not show: %v", err))
