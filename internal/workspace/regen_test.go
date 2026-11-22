@@ -300,7 +300,7 @@ func TestInspectPruneHoldsWhenWhatRunsCannotBeListed(t *testing.T) {
 
 type failingLiveRoots struct{}
 
-func (failingLiveRoots) Live(string) bool { return false }
+func (failingLiveRoots) Live(string, string) bool { return false }
 func (failingLiveRoots) LiveRoots(string) ([]string, error) {
 	return nil, errors.New("lsof crashed")
 }
