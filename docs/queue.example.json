@@ -1,0 +1,35 @@
+{
+  "max": 6,
+  "hold": "facet-queue.hold",
+  "gate": ["gate"],
+  "wait": "30s",
+  "label": "next",
+  "priorities": "priorities.example.txt",
+  "repos": ["acme/widgets", "acme/other"],
+  "prompt": "Do each issue below, in order. The workspace is {workspace}. {issues} Do the work each issue describes. Merge when the checks are green. Comment the result on the issue. Remove the {label} label when the issue is done. Then exit.",
+  "effort": {
+    "default": "medium",
+    "labels": {
+      "chore": "low",
+      "fix": "low",
+      "deps": "low",
+      "feat": "medium",
+      "design": "medium"
+    }
+  },
+  "agents": [
+    {
+      "label": "codex",
+      "bundle": 1,
+      "command": ["agent", "--for", "codex", "--effort", "{effort}", "{prompt}"]
+    },
+    {
+      "label": "gemini",
+      "command": ["agent", "--for", "gemini", "--effort", "{effort}", "{prompt}"]
+    },
+    {
+      "label": "",
+      "command": ["agent", "--effort", "{effort}", "{prompt}"]
+    }
+  ]
+}

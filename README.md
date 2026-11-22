@@ -392,6 +392,114 @@ only when it is on that issue. A comment id names a comment anywhere in the
 repository, so an id copied from the wrong thread is refused, with the issue it
 is really on.
 
+## One agent per queued issue
+
+`facet queue` watches the open issues that carry a label (by default `next`),
+spawns a workspace for the next one, and starts an agent there. When that
+agent exits, it takes the next issue. Several can run at once, up to `max`
+across every repository in the config. The default is 6.
+
+```sh
+facet queue --config queue.json
+```
+
+`--config` is a JSON file. With the flag omitted, `FACET_QUEUE` names it.
+`docs/queue.example.json` is a complete file: the commands in it are
+placeholders, and you replace them with the argument list you actually run.
+Nothing in the binary names an agent. An issue's labels pick the entry; the
+first match wins; the entry whose label is empty runs when none of the others
+match. Labels match without regard to case.
+
+The command is an argument list, not a shell command. One argument contains
+`{prompt}`, and that is where the task text goes. The issue title is
+substituted into the text, and a title is someone else's words, so it is
+never passed through a shell.
+
+| field | |
+| --- | --- |
+| `max` | how many agents run at once. Omitted means 6. |
+| `hold` | a file path. When it exists, the queue starts nothing and stops. An agent already running is left to finish. |
+| `gate` | a command run before each start. A non-zero exit waits `wait` and tries later. Omitted means there is no gate. |
+| `wait` | how long to wait before looking again. Omitted means 30s. |
+| `label` | which label marks an issue as queued. Omitted means `next`. |
+| `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
+| `repos` | the `owner/name` repositories to read. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}`. |
+| `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
+| `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
+
+The order is fixed. When `priorities` is set, the queue reads that file
+again before each start. A line is a repository name (`widgets` for
+`acme/widgets`), highest first, and a `#` starts a comment. It starts work
+only in the highest named project that still has an open issue with the
+queue label. A lower project waits, even for a free slot, and even when its
+issue is older or labelled `p1`. A repository the file does not name comes
+after every named one. An edit to the file applies to the next start.
+
+Within that project, an issue labelled `p1` is taken before `p2`, `p2`
+before `p3`, and `p3` before an issue with none of those labels. An issue
+that carries more than one of them is taken at the earliest. Within one of
+those groups the earliest `createdAt` is first. The same created time is
+broken by repository name, then by issue number. The match ignores case,
+and `p10` is not `p1`. These labels do not choose the agent unless an
+agents entry uses the same label. A milestone does not move an issue.
+`docs/priorities.example.txt` is an example of the file.
+
+`effort.labels` maps an issue label to a word, and `{effort}` in the command
+is where that word goes. The queue does not interpret the word. A label
+matches without regard to case. Labels that are not in the map, including
+the queue label and `p1`, do not count. When none of the issue's labels are
+in the map, `effort.default` is used, and omitted means `medium`. Two labels
+that name different efforts are a refusal: the queue logs that and waits,
+and does not guess. Each start is logged with the effort it used.
+
+An agent's `bundle` is how many issues one run of that command takes.
+Omitted means 1, and the maximum is 5. One run is still one agent, and it
+counts as one toward `max`. The issues are the next ones in the same
+repository that would use that same command and the same effort. The run
+stops at an issue that does not fit, so a later issue does not jump ahead
+of it. The workspace is the first issue's. The others are named in the
+prompt and are not spawned. `{issues}` is one line per issue,
+`owner/repo#n: title`. `{bundle}` is how many. When `bundle` is greater
+than 1 the prompt has to contain `{issues}`.
+
+An issue labelled `feat` or `research` is a run of one. It is not added to
+another issue's run, and the issues after it wait. The match ignores case
+and is the whole label. Each start is logged with the bundle size.
+
+The agent starts in the workspace directory. The `CLAUDE.md` there is the one
+`facet spawn` wrote, with the issue text quoted. The queue does not reap
+workspaces. When it stops, the directories stay, and the next time it takes
+that issue it uses the workspace already on disk instead of spawning another.
+
+An issue this process has already handed to an agent is not handed out again,
+including one whose agent exited with a non-zero status. A spawn that failed,
+and a command that never started, are retried after `wait`. Remove the queue
+label when the work is done; the next run of `facet queue` starts an agent
+for whatever still carries it.
+
+At most 1000 open issues per repository are considered. When a repository
+returns exactly that many, the queue says so: any beyond the cap are unseen.
+
+The stop is the hold file, or an interrupt. Remove the file and start
+`facet queue` again to resume.
+
+`TestQueueStopsWhenTheHoldFileExists`, `TestQueueWaitsWhenTheGateFails`,
+`TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
+`TestQueueTakesTheOldestIssueFirst`,
+`TestQueueTakesP1BeforeAnOlderIssue`,
+`TestQueuePassesTheEffortForTheIssueLabel`,
+`TestQueueWaitsWhenEffortLabelsDisagree`,
+`TestQueueBundlesSmallIssuesFromOneRepo`,
+`TestQueueStopsABundleAtAFeature`,
+`TestQueueCountsABundleAsOneAgent`,
+`TestQueueStaysWithTheHighestProject`,
+`TestQueueMovesOnWhenTheHighestProjectHasNoNextIssue`,
+`TestQueueDoesNotHandTheSameIssueOutTwice`,
+`TestQueueRetriesASpawnThatFailed`,
+`TestQueueRetriesWhenTheAgentCannotStart` and
+`TestQueueUsesAWorkspaceThatAlreadyExists` hold this.
+
 ## The credential preflight
 
 Everything facet does on the forge rides one `gh` credential, shared with

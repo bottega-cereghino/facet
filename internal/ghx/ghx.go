@@ -38,6 +38,10 @@ type Issue struct {
 	// Author opened the issue. gh's `--json author` fills it; the REST API
 	// calls the field `user`, mapped in parseRESTIssue.
 	Author User `json:"author"`
+	// CreatedAt is when the issue was opened, RFC3339, as `gh issue list
+	// --json createdAt` reports it. Empty when this value came from a call
+	// that does not ask for the field.
+	CreatedAt string `json:"createdAt"`
 }
 
 // LabelNames returns the issue's labels as plain strings.
@@ -93,6 +97,9 @@ type Client interface {
 	Auth() (*AuthStatus, error)
 	// ViewIssue fetches one issue from repo ("owner/name").
 	ViewIssue(repo string, number int) (*Issue, error)
+	// OpenIssues lists open issues in repo that carry label, up to
+	// OpenIssueLimit. The order is whatever gh returns; callers sort.
+	OpenIssues(repo, label string) ([]Issue, error)
 	// DevelopBranch creates a branch on the forge linked to the issue, and
 	// returns its name. gh links exactly one repository to an issue.
 	DevelopBranch(repo string, number int, base, name string) (string, error)

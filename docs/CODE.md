@@ -109,6 +109,12 @@ names the executable:
 | `launchctl`, `plutil` | `internal/launchd` | `launchd.Runner`, reached through `workspace.JobChecker` |
 | the agent CLI | `internal/claudex` | — |
 
+`facet queue` is the exception to that table. Its gate and its agents are
+commands the config file names, so no package names an executable for them.
+`runArgv` in `cmd/facet` is the one place that starts those commands, and it
+does not go through a shell: the issue title is substituted into the prompt,
+and a title is someone else's text.
+
 **Fake the narrowest thing that works.** `gitx.Runner` has one method, so faking
 all of it is trivial and callers take `gitx.Runner` directly. `ghx.Client` covers
 the whole `gh` surface, so a caller needing one or two calls declares its own
