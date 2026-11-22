@@ -79,6 +79,31 @@ func TestCensusHoldsWhatNoRemoteHas(t *testing.T) {
 	}
 }
 
+// A file checked out with eol=crlf (gradle writes `*.bat text eol=crlf` into
+// every project) is on disk with CRLF while its pushed blob has LF; git status
+// calls it clean. It is exactly what checkout writes from that blob, so it
+// goes (#402). A copy that differs from what checkout would write, here one
+// bare LF that clean conversion folds into the same blob, holds.
+func TestCensusAccountsForWhatCheckoutWritesFromAPushedBlob(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	writeTestFile(t, filepath.Join(clone, ".gitattributes"), "*.bat text eol=crlf\n")
+	writeTestFile(t, filepath.Join(clone, "gradlew.bat"), "@echo off\r\nrem start\r\n")
+	gitOut(t, clone, "add", ".gitattributes", "gradlew.bat")
+	gitOut(t, clone, "commit", "-qm", "wrapper")
+	gitOut(t, clone, "push", "-q", "origin", "HEAD:refs/heads/wrapper")
+	if out := gitOut(t, clone, "status", "--porcelain"); out != "" {
+		t.Fatalf("setup: the clone should be clean, got %q", out)
+	}
+	if held := censusOf(t, ws); len(held) != 0 {
+		t.Fatalf("the census holds a pushed file as checkout wrote it: %v", held)
+	}
+
+	writeTestFile(t, filepath.Join(clone, "gradlew.bat"), "@echo off\nrem start\r\n")
+	if held := censusOf(t, ws); !censusNames(held, "repo/gradlew.bat") {
+		t.Fatalf("the census lets go a file checkout would not write: %v", held)
+	}
+}
+
 // What something rebuilds is named relative to the work tree of the
 // repository holding it, never across a repository's boundary (#400). A
 // clone named dist, target or node_modules is a repository, not a build

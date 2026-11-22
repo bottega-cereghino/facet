@@ -201,3 +201,25 @@ func TestReapCountsWorkInABundleOutsideTheWorkspaceAsPushed(t *testing.T) {
 		t.Fatalf("work in a bundle outside the workspace holds: %v", st.Blockers())
 	}
 }
+
+// A symbolic ref under a remote's namespace names whatever it points at, and
+// fetch --prune never deletes one: refs/remotes/origin/keep pointing at a
+// local branch made that branch read as pushed. Only refs a fetch writes
+// count; a symref, origin/HEAD included, proves nothing of its own (#399).
+func TestReapHoldsABranchASymrefUnderARemoteNames(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	gitOut(t, clone, "switch", "-q", "-c", "wip")
+	commitFile(t, clone, "work.txt", "a day of work\n", "only here")
+	gitOut(t, clone, "switch", "-q", "main")
+	gitOut(t, clone, "symbolic-ref", "refs/remotes/origin/keep", "refs/heads/wip")
+	st, err := Inspect(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := gitOut(t, clone, "for-each-ref", "refs/remotes/origin/keep"); out == "" {
+		t.Fatal("setup: the fetch removed the symref")
+	}
+	if !hasBlocker(st, "repo has 1 unpushed commit") {
+		t.Fatalf("reap would delete wip, which only a symref under origin names: %v", st.Blockers())
+	}
+}
