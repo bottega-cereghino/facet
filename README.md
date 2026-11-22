@@ -531,7 +531,21 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` sees every untracked and modified file whatever git's config says.**
   Its status check names `--untracked-files=all` and `--ignore-submodules=none`,
   so `status.showUntrackedFiles=no` cannot hide a new file from it
-  (`TestReapHoldsAnUntrackedFileTheConfigHides`).
+  (`TestReapHoldsAnUntrackedFileTheConfigHides`), and turns off
+  `core.fsmonitor`, whose hook can miss an edit
+  (`TestReapSeesAnEditTheFSMonitorMisses`). A tracked file marked
+  `assume-unchanged` or `skip-worktree`, or read through a clean filter, is
+  hashed as it is on disk and compared with what is committed, in a clone and
+  in the enclosing repository alike, since git status skips the first and sees
+  the second only through the filter (`TestReapSeesAnEditBehindAnIndexBit`,
+  `TestReapHoldsAnEnclosingEditBehindAnIndexBit`,
+  `TestReapSeesContentACleanFilterHides`). A Git LFS file matches when the
+  committed pointer names its content
+  (`TestReapJudgesAnLFSFileByThePointerItsBlobHolds`); any other filter that
+  changes what it stores, such as git-crypt's, holds the file. A clone whose
+  `core.worktree` points elsewhere holds, since git would read that directory
+  instead of the one reap deletes
+  (`TestReapSeesFilesWhenCoreWorktreePointsElsewhere`).
 - **`reap` reads the repository on disk, not what the environment tells git.**
   Every git call drops `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the
   other variables that point git at another repository, index or config (git
