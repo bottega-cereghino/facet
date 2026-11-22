@@ -73,6 +73,9 @@ type CloneState struct {
 	// blocker of its own: it is set only when the fail-safe actually decided
 	// something, so a clean workspace on such a remote still reaps.
 	DefaultBranchUnresolved bool
+	// IgnoredFiles names what the clone ignores that nothing rebuilds
+	// (unrebuiltIgnored): a .env, a local config. Non-empty is a blocker.
+	IgnoredFiles []string
 	// Stashed counts `git stash` entries, which no push would ever carry.
 	Stashed int
 	// InnerRepos names the repositories inside the clone's work tree that no
@@ -175,6 +178,11 @@ func (s *IssueState) Blockers() []string {
 		}
 		for _, g := range c.StrayGitlinks {
 			out = append(out, fmt.Sprintf("%s has files in %s, a submodule's directory with no repository checked out -- git status never looks there, and they are in no repository; move them out of the clone, then reap again", c.Dir, g))
+		}
+	}
+	for _, c := range s.Clone {
+		if len(c.IgnoredFiles) > 0 {
+			out = append(out, fmt.Sprintf("%s has files git ignores that nothing rebuilds: %s -- the clone is their only copy; copy out what you need and delete the rest, then reap again", c.Dir, strings.Join(capList(c.IgnoredFiles, "ignored paths"), ", ")))
 		}
 	}
 	for _, c := range s.Clone {
@@ -768,6 +776,11 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for repositories inside it: %v", err))
 	} else {
 		c.InnerRepos, c.StrayGitlinks = repos, stray
+	}
+	if files, err := unrebuiltIgnored(git, p, append(append([]string{}, c.Worktrees...), c.InnerRepos...)); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not list the files it ignores: %v", err))
+	} else {
+		c.IgnoredFiles = files
 	}
 
 	// The branch name is informational only, so a failure here is not a safety
