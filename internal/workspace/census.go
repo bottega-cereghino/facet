@@ -29,10 +29,11 @@ import (
 //
 //   - its content is a blob in a commit a counted remote has (countedRemotes:
 //     the remotes the unpushed count trusts), in the repository whose work
-//     tree holds it, or the Git LFS pointer of its content is; a file outside
-//     every work tree inside the directory counts against the repository
-//     enclosing it;
-//   - it lies in a directory something rebuilds (rebuilt);
+//     tree holds it; a file outside every work tree inside the directory
+//     counts against the repository enclosing it;
+//   - it lies in a directory something rebuilds (rebuilt), named from the
+//     top of the work tree under the deleted root that holds it, never
+//     across a repository's boundary;
 //   - it is one of facet's own files at a workspace's top level, the CLAUDE.md
 //     spawn wrote, or a declared link or clone that is a symlink (top);
 //   - or it is in the git directory of a repository another check judges
@@ -40,7 +41,10 @@ import (
 //
 // Everything else holds: a file in no pushed commit, one that cannot be read,
 // a socket or a fifo, the files of a repository nothing judges and its git
-// directory. The census only adds holds; every other check still runs.
+// directory. So does a file whose pushed blob is only the Git LFS pointer to
+// its content: a pushed pointer does not show that any LFS store has the
+// object, and facet reads no store (#397). The census only adds holds; every
+// other check still runs.
 //
 // A file is compared as it is on disk, never through a filter: an edit that a
 // clean filter or the ident attribute would hide from git still differs here.
@@ -94,7 +98,7 @@ func census(git gitx.Runner, dir, gone, enclosing string, judged []string, top m
 			_ = os.RemoveAll(w.tmp)
 		}
 	}()
-	w.walk(root, repo)
+	w.walk(root, repo, "")
 	return w.held, w.count
 }
 
@@ -111,8 +115,12 @@ func (w *censusWalk) hold(p, format string, a ...any) {
 }
 
 // walk accounts for everything in the directory abs, whose files count
-// against repo (nil: no repository holds them).
-func (w *censusWalk) walk(abs string, repo *censusRepo) {
+// against repo (nil: no repository holds them). base is the top of the work
+// tree under the deleted root that abs lies in, which what something rebuilds
+// is named relative to, or "" when there is none: outside such a work tree,
+// in the enclosing repository's files or below a .git git does not read,
+// nothing counts as rebuilt (#400).
+func (w *censusWalk) walk(abs string, repo *censusRepo, base string) {
 	entries, err := os.ReadDir(abs)
 	if err != nil {
 		w.hold(abs, "could not be read (%v)", err)
@@ -121,8 +129,11 @@ func (w *censusWalk) walk(abs string, repo *censusRepo) {
 	for _, e := range entries {
 		if e.Name() == ".git" {
 			// A work tree's top: its files count against its own repository.
+			// A .git git does not read leaves them to the enclosing one, and
+			// nothing below it is rebuilt.
+			base = ""
 			if r := w.workTree(abs); r != nil {
-				repo = r
+				repo, base = r, abs
 			}
 			break
 		}
@@ -135,12 +146,12 @@ func (w *censusWalk) walk(abs string, repo *censusRepo) {
 		if repo != nil && repo.judged && abs == repo.top && e.Name() == ".git" {
 			continue
 		}
-		if rel, ok := relUnder(repo, w.root, p); ok && rebuiltEntry(rel, e.Type().IsRegular()) {
+		if w.rebuilt(base, p, e) {
 			continue
 		}
 		switch t := e.Type(); {
 		case t.IsDir():
-			w.walk(p, repo)
+			w.walk(p, repo, base)
 		case t&fs.ModeSymlink != 0:
 			target, err := os.Readlink(p)
 			if err != nil {
@@ -178,18 +189,27 @@ func rebuiltEntry(rel string, regular bool) bool {
 	return false
 }
 
-// relUnder is p relative to the work tree of repo, or to root when there is
-// no repository, slash-separated.
-func relUnder(repo *censusRepo, root, p string) (string, bool) {
-	base := root
-	if repo != nil {
-		base = repo.top
+// rebuilt reports whether the entry e at p is accounted for as what
+// something rebuilds: Finder's .DS_Store file anywhere, and otherwise a path
+// rebuiltEntry names, relative to base, the work tree p lies in. A directory
+// holding a .git is a repository, never a build output, and is walked.
+func (w *censusWalk) rebuilt(base, p string, e fs.DirEntry) bool {
+	if e.Name() == ".DS_Store" && e.Type().IsRegular() {
+		return true
+	}
+	if base == "" {
+		return false
 	}
 	rel, err := filepath.Rel(base, p)
-	if err != nil {
-		return "", false
+	if err != nil || !rebuiltEntry(filepath.ToSlash(rel), e.Type().IsRegular()) {
+		return false
 	}
-	return filepath.ToSlash(rel), true
+	if e.IsDir() {
+		if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // checkedOut reports whether the file at p is exactly what checkout writes
@@ -316,8 +336,9 @@ func (w *censusWalk) file(p string, repo *censusRepo) {
 const whyUnpushed = "is in no commit a remote has"
 
 // check returns why content, size bytes read from r, holds, or "" when it is
-// a pushed blob of repo, or its Git LFS pointer is, or it is a pushed blob as
-// checkout writes it with the ident attribute (identExpanded).
+// a pushed blob of repo, or it is a pushed blob as checkout writes it with the
+// ident attribute (identExpanded). Content whose Git LFS pointer is a pushed
+// blob holds with its own reason, which names the push that sends the object.
 func (w *censusWalk) check(repo *censusRepo, r io.Reader, size int64) string {
 	if repo == nil {
 		return "is in no repository"
@@ -347,11 +368,12 @@ func (w *censusWalk) check(repo *censusRepo, r io.Reader, size int64) string {
 	pointer := fmt.Sprintf("version https://git-lfs.github.com/spec/v1\noid sha256:%x\nsize %d\n", lfs.Sum(nil), size)
 	ptr := repo.newH()
 	_, _ = fmt.Fprintf(ptr, "blob %d\x00%s", len(pointer), pointer)
-	if repo.pushed[hex.EncodeToString(ptr.Sum(nil))] {
-		return ""
-	}
 	if small != nil && identExpanded(repo, small.Bytes()) {
 		return ""
+	}
+	if repo.pushed[hex.EncodeToString(ptr.Sum(nil))] {
+		return "is Git LFS content whose pointer is pushed, but facet cannot see that any LFS store has it " +
+			"(run git lfs push --all <remote> in its clone, then reap the workspace by name with --force)"
 	}
 	return whyUnpushed
 }

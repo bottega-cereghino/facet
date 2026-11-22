@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
 // pushEnclosing gives the enclosing repository enc a bare remote and pushes
@@ -98,6 +101,85 @@ func TestCensusAccountsForWhatCheckoutWritesFromAPushedBlob(t *testing.T) {
 	writeTestFile(t, filepath.Join(clone, "gradlew.bat"), "@echo off\nrem start\r\n")
 	if held := censusOf(t, ws); !censusNames(held, "repo/gradlew.bat") {
 		t.Fatalf("the census lets go a file checkout would not write: %v", held)
+	}
+}
+
+// What something rebuilds is named relative to the work tree of the
+// repository holding it, never across a repository's boundary (#400). A
+// clone named dist, target or node_modules is a repository, not a build
+// output, so the census looks inside it; so is a repository at a rebuilt name
+// inside a clone. A file only the census sees (one in a .Git of another case)
+// holds in each.
+func TestCensusLooksInsideRepositoriesAtRebuiltNames(t *testing.T) {
+	for _, name := range []string{"repo", "dist", "target", "node_modules"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			origin := originRepo(t, filepath.Join(root, "origin"))
+			ws := filepath.Join(root, "iss-repo-1-x")
+			mkdirs(t, ws)
+			m := &manifest.Manifest{
+				Name:   "iss-repo-1-x",
+				Clones: map[string]string{name: origin},
+				Issue:  &manifest.Issue{Repo: "o/repo", Number: 1, Branch: "1-x", Home: name},
+			}
+			if err := m.Write(ws); err != nil {
+				t.Fatal(err)
+			}
+			if err := Sync(testRoots(root), ws, gitx.Git{}, quiet(), SyncOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			mkdirs(t, filepath.Join(ws, name, "notes", ".Git"))
+			writeTestFile(t, filepath.Join(ws, name, "notes", ".Git", "todo.txt"), "only copy\n")
+			if held := censusOf(t, ws); !censusNames(held, name+"/notes/.Git/todo.txt") {
+				t.Fatalf("the census skips the clone %s: %v", name, held)
+			}
+		})
+	}
+
+	t.Run("a repository at a rebuilt name in a clone", func(t *testing.T) {
+		ws, clone := issueWorkspace(t)
+		excludeIn(t, clone, "node_modules/")
+		inner := filepath.Join(clone, "node_modules", "fork")
+		mkdirs(t, filepath.Join(clone, "node_modules"))
+		gitOut(t, "", "init", "-q", filepath.Join(clone, "node_modules"))
+		mkdirs(t, inner)
+		writeTestFile(t, filepath.Join(inner, "patch.js"), "a local fix, committed nowhere\n")
+		// Nothing judges the inner repository, so its git directory holds
+		// as well, and the capped list may not reach patch.js.
+		held := censusOf(t, ws)
+		if len(held) == 0 || !strings.HasPrefix(held[0], "repo/node_modules/") {
+			t.Fatalf("the census skips a repository named node_modules: %v", held)
+		}
+	})
+}
+
+// A pushed Git LFS pointer names content; it does not show that any LFS store
+// has it. A push with --no-verify, or from a clone with no pre-push hook,
+// sends the pointer and never the object, and facet reads no store, so a file
+// only its pointer accounts for holds, saying how to clear it (#397). The
+// same file left as its pointer (a checkout that skipped the smudge) is the
+// pushed blob itself and goes.
+func TestCensusHoldsLFSContentOnlyItsPointerAccountsFor(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	content := "a render, made today, uploaded nowhere\n"
+	pointer := fmt.Sprintf("version https://git-lfs.github.com/spec/v1\noid sha256:%x\nsize %d\n",
+		sha256.Sum256([]byte(content)), len(content))
+	pointerFile := filepath.Join(t.TempDir(), "pointer")
+	writeTestFile(t, pointerFile, pointer)
+	writeTestFile(t, filepath.Join(clone, ".gitattributes"), "*.bin filter=media\n")
+	mustGit(t, clone, "config", "filter.media.clean", "cat '"+pointerFile+"'")
+	mustGit(t, clone, "config", "filter.media.smudge", "cat")
+	gitOut(t, clone, "add", ".gitattributes")
+	commitFile(t, clone, "render.bin", content, "render")
+	mustGit(t, clone, "push", "-q", "--no-verify", "origin", "HEAD:refs/heads/render")
+	held := censusOf(t, ws)
+	if len(held) != 1 || !censusNames(held, "repo/render.bin") || !strings.Contains(held[0], "git lfs push") {
+		t.Fatalf("the census should hold render.bin alone, saying how to push its object: %v", held)
+	}
+
+	writeTestFile(t, filepath.Join(clone, "render.bin"), pointer)
+	if held := censusOf(t, ws); len(held) != 0 {
+		t.Fatalf("a file that is its pushed pointer holds: %v", held)
 	}
 }
 
