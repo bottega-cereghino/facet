@@ -106,8 +106,8 @@ func liveHolders(ws string, live LiveChecker) []string {
 	if live == nil {
 		return nil
 	}
-	if live.Live(filepath.Base(ws)) {
-		out = append(out, "a multiplexer session is attached -- end it first")
+	if live.Live(filepath.Base(ws), ws) {
+		out = append(out, fmt.Sprintf("tmux session %q runs in it -- end it first", filepath.Base(ws)))
 	}
 	if lr, ok := live.(LiveRootChecker); ok {
 		roots, err := lr.LiveRoots(ws)

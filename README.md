@@ -287,8 +287,8 @@ warning. `file` prints the labels it applied after the URL.
 
 `facet issues` lists the ephemeral workspaces. `facet reap <name>` deletes a
 workspace, ephemeral or long-lived, and **refuses** while there are unpushed
-commits, uncommitted changes, stashes, an open pull request, a live multiplexer
-session, or a tmux pane or process still in the workspace — the states where
+commits, uncommitted changes, stashes, an open pull request, or a tmux pane or
+process still in the workspace — the states where
 deleting would lose work, or delete a directory out from under something still
 running in it. A refusal lists every holder it can see, with a count, so
 clearing what it names and re-running should not turn up more.
@@ -756,7 +756,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapLeavesTheMirrorAloneAndDeletesReadOnlyDirs`).
 - **`reap` also refuses while a tmux pane or process is in the workspace**, in
   any session — not only the one named after it, which a `link-window`ed pane
-  would slip past. A process counts when its working directory, its executable
+  would slip past. A session named after the workspace is its own only while
+  one of its panes is rooted there, and `--force` ends only that one, never
+  the session facet runs in; a session that only shares the name is left
+  alone (`TestReapLeavesAnUnrelatedSessionOfTheSameNameAlone`,
+  `TestReapForceEndsTheWorkspacesSession`). A process counts when its working directory, its executable
   or any file it has open is inside the workspace, so a watcher started
   elsewhere that tails a log in it is caught too. Each is named with its pid:
   clear them by pid, never by a pattern kill, which can take out processes

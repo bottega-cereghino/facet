@@ -61,7 +61,7 @@ func bareNodeModules(t *testing.T, root, name string) (ws, deps string) {
 // busyLive reports a session live for one workspace name.
 type busyLive struct{ name string }
 
-func (b busyLive) Live(session string) bool { return session == b.name }
+func (b busyLive) Live(session, _ string) bool { return session == b.name }
 
 func TestPruneListsWithoutApplyAndDeletesOnlyWhatNothingHolds(t *testing.T) {
 	root := t.TempDir()
@@ -173,7 +173,7 @@ func TestPruneCarriesOnPastAnUnreadableWorkspace(t *testing.T) {
 // switchLive reports a session live once name is set.
 type switchLive struct{ name string }
 
-func (s *switchLive) Live(session string) bool { return s.name != "" && session == s.name }
+func (s *switchLive) Live(session, _ string) bool { return s.name != "" && session == s.name }
 
 // A node_modules with no tracked package.json beside it has no install to come
 // back from: --apply keeps it, and the listing says so even when nothing else
