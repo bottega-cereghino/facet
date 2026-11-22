@@ -536,7 +536,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   pushed at all — the branch most easily lost. Only the refs of a configured
   remote count, refreshed by the fetch below, so a ref left under
   `refs/remotes` by a remote removed by hand proves nothing
-  (`TestReapHoldsWorkOnlyAStaleRemoteRefHas`); and only a remote whose
+  (`TestReapHoldsWorkOnlyAStaleRemoteRefHas`), and neither does a symbolic
+  ref there, which names whatever it points at, a local branch included, and
+  which no prune deletes (`TestReapHoldsABranchASymrefUnderARemoteNames`);
+  and only a remote whose
   repository is outside the workspace, so the clone itself, a bare backup in
   it or a sibling clone is no copy
   (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). The repository is
