@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,20 +21,19 @@ import (
 // otherwise always be held by its own shell, itself and its probe. Anything
 // else in that shell's session still counts.
 //
-// Both probes are a convenience layered on top of the git-based checks in
-// package workspace: a tool that is missing, or a server that is not running,
-// is not a failure -- it means there is nothing to report, the same way
-// Available and Kill degrade elsewhere in this package.
+// tmux missing, or no server running, means no panes. lsof ships with macOS,
+// so lsof missing or failing is an error, and the caller holds what it cannot
+// check: read as "nothing runs", it would let reap and prune delete a
+// directory a process runs from. The panes found are returned with it.
 func (Tmux) LiveRoots(dir string) ([]string, error) {
-	var live []string
-	live = append(live, tmuxPanesUnder(dir, "")...)
-	live = append(live, lsofProcessesUnder(dir)...)
-	return live, nil
+	live := tmuxPanesUnder(dir, "")
+	procs, err := lsofProcessesUnder(dir)
+	return append(live, procs...), err
 }
 
 // ProcessesUnder is the lsof half of LiveRoots, for a machine with no
 // multiplexer: a process rooted in dir holds it whether or not tmux exists.
-func ProcessesUnder(dir string) []string { return lsofProcessesUnder(dir) }
+func ProcessesUnder(dir string) ([]string, error) { return lsofProcessesUnder(dir) }
 
 // tmuxPanesUnder lists, as human-readable descriptions naming the target and
 // pid, every pane across every session whose pane_current_path is dir or a
@@ -91,16 +91,27 @@ func tmuxPanesUnder(dir, socket string) []string {
 // sharing it with a VM, would otherwise hold every workspace on the machine.
 // What runs inside such a VM is not visible from here either way. lsof sees
 // only processes this user may inspect.
-func lsofProcessesUnder(dir string) []string {
+//
+// lsof exits 1 with nothing on stderr when nothing matches, and at times
+// when something does; its stdout is read either way. Any other exit, a
+// warning on stderr, or lsof missing is an error: a directory it cannot stat
+// reads exactly like one nothing runs from.
+func lsofProcessesUnder(dir string) ([]string, error) {
 	if _, err := exec.LookPath("lsof"); err != nil {
-		return nil
+		return nil, fmt.Errorf("lsof is not on PATH (it ships with macOS in /usr/sbin): %w", err)
 	}
-	raw, err := exec.Command("lsof", "-FpRcfn", "+D", canonicalPath(dir)).Output()
-	if err != nil && len(raw) == 0 {
-		// lsof exits non-zero with nothing on stdout when nothing matches --
-		// that is "no processes", not a failure worth surfacing.
-		return nil
+	var stderr strings.Builder
+	cmd := exec.Command("lsof", "-FpRcfn", "+D", canonicalPath(dir))
+	cmd.Stderr = &stderr
+	raw, err := cmd.Output()
+	var probeErr error
+	if err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 1 || stderr.Len() != 0 {
+			probeErr = fmt.Errorf("lsof failed: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
 	}
+	// What lsof did report is named even when it failed.
 	var live []string
 	for _, p := range withoutSelf(parseLsof(string(raw)), os.Getpid(), os.Getppid()) {
 		if p.cwd == "" && isSystemService(p.pid) {
@@ -108,7 +119,7 @@ func lsofProcessesUnder(dir string) []string {
 		}
 		live = append(live, p.describe())
 	}
-	return live
+	return live, probeErr
 }
 
 // lsofProc is one process in lsof's output and what it holds under the

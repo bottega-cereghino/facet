@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
@@ -190,5 +192,59 @@ func TestPruneKeepsWhatNothingTrackedRebuildsAndSaysWhy(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("listing lacks %q:\n%s", want, out.String())
 		}
+	}
+}
+
+// Prune holds a workspace when the probe for what runs from it fails: lsof
+// missing from PATH, or failing with a warning, is not "nothing runs", and a
+// process whose working directory is the node_modules keeps it (facet#303).
+// The control subtest shows the same process holding it when lsof works.
+func TestPruneHoldsWhenTheProcessProbeFails(t *testing.T) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git")
+	}
+	for _, tc := range []struct{ name, lsof string }{
+		{name: "control: lsof works", lsof: "real"},
+		{name: "lsof not on PATH"},
+		{name: "lsof fails", lsof: "#!/bin/sh\necho 'lsof: WARNING: can't stat() file system' >&2\nexit 1\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TMUX", "")
+			saved := jobs
+			t.Cleanup(func() { jobs = saved })
+			jobs = &launchd.Jobs{Dirs: []string{t.TempDir()}, Run: noTools}
+			ws, deps := pruneWorkspace(t, t.TempDir(), "busy")
+			bin := t.TempDir()
+			if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
+				t.Fatal(err)
+			}
+			switch tc.lsof {
+			case "":
+			case "real":
+				if err := os.Symlink("/usr/sbin/lsof", filepath.Join(bin, "lsof")); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := os.WriteFile(filepath.Join(bin, "lsof"), []byte(tc.lsof), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// A dev server, say, running from the dependencies prune would delete.
+			server := exec.Command("/bin/sleep", "60")
+			server.Dir = filepath.Join(deps, "pkg")
+			if err := server.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = server.Process.Kill(); _ = server.Wait() })
+			t.Setenv("PATH", bin)
+
+			var out bytes.Buffer
+			later := time.Now().Add(60 * 24 * time.Hour)
+			_ = runPrune(&out, []string{ws}, gitx.Git{}, muxLive(), later, 14*24*time.Hour, true, yesAll)
+			if !exists(t, deps) {
+				t.Fatalf("prune deleted node_modules under a running process (pid %d):\n%s", server.Process.Pid, out.String())
+			}
+		})
 	}
 }

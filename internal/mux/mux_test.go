@@ -53,6 +53,16 @@ func TestTmuxPanesUnderFindsPaneRootedInDir(t *testing.T) {
 	}
 }
 
+// mustLsof is lsofProcessesUnder, failing the test on a probe error.
+func mustLsof(t *testing.T, dir string) []string {
+	t.Helper()
+	live, err := lsofProcessesUnder(dir)
+	if err != nil {
+		t.Fatalf("lsofProcessesUnder(%q): %v", dir, err)
+	}
+	return live
+}
+
 // TestLsofProcessesUnderFindsProcessRootedInDir covers the fallback probe: a
 // process with no tmux pane at all (started outside any session) whose cwd is
 // inside dir must still be found.
@@ -71,7 +81,7 @@ func TestLsofProcessesUnderFindsProcessRootedInDir(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	var live []string
 	for {
-		live = lsofProcessesUnder(dir)
+		live = mustLsof(t, dir)
 		if len(live) > 0 || !time.Now().Before(deadline) {
 			break
 		}
@@ -91,7 +101,7 @@ func TestLsofProcessesUnderFindsProcessRootedInDir(t *testing.T) {
 		t.Errorf("lsofProcessesUnder(%q) = %v; want an entry naming pid %s", dir, live, pid)
 	}
 
-	elsewhere := lsofProcessesUnder(t.TempDir())
+	elsewhere := mustLsof(t, t.TempDir())
 	if len(elsewhere) != 0 {
 		t.Errorf("lsofProcessesUnder(unrelated dir) = %v; want none", elsewhere)
 	}
@@ -119,13 +129,13 @@ func TestLsofProcessesUnderFindsAnOpenFileHolder(t *testing.T) {
 	pid := strconv.Itoa(cmd.Process.Pid)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		for _, l := range lsofProcessesUnder(dir) {
+		for _, l := range mustLsof(t, dir) {
 			if strings.Contains(l, "pid "+pid+")") && strings.Contains(l, "log open") {
 				return
 			}
 		}
 		if !time.Now().Before(deadline) {
-			t.Fatalf("lsofProcessesUnder(%q) = %v; want pid %s holding log open", dir, lsofProcessesUnder(dir), pid)
+			t.Fatalf("lsofProcessesUnder(%q) = %v; want pid %s holding log open", dir, mustLsof(t, dir), pid)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -186,7 +196,7 @@ func TestLsofProcessesUnderLeavesOutFacetItself(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	self := strconv.Itoa(os.Getpid())
-	for _, l := range lsofProcessesUnder(dir) {
+	for _, l := range mustLsof(t, dir) {
 		if strings.Contains(l, "(pid "+self+")") || strings.Contains(l, "process lsof ") {
 			t.Errorf("held by facet's own process or its probe: %q", l)
 		}
@@ -209,5 +219,38 @@ func TestWithoutSelf(t *testing.T) {
 	}
 	if strings.Join(got, ",") != "14,15,16" {
 		t.Errorf("withoutSelf kept %v, want 14,15,16", got)
+	}
+}
+
+// lsof ships with macOS, so lsof missing or failing is an error, never "no
+// processes": a directory it could not read reads exactly like one nothing
+// runs from (facet#303). Only exit 1 with nothing on stdout or stderr is no
+// match.
+func TestLsofProcessesUnderFailsWhenLsofFails(t *testing.T) {
+	for _, tc := range []struct {
+		name, script string
+		wantErr      bool
+	}{
+		{name: "lsof not on PATH", wantErr: true},
+		{name: "lsof warns and exits 1", script: "#!/bin/sh\necho 'lsof: WARNING: can'\\''t stat() file system' >&2\nexit 1\n", wantErr: true},
+		{name: "lsof exits 2", script: "#!/bin/sh\nexit 2\n", wantErr: true},
+		{name: "lsof matches nothing", script: "#!/bin/sh\nexit 1\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := t.TempDir()
+			if tc.script != "" {
+				if err := os.WriteFile(filepath.Join(bin, "lsof"), []byte(tc.script), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("PATH", bin)
+			live, err := lsofProcessesUnder(t.TempDir())
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("lsofProcessesUnder: err = %v, want an error: %v", err, tc.wantErr)
+			}
+			if len(live) != 0 {
+				t.Fatalf("lsofProcessesUnder = %v, want none", live)
+			}
+		})
 	}
 }

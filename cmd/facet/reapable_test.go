@@ -521,7 +521,8 @@ func TestReapRefusesWhileAProcessIsInTheWorkspace(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = sleeper.Process.Kill(); _ = sleeper.Wait() })
 	deadline := time.Now().Add(5 * time.Second)
-	for len(mux.ProcessesUnder(free)) == 0 && time.Now().Before(deadline) {
+	running := func() bool { procs, _ := mux.ProcessesUnder(free); return len(procs) > 0 }
+	for !running() && time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	cmd := newReapCmd()
