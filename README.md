@@ -761,10 +761,17 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   elsewhere that tails a log in it is caught too. Each is named with its pid:
   clear them by pid, never by a pattern kill, which can take out processes
   belonging to other workspaces. A macOS system service (an executable under
-  `/System`) counts only by its working directory: Spotlight indexing the tree,
-  or the virtualization service sharing it with a VM, would otherwise hold every
-  workspace. What runs inside such a VM is not visible from the host. `lsof`
-  sees only your own processes.
+  `/System`, outside `/System/Applications`, read from the kernel and never
+  from the name a process gives itself) counts only by its working directory:
+  Spotlight indexing the tree, or the virtualization service sharing it with a
+  VM, would otherwise hold every workspace
+  (`TestLsofProcessesUnderJudgesASystemServiceByItsExecutable`). What runs
+  inside such a VM is not visible from the host. A git object file with
+  another hard link does not count either: lsof matches by inode, so a sibling
+  clone's process holding its own pack would read as this workspace's, and
+  deleting one name of it breaks nothing
+  (`TestLsofProcessesUnderSkipsAHardlinkedObjectHeldElsewhere`). `lsof` sees
+  only your own processes.
   tmux missing, or no tmux server, means no panes. `lsof` missing, or failing
   (a warning on stderr, an exit other than 1), holds the workspace, since a
   directory it could not read looks like one nothing runs from
