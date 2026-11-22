@@ -35,8 +35,8 @@ import (
 type Runner func(name string, args ...string) ([]byte, error)
 
 // Jobs reads the loaded jobs once, on first use, and answers for any number of
-// directories from that one read. A facet command is short-lived, so a job
-// loaded after the read is not seen until the next command.
+// directories from that one read. A job loaded after the read is not seen by
+// it: a check after a prompt asks Fresh for a new read.
 type Jobs struct {
 	// Dirs are the folders whose *.plist files define the user's jobs.
 	Dirs []string
@@ -71,6 +71,15 @@ func Default() *Jobs {
 
 func run(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).Output()
+}
+
+// Fresh is a Jobs over the same folders and tools that has not read the
+// loaded jobs yet, so its first Under reads them anew. Nil stays nil.
+func (j *Jobs) Fresh() *Jobs {
+	if j == nil {
+		return nil
+	}
+	return &Jobs{Dirs: j.Dirs, Run: j.Run}
 }
 
 // Under describes each loaded job whose program, arguments or working
