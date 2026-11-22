@@ -1175,9 +1175,18 @@ func isUnder(root, path string) bool {
 // false and is skipped; os.Chmod follows symlinks and would otherwise change the
 // target, outside the tree (facet#87).
 func removeAllForce(root string) error {
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	makeDirsWritable(root)
+	return os.RemoveAll(root)
+}
+
+// makeDirsWritable gives the owner full permission on every directory in the
+// tree at root, and changes nothing else; see removeAllForce for why only
+// directories, and why a symlink is never followed. What it cannot read or
+// change is left for the delete that follows to report.
+func makeDirsWritable(root string) {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // keep going; the remove below will report what matters
+			return nil
 		}
 		if d.IsDir() {
 			if info, err := d.Info(); err == nil && info.Mode().Perm()&0o700 != 0o700 {
@@ -1186,8 +1195,4 @@ func removeAllForce(root string) error {
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	return os.RemoveAll(root)
 }
