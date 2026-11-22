@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -31,8 +32,8 @@ func (pushed pushedRefs) not() []string {
 }
 
 // countedRemotes reads the remotes of the repository git runs at in dir, the
-// directory its fetches ran in, and keeps those whose URL resolves outside
-// gone, the directory reap deletes. On an error it returns no remote, so
+// directory its fetches ran in, and keeps those whose repository lies outside
+// gone, the directory reap deletes (remoteCounts). On an error it returns no remote, so
 // every commit counts as unpushed, and the caller records the error.
 func countedRemotes(git gitx.Runner, dir, gone string) (pushedRefs, error) {
 	out, err := git.Run(dir, nil, "remote")
@@ -46,7 +47,7 @@ func countedRemotes(git gitx.Runner, dir, gone string) (pushedRefs, error) {
 		if err != nil {
 			return pushedRefs{}, fmt.Errorf("read the URL of remote %s: %w", name, err)
 		}
-		counted[name] = !localInside(strings.TrimSpace(url), dir, gone)
+		counted[name] = remoteCounts(git, strings.TrimSpace(url), dir, gone)
 	}
 	// A remote named a/b fetches into refs/remotes/a/b/, inside a's
 	// namespace: when a counts and a/b does not, a's glob would take a/b's
@@ -68,25 +69,73 @@ func countedRemotes(git gitx.Runner, dir, gone string) (pushedRefs, error) {
 	return pushed, nil
 }
 
-// localInside reports whether url names a repository on this disk inside
-// gone. As git reads a URL: one with "://" is local only as file://; one
-// with a colon before any slash is scp-like (host:path); anything else is a
-// path, relative to dir, where the fetch ran.
-func localInside(url, dir, gone string) bool {
+// remoteCounts reports whether the remote at url is a copy that outlives
+// gone, the directory reap deletes. A remote on another host is. A local one
+// is when the repository git reads there lies outside gone, resolved as git
+// resolves it (#364): the path itself, its git directory through a gitfile or
+// a symlinked .git, and the common directory a worktree's git directory names;
+// and when none of the object directories it borrows through alternates lies
+// inside gone. A local remote git cannot read as a repository proves nothing.
+// A bundle file outside gone is a copy.
+func remoteCounts(git gitx.Runner, url, dir, gone string) bool {
+	path, local := localPath(url, dir)
+	if !local {
+		return true
+	}
+	root := realPath(gone)
+	if isUnder(root, resolvePath(path)) {
+		return false
+	}
+	// git tries the path, then the path with .git appended.
+	fi, err := os.Stat(path)
+	if err != nil {
+		path += ".git"
+		if fi, err = os.Stat(path); err != nil {
+			return false
+		}
+		if isUnder(root, resolvePath(path)) {
+			return false
+		}
+	}
+	if fi.Mode().IsRegular() {
+		return true
+	}
+	out, err := git.Run(path, nil, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+	if err != nil {
+		return false
+	}
+	dirs := strings.Fields(out)
+	if len(dirs) != 2 {
+		return false
+	}
+	for _, d := range dirs {
+		if isUnder(root, realPath(d)) {
+			return false
+		}
+	}
+	inside, err := alternateInside(filepath.Join(realPath(dirs[1]), "objects"), gone)
+	return err == nil && inside == ""
+}
+
+// localPath returns the path url names when it names a repository on this
+// disk. As git reads a URL: one with "://" is local only as file://; one with
+// a colon before any slash is scp-like (host:path); anything else is a path,
+// relative to dir, where the fetch ran.
+func localPath(url, dir string) (string, bool) {
 	path, isFile := strings.CutPrefix(url, "file://")
 	switch {
 	case isFile:
 	case strings.Contains(url, "://"):
-		return false
+		return "", false
 	default:
 		if colon := strings.Index(url, ":"); colon >= 0 && !strings.Contains(url[:colon], "/") {
-			return false
+			return "", false
 		}
 	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(dir, path)
 	}
-	return isUnder(realPath(gone), resolvePath(path))
+	return path, true
 }
 
 // resolvePath is path with the symlinks of its deepest existing ancestor
