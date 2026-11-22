@@ -536,7 +536,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   pushed at all — the branch most easily lost. Only the refs of a configured
   remote count, refreshed by the fetch below, so a ref left under
   `refs/remotes` by a remote removed by hand proves nothing
-  (`TestReapHoldsWorkOnlyAStaleRemoteRefHas`); and only a remote whose
+  (`TestReapHoldsWorkOnlyAStaleRemoteRefHas`), and neither does a symbolic
+  ref there, which names whatever it points at, a local branch included, and
+  which no prune deletes (`TestReapHoldsABranchASymrefUnderARemoteNames`);
+  and only a remote whose
   repository is outside the workspace, so the clone itself, a bare backup in
   it or a sibling clone is no copy
   (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). The repository is
@@ -591,10 +594,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   in the enclosing repository alike, since git status skips the first and sees
   the second only through the filter (`TestReapSeesAnEditBehindAnIndexBit`,
   `TestReapHoldsAnEnclosingEditBehindAnIndexBit`,
-  `TestReapSeesContentACleanFilterHides`). A Git LFS file matches when the
-  committed pointer names its content
-  (`TestReapJudgesAnLFSFileByThePointerItsBlobHolds`); any other filter that
-  changes what it stores, such as git-crypt's, holds the file. A clone whose
+  `TestReapSeesContentACleanFilterHides`). A Git LFS file is no hidden edit
+  when the committed pointer names its content, though the census below still
+  holds it (`TestReapJudgesAnLFSFileByThePointerItsBlobHolds`); any other
+  filter that changes what it stores, such as git-crypt's, holds the file. A clone whose
   `core.worktree` points elsewhere holds, since git would read that directory
   instead of the one reap deletes
   (`TestReapSeesFilesWhenCoreWorktreePointsElsewhere`). A rebase, merge,
@@ -637,19 +640,31 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   takes a census of the real path it deletes, links never followed: each file
   is hashed as git names a blob and must be in a commit a counted remote has,
   in the repository whose work tree holds it (the enclosing repository for a
-  file beside the clones), or its Git LFS pointer must be; or it lies in a
-  directory something rebuilds; or it is facet's own file, the `CLAUDE.md`
-  spawn wrote, a declared link, or in the git directory of a repository
-  another check judges. Anything else holds: an untracked file, a commit no
-  remote has, a file in a `.Git` of another case, a fifo
-  (`TestCensusHoldsWhatNoRemoteHas`); a loose file committed in the enclosing
+  file beside the clones); or it lies in a directory something rebuilds,
+  named from the top of the clone or worktree holding it, so a clone called
+  `dist` or a repository inside a clone at `node_modules` is read like any
+  other (`TestCensusLooksInsideRepositoriesAtRebuiltNames`); or it is facet's
+  own file, the `CLAUDE.md` spawn wrote, a declared link, or in the git
+  directory of a repository another check judges. Anything else holds: an
+  untracked file, a commit no remote has, a file in a `.Git` of another case,
+  a fifo (`TestCensusHoldsWhatNoRemoteHas`); a Git LFS file whose pushed
+  pointer is all that accounts for it, since a pointer pushed with
+  `--no-verify` or without the hook leaves the object on no store and facet
+  reads no store: push it with `git lfs push --all <remote>`, then reap the
+  workspace by name with `--force`
+  (`TestCensusHoldsLFSContentOnlyItsPointerAccountsFor`); a loose file committed in the enclosing
   repository but never pushed
   (`TestCensusHoldsALooseFileCommittedButNotPushed`); a repository nothing
   judges, git directory included (`TestCensusHoldsAnUnjudgedRepository`). A
   file is read as it is on disk, never through a filter; a file the `ident`
   attribute expanded matches only when every keyword names its own pushed
   blob, so a note written into one holds
-  (`TestCensusReadsTheIdentKeywordExactly`).
+  (`TestCensusReadsTheIdentKeywordExactly`). A tracked file with no filter
+  attribute also matches when git, asked to write its index entry elsewhere,
+  writes the same bytes from a pushed blob, as with `text eol=crlf` or
+  `working-tree-encoding`; a copy checkout would not write, such as one line
+  ending changed, holds
+  (`TestCensusAccountsForWhatCheckoutWritesFromAPushedBlob`).
 - **`reap` refuses while anything beside the clones exists nowhere else**, in an
   issue workspace as in a long-lived one: a checkout `facet rm` dropped from the
   manifest, a hand clone, a note at the root. It deletes only what it can
