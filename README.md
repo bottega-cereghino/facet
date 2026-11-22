@@ -531,10 +531,17 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapReapableHoldsAWorkspaceJudgedAgainstAFailedFetch`). It fetches
   each repository once, so worktree clones of one checkout do not fetch into
   the same refs at once and collide (`TestSharedFetchFetchesEachRepositoryOnce`).
-- **`reap` judges each initialised submodule as a clone of its own**,
-  recursively: its commits, branches and stash live in the clone's git
-  directory and go with it, while the superproject sees only the commit it
-  records (`TestReapHoldsAnUnpushedSubmoduleCommit`).
+- **`reap` judges every repository a clone holds as a clone of its own**,
+  recursively: a submodule's commits, branches and stash live in the clone's
+  git directory and go with it, while the superproject sees only the commit it
+  records (`TestReapHoldsAnUnpushedSubmoduleCommit`). That includes a
+  submodule that is not checked out, switched to a commit without it or
+  deinitialised, whose repository stays in the clone's git directory
+  (`TestReapHoldsASubmoduleThatIsNotCheckedOut`); a repository added with
+  `git add` and no `.gitmodules`
+  (`TestReapHoldsAnEmbeddedRepositoryWithoutGitmodules`); and one made inside
+  a directory the clone tracks files in
+  (`TestReapHoldsARepositoryInATrackedDirectory`).
 - **`reap` sees every untracked and modified file whatever git's config says.**
   Its status check names `--untracked-files=all` and `--ignore-submodules=none`,
   so `status.showUntrackedFiles=no` cannot hide a new file from it
@@ -606,9 +613,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   there would make its commits read as pushed)
   (`TestReapHoldsAnyRepositoryInAnIgnoredDirectory`).
 - **What `reap` does not protect:** other files git ignores inside a clone (`.env`,
-  `node_modules`, build output: holding on them would hold every workspace), and
+  `node_modules`, build output: holding on them would hold every workspace);
   commits reachable only from a local tag (a clone carries every upstream tag,
-  so a tag cannot tell your work from a release). Copy or push those first.
+  so a tag cannot tell your work from a release); and commits reachable only
+  from the reflog (amended, rebased or reset away) or from `refs/notes`, since
+  every rebase leaves the first and no fetch brings back the second, so either
+  would hold every workspace. Copy or push those first.
 - **`prune` deletes only directories git ignores**, named in a fixed list of
   rebuildable ones, holding no tracked file and outside any nested repository
   or worktree; an ignored `.secrets/` or an unignored `node_modules` stays
