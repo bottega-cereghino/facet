@@ -6,6 +6,17 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.7.6](https://github.com/bottega-cereghino/facet/compare/v0.7.5...v0.7.6) (2026-11-22)
+
+
+### Fixed
+
+* **prune:** date a rebuildable directory by the newest entry inside it ([#342](https://github.com/bottega-cereghino/facet/issues/342)) ([9fface9](https://github.com/bottega-cereghino/facet/commit/9fface937b5b08003cb8202b33ef4af1cbdc8a66)), refs [#304](https://github.com/bottega-cereghino/facet/issues/304)
+* **reap:** --force refuses when the workspace changed during its prompt ([#346](https://github.com/bottega-cereghino/facet/issues/346)) ([c927b2b](https://github.com/bottega-cereghino/facet/commit/c927b2b03b988d7f0a8a7f05080f59dddafa25eb)), refs [#322](https://github.com/bottega-cereghino/facet/issues/322)
+* **reap:** hold on a repository beside the clones, gitlinked or not ([#343](https://github.com/bottega-cereghino/facet/issues/343)) ([b7fe0f4](https://github.com/bottega-cereghino/facet/commit/b7fe0f4a08ce283f8860442d83aecf05c725134d)), refs [#319](https://github.com/bottega-cereghino/facet/issues/319)
+* **reap:** hold on any repository in a directory a clone ignores ([#344](https://github.com/bottega-cereghino/facet/issues/344)) ([0865188](https://github.com/bottega-cereghino/facet/commit/0865188b7dfff66cf05bb1fe1254ef6e4a121e26)), refs [#336](https://github.com/bottega-cereghino/facet/issues/336)
+* **reap:** see a note renamed in case only beside the clones ([#345](https://github.com/bottega-cereghino/facet/issues/345)) ([beca622](https://github.com/bottega-cereghino/facet/commit/beca622568b3f6eb068c0f88ed0d18beb708f03d)), refs [#320](https://github.com/bottega-cereghino/facet/issues/320)
+
 ## [0.7.5](https://github.com/bottega-cereghino/facet/compare/v0.7.4...v0.7.5) (2026-11-22)
 
 
