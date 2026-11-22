@@ -116,7 +116,7 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 		}
 		// As in reap: a live session holds file handles on the tree.
 		if l := mux.Pick(); l != nil && !again.Worktree {
-			_ = l.Kill(filepath.Base(again.Dir))
+			_ = l.Kill(filepath.Base(again.Dir), again.Dir)
 		}
 		if err := workspace.Reap(again, git); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", reapName(again), err))

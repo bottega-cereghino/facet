@@ -226,7 +226,7 @@ func newReapCmd() *cobra.Command {
 			// A worktree has no session of its own: one of its name belongs to
 			// something else.
 			if l := mux.Pick(); l != nil && !st.Worktree {
-				_ = l.Kill(filepath.Base(st.Dir))
+				_ = l.Kill(filepath.Base(st.Dir), st.Dir)
 			}
 			if err := workspace.Reap(st, git); err != nil {
 				return err
@@ -423,7 +423,9 @@ func (c liveChecks) fresh() workspace.LiveChecker {
 	return c
 }
 
-func (c liveChecks) Live(session string) bool { return c.mux != nil && c.mux.Live(session) }
+func (c liveChecks) Live(session, dir string) bool {
+	return c.mux != nil && c.mux.Live(session, dir)
+}
 
 func (c liveChecks) LiveRoots(dir string) ([]string, error) {
 	if lr, ok := c.mux.(workspace.LiveRootChecker); ok {

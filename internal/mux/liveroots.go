@@ -26,7 +26,7 @@ import (
 // check: read as "nothing runs", it would let reap and prune delete a
 // directory a process runs from. The panes found are returned with it.
 func (Tmux) LiveRoots(dir string) ([]string, error) {
-	live := tmuxPanesUnder(dir, "")
+	live := tmuxPanesUnder(dir, "", "")
 	procs, err := lsofProcessesUnder(dir)
 	return append(live, procs...), err
 }
@@ -36,17 +36,21 @@ func (Tmux) LiveRoots(dir string) ([]string, error) {
 func ProcessesUnder(dir string) ([]string, error) { return lsofProcessesUnder(dir) }
 
 // tmuxPanesUnder lists, as human-readable descriptions naming the target and
-// pid, every pane across every session whose pane_current_path is dir or a
-// directory beneath it. socket selects an alternate server via `tmux -L
-// <socket>`, so tests can target an isolated server; production callers pass
-// "" for the default one.
-func tmuxPanesUnder(dir, socket string) []string {
+// pid, every pane whose pane_current_path is dir or a directory beneath it:
+// across every session, or in the one session named, when session is not "".
+// socket selects an alternate server via `tmux -L <socket>`, so tests can
+// target an isolated server; production callers pass "" for the default one.
+func tmuxPanesUnder(dir, socket, session string) []string {
 	if !(Tmux{}).Available() {
 		return nil
 	}
 	dir = canonicalPath(dir)
-	argv := []string{"list-panes", "-a", "-F",
-		"#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_path}"}
+	scope := []string{"-a"}
+	if session != "" {
+		scope = []string{"-s", "-t", "=" + session}
+	}
+	argv := append(append([]string{"list-panes"}, scope...), "-F",
+		"#{session_name}:#{window_index}.#{pane_index}\t#{pane_pid}\t#{pane_current_path}")
 	if socket != "" {
 		argv = append([]string{"-L", socket}, argv...)
 	}
