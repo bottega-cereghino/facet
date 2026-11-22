@@ -513,7 +513,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   a symlink before it is removed, so a plain directory is never mistaken for one.
 - **`reap` counts commits reachable from any local branch or HEAD and from no
   remote.** Unlike `@{u}..HEAD`, that also catches a branch which was never
-  pushed at all — the branch most easily lost. It fetches every remote with
+  pushed at all — the branch most easily lost. A worktree's own refs
+  (`refs/worktree/*`, `refs/bisect/*`) count too, since they go with it
+  (`TestReapHoldsACommitOnlyAPerWorktreeRefReaches`). It fetches every remote with
   `--prune` first, not only `origin`, so a branch deleted from a fork since it
   was pushed there no longer reads as pushed; a remote it cannot fetch is named
   (`TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed`,
