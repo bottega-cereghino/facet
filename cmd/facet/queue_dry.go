@@ -10,7 +10,10 @@ import (
 // gate that fails is a start that would not happen. Issues already printed
 // are treated as running, so a later line is the run a free slot would take
 // while the earlier ones are still going. A slot the higher projects
-// cannot fill goes to the next project down, as in the loop.
+// cannot fill goes to the next project down, as in the loop. A run whose
+// repository spawn cannot route is printed as a start that would not
+// happen, and the next run is looked at: the loop defers such an issue
+// after its spawn fails, and moves on.
 func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 	env.fill()
 	r := &queueRunner{
@@ -42,6 +45,13 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 				r.logf("dry-run: no open issue labelled %s", cfg.Label)
 			}
 			return nil
+		}
+		if r.env.route != nil {
+			if err := r.env.route(run[0].Repo); err != nil {
+				r.logf("dry-run: would not start %s#%d: spawn: %v", run[0].Repo, run[0].Issue.Number, err)
+				r.deferAll(run, r.deferRetry)
+				continue
+			}
 		}
 		effort, err := r.cfg.effortFor(run[0].Issue.LabelNames())
 		if err != nil {

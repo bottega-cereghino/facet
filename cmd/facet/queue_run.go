@@ -23,9 +23,12 @@ type queueEnv struct {
 	// requests. Nil skips the check.
 	prBranches func(repo string) ([]string, error)
 	spawn      func(repo string, number int) (string, error)
-	run        func(ctx context.Context, dir string, argv []string) error
-	now        func() time.Time
-	out        io.Writer
+	// route runs spawn's routing checks for a repository, without the
+	// network. Only --dry-run calls it; nil skips it.
+	route func(repo string) error
+	run   func(ctx context.Context, dir string, argv []string) error
+	now   func() time.Time
+	out   io.Writer
 }
 
 func realQueueEnv() queueEnv {
@@ -35,7 +38,11 @@ func realQueueEnv() queueEnv {
 		},
 		prBranches: ghx.CLI{}.OpenPRBranches,
 		spawn:      prepareWorkspace,
-		run:        runArgv,
+		route: func(repo string) error {
+			_, _, err := spawnRoute(repo)
+			return err
+		},
+		run: runArgv,
 	}
 }
 
