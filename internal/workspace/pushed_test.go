@@ -105,7 +105,9 @@ func TestReapCountsWorkOnARemoteOutsideTheWorkspaceAsPushed(t *testing.T) {
 	}
 }
 
-func TestLocalInside(t *testing.T) {
+// localPath names a local URL's path, read as git reads it, so a remote
+// inside the workspace is found by its path.
+func TestLocalPathInside(t *testing.T) {
 	root := t.TempDir()
 	gone := filepath.Join(root, "ws")
 	clone := filepath.Join(gone, "repo")
@@ -127,8 +129,9 @@ func TestLocalInside(t *testing.T) {
 		"host:tmp/backup.git":                 false,
 		"./a:b":                               true,
 	} {
-		if got := localInside(url, clone, gone); got != want {
-			t.Errorf("localInside(%q) = %v, want %v", url, got, want)
+		p, local := localPath(url, clone)
+		if got := local && isUnder(realPath(gone), resolvePath(p)); got != want {
+			t.Errorf("localPath(%q) inside = %v, want %v", url, got, want)
 		}
 	}
 }

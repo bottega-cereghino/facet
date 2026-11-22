@@ -205,6 +205,11 @@ func inspectGitDir(git gitx.Runner, name, g, gone string) CloneState {
 	if err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell which remotes hold its commits: %v", err))
 	}
+	if holds, err := gitDirHolds(git, g, gone); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not read its git directory: %v", err))
+	} else {
+		c.Unverifiable = append(c.Unverifiable, holds...)
+	}
 	refs, err := walkedRefs(git, g, true)
 	if err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not list its refs: %v", err))

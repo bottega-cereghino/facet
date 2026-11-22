@@ -528,7 +528,13 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsWorkOnlyAStaleRemoteRefHas`); and only a remote whose
   repository is outside the workspace, so the clone itself, a bare backup in
   it or a sibling clone is no copy
-  (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). In a worktree
+  (`TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace`). The repository is
+  resolved as git reads it: a directory outside whose `.git` is a gitfile or a
+  symlink into the clone is the clone
+  (`TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone`), and a backup that
+  borrows the clone's objects through its alternates (`git clone --shared`)
+  holds none of them
+  (`TestReapHoldsWorkPushedToABackupThatBorrowsTheClonesObjects`). In a worktree
   clone, whose branches are the checkout's and stay with it, HEAD and the
   worktree's own refs count (`refs/worktree/*`, `refs/bisect/*`, and
   `refs/rewritten/*`, where an interrupted `rebase -r` keeps its labels),
@@ -583,7 +589,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   local and never pushed, and reads every path as a file name, never as
   pathspec magic (`TestReapIgnoresAnInheritedGitDir`,
   `TestReapIgnoresAReplaceRefThatGraftsALocalCommitOntoTheRemote`,
-  `TestReapHoldsAFileWhoseNameIsPathspecMagic`). The landing proof names the
+  `TestReapHoldsAFileWhoseNameIsPathspecMagic`). A repository whose git
+  directory has `info/grafts`, the older local rewrite that nothing turns off,
+  holds (`TestReapHoldsAGraftFile`), and so does one whose alternates lead into
+  the workspace, since the objects it borrows go with it
+  (`TestReapHoldsACloneThatBorrowsObjectsFromTheWorkspace`). The landing proof names the
   default branch by its full ref, so a local branch called `origin/main` is not
   taken for it (`TestReapHoldsALocalBranchNamedOriginMain`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
