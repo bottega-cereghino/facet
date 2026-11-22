@@ -7,7 +7,9 @@ import (
 
 // dryQueue prints the runs the next starts would take and returns. It does
 // not spawn and does not start an agent. The gate still runs, because a
-// gate that fails is a start that would not happen. Issues already printed
+// gate that fails is a start that would not happen. A gate that skips a
+// run (gateSkipExit) is printed and the next run is looked at, as in the
+// loop; any other refusal ends the listing, since the loop would wait. Issues already printed
 // are treated as running, so a later line is the run a free slot would take
 // while the earlier ones are still going. A slot the higher projects
 // cannot fill goes to the next project down, as in the loop. A run whose
@@ -61,6 +63,11 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		if err := r.gate(ctx, run, effort); err != nil {
 			if ctx.Err() != nil {
 				return nil
+			}
+			if gateSkips(err) {
+				r.logf("dry-run: would not start %s#%d: gate skips it: %s", run[0].Repo, run[0].Issue.Number, err.Error())
+				r.deferAll(run, r.deferRetry)
+				continue
 			}
 			r.logf("dry-run: would not start %s#%d: gate: %s", run[0].Repo, run[0].Issue.Number, err.Error())
 			return nil

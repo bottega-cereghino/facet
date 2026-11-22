@@ -88,6 +88,18 @@ func runArgv(ctx context.Context, dir string, argv []string) error {
 	return cmd.Run()
 }
 
+// gateSkipExit is the gate's exit status for "not this run": a refusal about
+// one repository or issue, such as a red pull request there. The queue
+// defers that run for wait and moves on to the next. Any other non-zero
+// status is about the whole queue, such as a spend cap, and the queue waits.
+const gateSkipExit = 3
+
+// gateSkips reports that the gate exited with gateSkipExit.
+func gateSkips(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == gateSkipExit
+}
+
 // queueStopGrace is how long a command has to exit after the queue stops
 // it, before it is killed.
 const queueStopGrace = 10 * time.Second
@@ -166,6 +178,11 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		if ctx.Err() != nil {
 			r.logf("queue: stopping")
 			return true, nil
+		}
+		if gateSkips(err) {
+			r.logf("queue: %s#%d gate skips it: %s; trying the next run, this one again after %s", run[0].Repo, run[0].Issue.Number, err.Error(), r.cfg.Wait)
+			r.deferAll(run, r.deferRetry)
+			return false, nil
 		}
 		r.logf("queue: %s#%d gate: %s; waiting %s", run[0].Repo, run[0].Issue.Number, err.Error(), r.cfg.Wait)
 		r.pause(ctx)
