@@ -233,6 +233,21 @@ func TestReapForceRefusesWorkThatLandsDuringThePrompt(t *testing.T) {
 				gitIn(t, app, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--amend", "--no-edit")
 			},
 			"b.txt"},
+		// The modification time can be put back; the change time cannot (#387).
+		{"a same-size edit with its modification time put back",
+			func(t *testing.T, app string) { putFile(t, filepath.Join(app, "scratch.txt"), "accepted as lost\n") },
+			func(t *testing.T, app string) {
+				p := filepath.Join(app, "scratch.txt")
+				fi, err := os.Stat(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				putFile(t, p, "accepted as LOST\n")
+				if err := os.Chtimes(p, fi.ModTime(), fi.ModTime()); err != nil {
+					t.Fatal(err)
+				}
+			},
+			"scratch.txt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _, _ := reapableRoot(t)

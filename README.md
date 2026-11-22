@@ -759,7 +759,9 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `TestReapForceRefusesWhatStartedDuringThePrompt`). A holder's sentence
   ("app has uncommitted changes") reads the same however much work lands
   under it, so with holders shown, any change to the workspace's files during
-  the prompt refuses too: a new file in a clone already dirty, an amend
+  the prompt refuses too: a new file in a clone already dirty, an amend, a
+  same-size edit whose modification time was put back, since each entry's
+  change time is read as well
   (`TestReapForceRefusesWorkThatLandsDuringThePrompt`). It refuses, in
   `--reapable` too, when the target's path leads to another real directory
   than before the prompt, or a step of it became or stopped being a symlink,
