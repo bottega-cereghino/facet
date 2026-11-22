@@ -24,6 +24,9 @@ type CloneState struct {
 	Branch string
 	// Dirty means uncommitted changes or untracked files.
 	Dirty bool
+	// InProgress names the git operations stopped partway (a rebase, a merge),
+	// whose state, an autostash among it, is only in the git directory.
+	InProgress []string
 	// Hidden names the tracked files that differ from what is committed while
 	// git status calls them unchanged: an index mark or a clean filter hides
 	// them (see hiddenEdits). Each entry says what hides it and how to show
@@ -194,6 +197,11 @@ func (s *IssueState) Blockers() []string {
 	for _, c := range s.Clone {
 		if c.Dirty {
 			out = append(out, fmt.Sprintf("%s has uncommitted changes", c.Dir))
+		}
+	}
+	for _, c := range s.Clone {
+		for _, op := range c.InProgress {
+			out = append(out, fmt.Sprintf("%s has %s in progress -- its state, an autostash of uncommitted edits among it, is only in the git directory; finish or abort it, then reap again", c.Dir, op))
 		}
 	}
 	for _, c := range s.Clone {
@@ -753,6 +761,11 @@ func inspectClone(git gitx.Runner, dir, p, gone, repo string, pr PRLookup) Clone
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("git status failed: %v", err))
 	} else {
 		c.Dirty = strings.TrimSpace(out) != ""
+	}
+	if ops, err := opsInProgress(git, p); err != nil {
+		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not tell whether a rebase or merge is in progress: %v", err))
+	} else {
+		c.InProgress = ops
 	}
 	if hidden, err := hiddenEdits(git, p, nil); err != nil {
 		c.Unverifiable = append(c.Unverifiable, fmt.Sprintf("could not look for edits git status does not show: %v", err))

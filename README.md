@@ -586,7 +586,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   changes what it stores, such as git-crypt's, holds the file. A clone whose
   `core.worktree` points elsewhere holds, since git would read that directory
   instead of the one reap deletes
-  (`TestReapSeesFilesWhenCoreWorktreePointsElsewhere`).
+  (`TestReapSeesFilesWhenCoreWorktreePointsElsewhere`). A rebase, merge,
+  cherry-pick or revert stopped partway holds, since its state lives only in
+  the git directory: a rebase stopped at a `break` leaves a clean tree while
+  the edits it autostashed are named by no ref
+  (`TestReapHoldsARebaseInProgress`).
 - **`reap` reads the repository on disk, not what the environment tells git.**
   Every git call drops `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the
   other variables that point git at another repository, index or config (git
