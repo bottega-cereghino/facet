@@ -44,6 +44,9 @@ import (
 //
 // A file is compared as it is on disk, never through a filter: an edit that a
 // clean filter or the ident attribute would hide from git still differs here.
+// A tracked file with no filter attribute that is exactly what checkout writes
+// from a pushed blob (line endings, working-tree-encoding) is accounted for
+// (checkedOut).
 
 // maxUnaccounted bounds how many unaccounted paths are named one by one.
 const maxUnaccounted = maxLoose
@@ -53,8 +56,9 @@ type censusRepo struct {
 	top    string // its work tree's real path
 	judged bool   // another check judges it, so its git directory is skipped
 	newH   func() hash.Hash
-	pushed map[string]bool // blob names in commits a counted remote has; nil until read
-	err    error           // why pushed could not be read
+	pushed map[string]bool   // blob names in commits a counted remote has; nil until read
+	err    error             // why pushed could not be read
+	index  map[string]string // stage-0 blob of each tracked path; nil until read
 }
 
 type censusWalk struct {
@@ -66,6 +70,7 @@ type censusWalk struct {
 	repos  map[string]*censusRepo
 	held   []string
 	count  int
+	tmp    string // where checkedOut has git write files; "" until made
 }
 
 // census returns the files under dir that nothing accounts for, each relative
@@ -84,6 +89,11 @@ func census(git gitx.Runner, dir, gone, enclosing string, judged []string, top m
 	if enclosing != "" {
 		repo = w.repo(realPath(enclosing))
 	}
+	defer func() {
+		if w.tmp != "" {
+			_ = os.RemoveAll(w.tmp)
+		}
+	}()
 	w.walk(root, repo)
 	return w.held, w.count
 }
@@ -137,7 +147,9 @@ func (w *censusWalk) walk(abs string, repo *censusRepo) {
 				w.hold(p, "could not be read (%v)", err)
 				continue
 			}
-			w.check(p, repo, strings.NewReader(target), int64(len(target)))
+			if why := w.check(repo, strings.NewReader(target), int64(len(target))); why != "" {
+				w.hold(p, "%s", why)
+			}
 		case t.IsRegular():
 			w.file(p, repo)
 		default:
@@ -180,6 +192,81 @@ func relUnder(repo *censusRepo, root, p string) (string, bool) {
 	return filepath.ToSlash(rel), true
 }
 
+// checkedOut reports whether the file at p is exactly what checkout writes
+// for its path from a pushed blob: the index names the blob, a counted remote
+// has it, and git, asked to write the entry elsewhere, writes the same bytes.
+// That accounts for line endings converted on checkout (text eol=crlf,
+// core.autocrlf) and working-tree-encoding, which git status calls clean
+// (#402). A path with a filter attribute is never written: a filter driver
+// is a command, and the census runs none.
+func (w *censusWalk) checkedOut(p string, repo *censusRepo) bool {
+	rel, err := filepath.Rel(repo.top, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+	if repo.index == nil {
+		entries, err := indexEntries(w.git, repo.top, nil)
+		if err != nil {
+			return false
+		}
+		repo.index = make(map[string]string, len(entries))
+		for _, e := range entries {
+			repo.index[e.path] = e.oid
+		}
+	}
+	if oid, ok := repo.index[rel]; !ok || !repo.pushed[oid] {
+		return false
+	}
+	out, err := w.git.Run(repo.top, nil, "check-attr", "-z", "filter", "--", rel)
+	if f := strings.Split(out, "\x00"); err != nil || len(f) < 3 || (f[2] != "unspecified" && f[2] != "unset") {
+		return false
+	}
+	if w.tmp == "" {
+		if w.tmp, err = os.MkdirTemp("", "facet-census-"); err != nil {
+			w.tmp = ""
+			return false
+		}
+	}
+	dir, err := os.MkdirTemp(w.tmp, "")
+	if err != nil {
+		return false
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	if _, err := w.git.Run(repo.top, nil, "checkout-index", "--prefix="+dir+string(filepath.Separator), "--", rel); err != nil {
+		return false
+	}
+	return sameBytes(p, filepath.Join(dir, filepath.FromSlash(rel)))
+}
+
+// sameBytes reports whether the regular files a and b hold the same bytes,
+// neither read through a link.
+func sameBytes(a, b string) bool {
+	fa, err := os.OpenFile(a, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = fa.Close() }()
+	fb, err := os.OpenFile(b, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = fb.Close() }()
+	ia, errA := fa.Stat()
+	ib, errB := fb.Stat()
+	if errA != nil || errB != nil || !ia.Mode().IsRegular() || !ib.Mode().IsRegular() || ia.Size() != ib.Size() {
+		return false
+	}
+	ha, hb := sha256.New(), sha256.New()
+	if _, err := io.Copy(ha, fa); err != nil {
+		return false
+	}
+	if _, err := io.Copy(hb, fb); err != nil {
+		return false
+	}
+	return bytes.Equal(ha.Sum(nil), hb.Sum(nil))
+}
+
 // workTree returns the repository whose work tree's top is abs, or nil when
 // git does not read abs as one: its .git is then a file like any other, and
 // holds.
@@ -216,20 +303,27 @@ func (w *censusWalk) file(p string, repo *censusRepo) {
 		w.hold(p, "could not be read as a file")
 		return
 	}
-	w.check(p, repo, f, fi.Size())
-}
-
-// check holds p unless its content, size bytes read from r, is a pushed blob
-// of repo, or its Git LFS pointer is, or it is a pushed blob as checkout
-// writes it with the ident attribute (identExpanded).
-func (w *censusWalk) check(p string, repo *censusRepo, r io.Reader, size int64) {
-	if repo == nil {
-		w.hold(p, "is in no repository")
+	why := w.check(repo, f, fi.Size())
+	if why == whyUnpushed && w.checkedOut(p, repo) {
 		return
 	}
+	if why != "" {
+		w.hold(p, "%s", why)
+	}
+}
+
+// whyUnpushed is check's reason for content no pushed blob accounts for.
+const whyUnpushed = "is in no commit a remote has"
+
+// check returns why content, size bytes read from r, holds, or "" when it is
+// a pushed blob of repo, or its Git LFS pointer is, or it is a pushed blob as
+// checkout writes it with the ident attribute (identExpanded).
+func (w *censusWalk) check(repo *censusRepo, r io.Reader, size int64) string {
+	if repo == nil {
+		return "is in no repository"
+	}
 	if err := w.readPushed(repo); err != nil {
-		w.hold(p, "could not be checked against what its repository has pushed (%v)", err)
-		return
+		return fmt.Sprintf("could not be checked against what its repository has pushed (%v)", err)
 	}
 	blob := repo.newH()
 	_, _ = fmt.Fprintf(blob, "blob %d\x00", size) // a hash never fails a write
@@ -242,26 +336,24 @@ func (w *censusWalk) check(p string, repo *censusRepo, r io.Reader, size int64) 
 	}
 	n, err := io.Copy(io.MultiWriter(sinks...), r)
 	if err != nil {
-		w.hold(p, "could not be read (%v)", err)
-		return
+		return fmt.Sprintf("could not be read (%v)", err)
 	}
 	if n != size {
-		w.hold(p, "changed while it was read")
-		return
+		return "changed while it was read"
 	}
 	if repo.pushed[hex.EncodeToString(blob.Sum(nil))] {
-		return
+		return ""
 	}
 	pointer := fmt.Sprintf("version https://git-lfs.github.com/spec/v1\noid sha256:%x\nsize %d\n", lfs.Sum(nil), size)
 	ptr := repo.newH()
 	_, _ = fmt.Fprintf(ptr, "blob %d\x00%s", len(pointer), pointer)
 	if repo.pushed[hex.EncodeToString(ptr.Sum(nil))] {
-		return
+		return ""
 	}
 	if small != nil && identExpanded(repo, small.Bytes()) {
-		return
+		return ""
 	}
-	w.hold(p, "is in no commit a remote has")
+	return whyUnpushed
 }
 
 // maxIdentBytes bounds the files identExpanded reads: an ident keyword is for
