@@ -9,8 +9,8 @@ import (
 // not spawn and does not start an agent. The gate still runs, because a
 // gate that fails is a start that would not happen. Issues already printed
 // are treated as running, so a later line is the run a free slot would take
-// while the earlier ones are still going. A lower project is not listed
-// while a higher one still has an open queued issue.
+// while the earlier ones are still going. A slot the higher projects
+// cannot fill goes to the next project down, as in the loop.
 func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 	env.fill()
 	r := &queueRunner{
@@ -33,14 +33,12 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		run, waiting, err := r.candidate()
+		run, err := r.candidate()
 		if err != nil {
 			return err
 		}
 		if len(run) == 0 {
-			if waiting != "" {
-				r.logf("dry-run: %s still has an open issue labelled %s; not starting a lower project", waiting, cfg.Label)
-			} else if started == 0 {
+			if started == 0 {
 				r.logf("dry-run: no open issue labelled %s", cfg.Label)
 			}
 			return nil
@@ -76,7 +74,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		r.mu.Unlock()
 		started++
 	}
-	run, _, err := r.candidate()
+	run, err := r.candidate()
 	if err != nil {
 		return err
 	}
