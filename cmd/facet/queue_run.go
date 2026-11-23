@@ -171,6 +171,12 @@ type queueRunner struct {
 	mergeMethods map[string]string
 	// dry is set by --dry-run: no label is added and no state is written.
 	dry bool
+	// capSeen and capPass are this round's passes results, one per
+	// repository. cappedLog is the cap line already printed for an issue,
+	// so a skip is logged once until the window changes.
+	capSeen   map[string]bool
+	capPass   map[string]bool
+	cappedLog map[string]string
 	// lastHeld is the hold file path last recorded in the decision log, so
 	// held/released is emitted once per change rather than once per poll.
 	lastHeld   string
@@ -183,7 +189,7 @@ type queueRunner struct {
 }
 
 // newQueueRunner builds a runner and reads the state file when the config
-// has a fix block.
+// has a fix block or a cap. Both record the issues the queue started.
 func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, error) {
 	env.fill()
 	r := &queueRunner{
@@ -208,7 +214,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 	if !dry && cfg.Decisions != "" {
 		r.lastHeld = lastHoldPath(cfg.Decisions)
 	}
-	if cfg.Fix != nil {
+	if cfg.State != "" && (cfg.Fix != nil || cfg.Cap != nil) {
 		st, err := loadQueueState(cfg.State)
 		if err != nil {
 			return nil, err
@@ -250,6 +256,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	r.mu.Lock()
 	r.round = map[string]prListing{}
 	r.mu.Unlock()
+	r.resetCapRound()
 	// The fix stage looks even when every slot is taken: landing a green
 	// pull request takes no slot. Red first: the queue's own broken pull
 	// request before new work.
@@ -266,8 +273,12 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		r.logf("queue: stopping")
 		return true, nil
 	}
-	run, err := r.candidate()
+	run, err := r.candidate(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			r.logf("queue: stopping")
+			return true, nil
+		}
 		r.logf("queue: %s", err.Error())
 		r.pause(ctx)
 		return false, nil
@@ -361,7 +372,7 @@ func (r *queueRunner) full() bool {
 // agent opened the pull request and exited, and the label stays until the
 // merge. This process may not remember handing it out, after a restart
 // (#421). Such an issue counts as not free, like one already running.
-func (r *queueRunner) candidate() ([]queuedIssue, error) {
+func (r *queueRunner) candidate(ctx context.Context) ([]queuedIssue, error) {
 	issues, err := r.collect()
 	if err != nil {
 		return nil, err
@@ -374,6 +385,9 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 	r.recordBlockedSkips(ranked)
 	skip := map[string]bool{}
 	for {
+		if err := r.skipCapped(ctx, ranked, skip); err != nil {
+			return nil, err
+		}
 		r.mu.Lock()
 		now := r.env.now()
 		rooms := r.rooms
