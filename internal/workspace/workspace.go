@@ -287,6 +287,14 @@ func createClone(roots config.Roots, dir string, m *manifest.Manifest, name stri
 	rep.Working("%s : cloning %s%s", name, src, note)
 	if err := gitx.Clone(git, src, stage, gitx.CloneOptions{SkipLFS: skipLFS, SetOriginTo: setOrigin}); err != nil {
 		rep.Warn("%s (clone failed: %v)", name, err)
+		// A clone whose final checkout failed (an origin whose HEAD names no
+		// branch) still holds fetched objects. Keep it in place, as a clone made
+		// directly at dir would have been kept.
+		if _, statErr := os.Lstat(filepath.Join(stage, ".git")); statErr == nil {
+			if placeErr := placeStaged(stage, dir); placeErr != nil {
+				rep.Warn("%s (clone not kept: %v)", name, placeErr)
+			}
+		}
 		return false, nil
 	}
 	if err := placeStaged(stage, dir); err != nil {
