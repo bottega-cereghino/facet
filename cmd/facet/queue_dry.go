@@ -36,6 +36,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 	if stop {
 		return nil
 	}
+	r.refreshRooms(ctx)
 	for started < cfg.Max {
 		if ctx.Err() != nil {
 			return nil
@@ -80,13 +81,17 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 			r.logf("dry-run: would not start %s#%d: gate: %s", run[0].Repo, run[0].Issue.Number, err.Error())
 			return nil
 		}
-		who, _, err := r.cfg.commandFor(run[0].Issue.LabelNames())
+		a, from, err := r.cfg.resolveAgent(run[0].Issue.LabelNames(), r.rooms)
 		if err != nil {
 			r.logf("dry-run: would not start %s#%d: %v", run[0].Repo, run[0].Issue.Number, err)
 			return nil
 		}
+		who := a.Label
 		if who == "" {
 			who = "default"
+		}
+		if from != "" {
+			r.logf("dry-run: %s#%d lane %s has no room; fallback_from %s", run[0].Repo, run[0].Issue.Number, from, from)
 		}
 		r.logf("dry-run: would start %s#%d agent %s effort %s bundle %d", run[0].Repo, run[0].Issue.Number, who, effort, len(run))
 		for _, iss := range run {

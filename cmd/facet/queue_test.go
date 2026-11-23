@@ -60,6 +60,9 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	if strings.Join(names, ",") != "widgets,other" {
 		t.Fatalf("example priorities = %q", names)
 	}
+	if cfg.Lanes == nil || cfg.Lanes.Command[0] != "lanes" || filepath.Base(cfg.Lanes.Log) != "runs.jsonl" {
+		t.Fatalf("example lanes = %+v", cfg.Lanes)
+	}
 	if cfg.Agents[0].Label != "codex" || cfg.Agents[1].Label != "gemini" || cfg.Agents[2].Label != "" {
 		t.Fatalf("agents = %+v", cfg.Agents)
 	}
@@ -269,10 +272,10 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 2, "2026-01-02T00:00:00Z", "Hinge", "next", "fix"),
 		qIssue("acme/widgets", 3, "2026-01-03T00:00:00Z", "Bolt", "next", "chore"),
 	}
-	run := bundleFor(cfg, orderQueued(small, nil), open)
+	run := bundleFor(cfg, orderQueued(small, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1", "acme/widgets#2", "acme/widgets#3")
 
-	run = bundleFor(bundleConfig(2), orderQueued(small, nil), open)
+	run = bundleFor(bundleConfig(2), orderQueued(small, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1", "acme/widgets#2")
 
 	// A feature stops the run even when its effort matches the small issues.
@@ -282,7 +285,7 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 4, "2026-01-02T00:00:00Z", "Panel", "next", "Feat"),
 		qIssue("acme/widgets", 3, "2026-01-03T00:00:00Z", "Bolt", "next", "fix"),
 	}
-	run = bundleFor(cfg, orderQueued(stopped, nil), open)
+	run = bundleFor(cfg, orderQueued(stopped, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	alone := []queuedIssue{
@@ -290,7 +293,7 @@ func TestBundleFor(t *testing.T) {
 		small[0],
 		small[1],
 	}
-	run = bundleFor(cfg, orderQueued(alone, nil), open)
+	run = bundleFor(cfg, orderQueued(alone, nil), open, nil)
 	wantRun(t, run, "acme/widgets#5")
 
 	// feature is not feat. Same effort, so the two share a run.
@@ -298,28 +301,28 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 6, "2026-01-01T00:00:00Z", "Named", "next", "fix", "feature"),
 		small[1],
 	}
-	run = bundleFor(cfg, orderQueued(word, nil), open)
+	run = bundleFor(cfg, orderQueued(word, nil), open, nil)
 	wantRun(t, run, "acme/widgets#6", "acme/widgets#2")
 
 	repos := []queuedIssue{
 		small[0],
 		qIssue("acme/other", 7, "2026-01-02T00:00:00Z", "Other", "next", "fix"),
 	}
-	run = bundleFor(cfg, orderQueued(repos, nil), open)
+	run = bundleFor(cfg, orderQueued(repos, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	agents := []queuedIssue{
 		small[0],
 		qIssue("acme/widgets", 8, "2026-01-02T00:00:00Z", "Codex", "next", "fix", "codex"),
 	}
-	run = bundleFor(cfg, orderQueued(agents, nil), open)
+	run = bundleFor(cfg, orderQueued(agents, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	effort := []queuedIssue{
 		small[0],
 		qIssue("acme/widgets", 9, "2026-01-02T00:00:00Z", "Design", "next", "design"),
 	}
-	run = bundleFor(cfg, orderQueued(effort, nil), open)
+	run = bundleFor(cfg, orderQueued(effort, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	// An issue whose labels disagree is not bundled past, and it is not taken.
@@ -328,16 +331,16 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 10, "2026-01-02T00:00:00Z", "Both", "next", "fix", "design"),
 		small[2],
 	}
-	run = bundleFor(cfg, orderQueued(bad, nil), open)
+	run = bundleFor(cfg, orderQueued(bad, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	// An issue already in flight is skipped. The next one that fits still joins.
 	run = bundleFor(cfg, orderQueued(small, nil), func(iss queuedIssue) bool {
 		return iss.Issue.Number == 2
-	})
+	}, nil)
 	wantRun(t, run, "acme/widgets#1", "acme/widgets#3")
 
-	run = bundleFor(cfg, orderQueued(small, nil), func(queuedIssue) bool { return true })
+	run = bundleFor(cfg, orderQueued(small, nil), func(queuedIssue) bool { return true }, nil)
 	wantRun(t, run)
 
 	projects := []string{"widgets", "other"}
@@ -347,7 +350,7 @@ func TestBundleFor(t *testing.T) {
 	}, projects)
 	run = bundleFor(cfg, ranked, func(iss queuedIssue) bool {
 		return iss.Repo == "acme/widgets"
-	})
+	}, nil)
 	wantRun(t, run, "acme/other#2")
 }
 

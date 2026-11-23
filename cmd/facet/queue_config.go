@@ -48,6 +48,9 @@ type queueConfig struct {
 	State string
 	// Fix is nil when the config has no fix block.
 	Fix *queueFix
+	// Lanes is nil when the config has no lanes block. A lane: label is
+	// then always its own agent, as before.
+	Lanes *queueLanes
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -117,6 +120,7 @@ type queueFile struct {
 	Effort     queueEffortFile  `json:"effort"`
 	State      string           `json:"state"`
 	Fix        *queueFixFile    `json:"fix"`
+	Lanes      *queueLanesFile  `json:"lanes"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -128,7 +132,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, lanes", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -189,6 +193,10 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg.Effort = effort
 	cfg.effortLabels = labels
 	cfg.Fix, cfg.State, err = normalizeFix(configPath, f.State, f.Fix)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	cfg.Lanes, err = normalizeLanes(configPath, f.Lanes)
 	if err != nil {
 		return queueConfig{}, err
 	}
