@@ -26,6 +26,11 @@ env:
   # renovate: datasource=github-releases depName=koalaman/shellcheck extractVersion=^v(?<version>.+)$
   SHELLCHECK_VERSION: 0.11.0
   SHELLCHECK_SHA256: b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
+  # shfmt, the same way: an exact release and the SHA-256 of its Linux amd64
+  # binary, the release page's asset digest.
+  # renovate: datasource=github-releases depName=mvdan/sh extractVersion=^v(?<version>.+)$
+  SHFMT_VERSION: 3.14.1
+  SHFMT_SHA256: 76e77641faa025814b77f153b29796b8e6fa2fca03e0c76a691608b86c7ea7bf
 
 # Third-party actions are pinned to full-length commit SHAs, per GitHub's
 # hardening guidance. A tag is mutable: `@v4` is a promise the upstream owner
@@ -76,6 +81,13 @@ jobs:
           echo "${SHELLCHECK_SHA256}  shellcheck.tar.gz" | sha256sum --check --strict
           tar -xzf shellcheck.tar.gz --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
       - run: make shellcheck SHELLCHECK="$RUNNER_TEMP/shellcheck"
+      - name: Install shfmt
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo shfmt "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+          echo "${SHFMT_SHA256}  shfmt" | sha256sum --check --strict
+          chmod +x shfmt
+      - run: make shfmt SHFMT="$RUNNER_TEMP/shfmt"
       # The organisation-name guard (internal/privacy) must not carry an
       # employer's internal names in this public repo, so its word list is a
       # secret (Settings -> Secrets and variables -> Actions, comma-separated)
