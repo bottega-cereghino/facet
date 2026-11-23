@@ -1477,10 +1477,29 @@ func TestQueueKeepsAWorkspaceAFailedSpawnLeftBehind(t *testing.T) {
 	}
 }
 
+// syncBuffer is a log buffer the queue's goroutine writes while a test
+// reads it, so both take the lock.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
 type queueRun struct {
 	cancel context.CancelFunc
 	errCh  chan error
-	buf    *bytes.Buffer
+	buf    *syncBuffer
 	once   sync.Once
 	err    error
 }
@@ -1488,10 +1507,10 @@ type queueRun struct {
 func startQueue(t *testing.T, cfg queueConfig, env queueEnv) *queueRun {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	q := &queueRun{cancel: cancel, errCh: make(chan error, 1), buf: &bytes.Buffer{}}
+	q := &queueRun{cancel: cancel, errCh: make(chan error, 1), buf: &syncBuffer{}}
 	if env.out == nil {
 		env.out = q.buf
-	} else if b, ok := env.out.(*bytes.Buffer); ok {
+	} else if b, ok := env.out.(*syncBuffer); ok {
 		q.buf = b
 	}
 	if env.spawn == nil {
