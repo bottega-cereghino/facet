@@ -48,9 +48,10 @@ checked by its SHA-256, and locally the one on PATH runs
 
 - `ci.yml`: `linux` runs each `make` target as its own step; `macos` runs
   build and test after linux passes, and skips on draft PRs and on PRs not
-  based on `main`; `renovate` validates `renovate.json`; `ci` needs all of
-  them and is the one result for this workflow. A new job goes into `ci`'s
-  `needs`.
+  based on `main`; `renovate` validates `renovate.json` and only warns; `ci` needs
+  `linux` and `macos` and is the one result for this workflow. A new blocking
+  job goes into `ci`'s `needs`. Every job's `timeout-minutes` is 5 or less
+  (fleet standard ci-time).
 - `security.yml`: gitleaks on the PR's commits (full history on main and
   weekly) and zizmor on the workflows. A separate workflow, so its two jobs
   ("Committed secrets", "Workflow audit") are required by the ruleset by

@@ -9,8 +9,8 @@ import (
 )
 
 // OpenPRLimit is how many open pull requests OpenPRs reads from one
-// repository. A repository with more than this is truncated, and the caller
-// can see that it got exactly this many.
+// repository. A result at this limit may be truncated, so OpenPRs returns an
+// error instead of treating it as complete.
 const OpenPRLimit = 1000
 
 // OpenPR is one open pull request, with what the queue needs to tell
@@ -71,6 +71,9 @@ func (CLI) OpenPRs(repo string) ([]OpenPR, error) {
 	var prs []OpenPR
 	if err := json.Unmarshal(out, &prs); err != nil {
 		return nil, fmt.Errorf("parse open pull requests in %s: %w", repo, err)
+	}
+	if len(prs) == OpenPRLimit {
+		return nil, fmt.Errorf("list open pull requests in %s: reached limit %d; results may be incomplete", repo, OpenPRLimit)
 	}
 	return prs, nil
 }
