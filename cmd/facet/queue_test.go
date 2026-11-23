@@ -84,8 +84,14 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	}
 	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || len(cfg.Fix.Gate) == 0 || len(cfg.Fix.Notify) == 0 ||
 		!strings.Contains(cfg.Fix.Prompt, "{reason}") || !strings.Contains(cfg.Fix.Prompt, "origin/{base}") || !cfg.Fix.Land ||
+		cfg.Fix.forbidOff || len(cfg.Fix.Forbid) != len(defaultForbid) ||
 		filepath.Base(cfg.State) != "facet-queue.state.json" || filepath.Base(cfg.Decisions) != "queue-gate.jsonl" {
 		t.Fatalf("example fix = %+v, state %q, decisions %q", cfg.Fix, cfg.State, cfg.Decisions)
+	}
+	for i, re := range cfg.Fix.Forbid {
+		if re.String() != defaultForbid[i] {
+			t.Errorf("example forbid[%d] = %q, want %q", i, re.String(), defaultForbid[i])
+		}
 	}
 	if cfg.Cap == nil || cfg.Cap.Num != 1 || cfg.Cap.Den != 3 || len(cfg.Cap.Passes) != 2 || cfg.Cap.Passes[1] != "{repo}" {
 		t.Fatalf("example cap = %+v", cfg.Cap)
@@ -1471,10 +1477,29 @@ func TestQueueKeepsAWorkspaceAFailedSpawnLeftBehind(t *testing.T) {
 	}
 }
 
+// syncBuffer is a log buffer the queue's goroutine writes while a test
+// reads it, so both take the lock.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
 type queueRun struct {
 	cancel context.CancelFunc
 	errCh  chan error
-	buf    *bytes.Buffer
+	buf    *syncBuffer
 	once   sync.Once
 	err    error
 }
@@ -1482,10 +1507,10 @@ type queueRun struct {
 func startQueue(t *testing.T, cfg queueConfig, env queueEnv) *queueRun {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	q := &queueRun{cancel: cancel, errCh: make(chan error, 1), buf: &bytes.Buffer{}}
+	q := &queueRun{cancel: cancel, errCh: make(chan error, 1), buf: &syncBuffer{}}
 	if env.out == nil {
 		env.out = q.buf
-	} else if b, ok := env.out.(*bytes.Buffer); ok {
+	} else if b, ok := env.out.(*syncBuffer); ok {
 		q.buf = b
 	}
 	if env.spawn == nil {

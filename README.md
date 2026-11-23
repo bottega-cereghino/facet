@@ -664,7 +664,13 @@ shared with the fix stage. A listing that fails starts no fix in that
 repository, and is logged.
 
 A pull request still red or conflicting once CI has finished after a fix run
-is a failed try. After `fix.tries` failed tries the queue adds the
+is a failed try. So is a fix whose own commits suppress a finding instead of
+fixing it: after the run, and before anything of that pull request is
+landed, the queue reads the diff from the head the first fix run started
+at. An added line that matches `fix.forbid`, or a higher number in a file
+named like a baseline, ratchet or limit, is refused. The refusal is a failed
+try. Nothing of that pull request is landed, and the next try is told the
+same way a red one is. After `fix.tries` failed tries the queue adds the
 `fix.blockLabel` label to the issue, logs it, runs `fix.notify` once, and
 starts no other fix for it. **Blocked stays blocked**: the queue neither
 fixes nor lands that pull request again, even if it turns green; it is a
@@ -685,12 +691,22 @@ again. A conflict on that update counts as red and goes through the fix
 path above. One that is green and up to date is merged with the
 repository's own method, read from its settings (squash, merge or rebase,
 in that order of preference; squash where it is the only one allowed), and
-only at the head commit that was judged. Required checks and branch rules
-are GitHub's to enforce: a merge GitHub refuses is logged and tried again
-on the next listing, never forced (no `--admin`). At most one pull request
-per repository is merged per round. Neither step runs an agent or the gate,
-neither takes a slot, and each pull request gets at most one of them per
-listing.
+only at the head commit that was judged. A pull request is green for landing
+only when every required check passed. The queue reads those names from the
+base branch's rules and from classic branch protection. When that cannot be
+read, a conclusion other than success, neutral or skipped is not a pass, so
+a cancelled check is not landed. A skipped or missing required check is not
+a pass either. Required checks and branch rules are GitHub's to enforce: a
+merge GitHub refuses is never forced (no `--admin`). It is retried after
+`wait`, then after twice that, doubling up to an hour, and the refusal is
+logged once per step rather than once per tick. The count and the wait are
+kept in the state file, so a restart does not start them over. A new head,
+or a check result that changed, resets the count. After five refusals of
+the same head the queue stops trying that pull request, adds
+`fix.blockLabel`, runs `fix.notify` with the refusal text, and logs it. At
+most one pull request per repository is merged per round. Neither step runs
+an agent or the gate, and neither takes a slot. An update of a pull request
+that is behind is once per listing. A merge GitHub refuses waits as above.
 
 **Serialize pull requests that touch a shared file.** Optional top-level
 `serialize` takes `paths`, a list of globs (for example `**/*baseline*`,
@@ -706,12 +722,13 @@ waits.
 | `fix` field | |
 | --- | --- |
 | `command` | the fix run's argument list, with `{prompt}`. Placeholders: those of a start, plus `{pr}` (the number), `{branch}`, `{base}` (the pull request's base branch), `{reason}` (`red: <check> is FAILURE` or `conflicts with <base>`) and `{try}`, from 1. |
-| `prompt` | the fix run's task text, expanded the same way. Omitted means a prompt that says: make CI green on the same branch, merge `origin/{base}` into it if it conflicts, never weaken a test without the repository's own rule for that, push, exit. |
+| `prompt` | the fix run's task text, expanded the same way. Omitted means a prompt that opens with "never take a shortcut; take the long road, or stop, say so in the report, and label the issue blocked", then says: make CI green on the same branch, merge `origin/{base}` into it if it conflicts, never weaken a test without the repository's own rule for that, never clear a ratchet, baseline or lint finding by suppressing it, and if that is the only way, stop and say so, push, exit. |
 | `gate` | run before a fix start, with the same placeholders; exit 3 and 4 and any other non-zero exit act as for new work. Omitted means the main `gate` runs. A gate that refuses a repository with a red pull request needs a different gate here. |
 | `tries` | failed tries before the issue is blocked, 1 to 5. Omitted means 2. |
 | `blockLabel` | the label a blocked issue gets. It must exist in the repository. Omitted means `blocked`. |
 | `notify` | an argument list run once when an issue is blocked: `{repo}` `{number}` `{pr}` `{reason}`. Omitted means none. |
 | `land` | update a green queue pull request that is behind its base, and merge one that is up to date, as above. Omitted means `true`. |
+| `forbid` | regular expressions matched against lines a fix run added. A match, or a higher number in a file whose name is a baseline, ratchet or limit, refuses the fix (see above). Omitted means patterns for a postfix `!` after an identifier, `]` or `)`, ` as `, `as any`, `@ts-ignore`, `@ts-expect-error`, `# type: ignore`, `eslint-disable`, `nolint` and `noqa`. An empty list turns the check off. |
 
 `--dry-run` lists the fix runs first (`would fix <repo>#<n> PR #<pr>:
 <reason>, try <k> of <tries>`), then new starts, together up to `max`. It
@@ -735,7 +752,13 @@ writes no state. It runs the gate as for a start.
 `TestQueueUpdatesAGreenPRBehindItsBaseWithoutAnAgent`,
 `TestQueueFixesAPRWhoseUpdateConflicts`, `TestQueueMergesAGreenUpToDatePR`,
 `TestQueueTriesARefusedMergeOncePerListing`,
-`TestQueueRetriesARefusedMergeOnTheNextListing`,
+`TestQueueRetriesARefusedMergeAfterTheWait`,
+`TestQueueStopsMergingAfterFiveRefusals`,
+`TestQueueResetsAMergeRefusalWhenTheHeadChanges`,
+`TestQueueKeepsAMergeWaitAcrossARestart`,
+`TestQueueDoesNotLandACancelledRequiredCheck`,
+`TestQueueLandsWhenACancelledCheckIsNotRequired`,
+`TestQueueRefusesAFixThatSuppresses`,
 `TestQueueLandsNothingWithLandOff`, `TestQueueFixPromptNamesTheBase`,
 `TestQueueDryRunListsFixRunsFirstAndWritesNothing`,
 `TestQueueDryRunSaysWhatItWouldLand`, `TestQueueDryRunSaysItWouldClearARecord`,
