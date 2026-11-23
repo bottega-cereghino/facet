@@ -6,6 +6,18 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.13.0](https://github.com/bottega-cereghino/facet/compare/v0.12.0...v0.13.0) (2026-11-23)
+
+
+### Added
+
+* **queue:** gate exit 4 skips a whole repository for the round ([#434](https://github.com/bottega-cereghino/facet/issues/434)) ([32954f2](https://github.com/bottega-cereghino/facet/commit/32954f24ad0ba53844f297a30ef9e7c3f5bcf869))
+
+
+### Fixed
+
+* spawn quote hazards (VT/FF/RS, title, labels) and reap origin aliases ([#436](https://github.com/bottega-cereghino/facet/issues/436)) ([adf4b97](https://github.com/bottega-cereghino/facet/commit/adf4b974a30ca3170883d3960387f9e529f6ee4d))
+
 ## [0.12.0](https://github.com/bottega-cereghino/facet/compare/v0.11.0...v0.12.0) (2026-11-22)
 
 

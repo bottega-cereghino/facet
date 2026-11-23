@@ -1764,3 +1764,32 @@ func TestQueueDryRunListsPastARunTheGateSkips(t *testing.T) {
 		t.Fatalf("dry-run =\n%s", got)
 	}
 }
+
+func TestQueueDryRunSkipsAWholeRepositoryOnExit4(t *testing.T) {
+	count := filepath.Join(t.TempDir(), "count")
+	gate := writeExe(t, "gate-repo", "#!/bin/sh\necho x >> "+count+"\nif [ \"$1\" = acme/widgets ]; then exit 4; fi\nexit 0\n")
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 2
+	cfg.Wait = time.Hour
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Gate = []string{gate, "{repo}"}
+	list := func(repo, _ string) ([]ghx.Issue, error) {
+		if repo == "acme/widgets" {
+			return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z"), openIssue(3, "2026-01-02T00:00:00Z")}, nil
+		}
+		return []ghx.Issue{openIssue(2, "2026-01-01T00:00:00Z")}, nil
+	}
+	var buf bytes.Buffer
+	if err := dryQueue(context.Background(), cfg, queueEnv{list: list, out: &buf}); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "acme/widgets#1: gate skips the repository") ||
+		strings.Contains(got, "acme/widgets#3") ||
+		!strings.Contains(got, "would start acme/other#2") {
+		t.Fatalf("dry-run =\n%s", got)
+	}
+	if n := len(readLines(t, count)); n != 2 {
+		t.Fatalf("gate ran %d times, want 2 (once per repository)\n%s", n, got)
+	}
+}

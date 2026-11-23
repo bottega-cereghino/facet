@@ -684,6 +684,14 @@ func nestedWorktrees(worktrees []string, dir string) []string {
 // or HTTPS form, and "" for anything else.
 func githubRepo(url string) string {
 	var rest string
+	url = strings.TrimRight(url, "/")
+	// A user or token before the host (https://user@github.com/...) is not part
+	// of the repository's name.
+	if after, ok := strings.CutPrefix(url, "https://"); ok {
+		if _, host, found := strings.Cut(after, "@"); found && strings.HasPrefix(host, "github.com/") {
+			url = "https://" + host
+		}
+	}
 	for _, prefix := range []string{"git@github.com:", "ssh://git@github.com/", "https://github.com/"} {
 		if r, ok := strings.CutPrefix(url, prefix); ok {
 			rest = r

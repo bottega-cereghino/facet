@@ -24,6 +24,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		inflight: map[string]bool{},
 		done:     map[string]bool{},
 		retryAt:  map[string]time.Time{},
+		repoWait: map[string]time.Time{},
 	}
 	held, err := holdFile(cfg.Hold)
 	if err != nil {
@@ -63,6 +64,12 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		if err := r.gate(ctx, run, effort); err != nil {
 			if ctx.Err() != nil {
 				return nil
+			}
+			if gateSkipsRepo(err) {
+				r.logf("dry-run: would not start %s#%d: gate skips the repository: %s", run[0].Repo, run[0].Issue.Number, err.Error())
+				r.deferRepo(run[0].Repo)
+				r.deferAll(run, r.deferRetry)
+				continue
 			}
 			if gateSkips(err) {
 				r.logf("dry-run: would not start %s#%d: gate skips it: %s", run[0].Repo, run[0].Issue.Number, err.Error())
