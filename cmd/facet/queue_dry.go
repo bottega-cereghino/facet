@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"time"
 )
 
 // dryQueue prints the runs the next starts would take and returns. It does
@@ -16,15 +15,14 @@ import (
 // repository spawn cannot route is printed as a start that would not
 // happen, and the next run is looked at: the loop defers such an issue
 // after its spawn fails, and moves on.
+//
+// With a fix block, the fix runs come first, as in the loop, and count
+// toward max with the new starts. A dry run adds no label and writes no
+// state.
 func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
-	env.fill()
-	r := &queueRunner{
-		cfg:      cfg,
-		env:      env,
-		inflight: map[string]bool{},
-		done:     map[string]bool{},
-		retryAt:  map[string]time.Time{},
-		repoWait: map[string]time.Time{},
+	r, err := newQueueRunner(cfg, env, true)
+	if err != nil {
+		return err
 	}
 	held, err := holdFile(cfg.Hold)
 	if err != nil {
@@ -34,7 +32,10 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		r.logf("dry-run: hold file %s exists; would start nothing", held)
 		return nil
 	}
-	started := 0
+	started, stop := r.dryFixes(ctx)
+	if stop {
+		return nil
+	}
 	for started < cfg.Max {
 		if ctx.Err() != nil {
 			return nil
@@ -106,4 +107,47 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		r.logf("dry-run: reached max %d; %s#%d waits for a free slot", cfg.Max, run[0].Repo, run[0].Issue.Number)
 	}
 	return nil
+}
+
+// dryFixes prints the fix runs the next starts would take, up to max, and
+// the pull requests it would update or merge. stop means a gate refused
+// for the whole queue, so nothing more would start.
+func (r *queueRunner) dryFixes(ctx context.Context) (int, bool) {
+	started := 0
+	for _, job := range r.scanQueuePRs(ctx) {
+		if started >= r.cfg.Max || ctx.Err() != nil {
+			return started, ctx.Err() != nil
+		}
+		k := job.iss.key()
+		if r.repoDeferred(job.iss.Repo) {
+			continue
+		}
+		if err := r.fixGate(ctx, job); err != nil {
+			if ctx.Err() != nil {
+				return started, true
+			}
+			switch {
+			case gateSkipsRepo(err):
+				r.logf("dry-run: would not fix %s PR #%d: gate skips the repository: %s", k, job.pr.Number, err.Error())
+				r.deferRepo(job.iss.Repo)
+			case gateSkips(err):
+				r.logf("dry-run: would not fix %s PR #%d: gate skips it: %s", k, job.pr.Number, err.Error())
+			default:
+				r.logf("dry-run: would not fix %s PR #%d: gate: %s", k, job.pr.Number, err.Error())
+				return started, true
+			}
+			continue
+		}
+		r.logf("dry-run: would fix %s PR #%d: %s, try %d of %d", k, job.pr.Number, job.reason, job.try, r.cfg.Fix.Tries)
+		started++
+	}
+	return started, false
+}
+
+// repoDeferred reports a repository the gate skipped for wait.
+func (r *queueRunner) repoDeferred(repo string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	until, ok := r.repoWait[repo]
+	return ok && r.env.now().Before(until)
 }

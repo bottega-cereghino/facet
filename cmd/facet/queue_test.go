@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -77,6 +79,11 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	if cfg.Effort != "medium" {
 		t.Fatalf("example effort = %q", cfg.Effort)
 	}
+	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || len(cfg.Fix.Gate) == 0 || len(cfg.Fix.Notify) == 0 ||
+		!strings.Contains(cfg.Fix.Prompt, "{reason}") || !strings.Contains(cfg.Fix.Prompt, "origin/{base}") || !cfg.Fix.Land ||
+		filepath.Base(cfg.State) != "facet-queue.state.json" {
+		t.Fatalf("example fix = %+v, state %q", cfg.Fix, cfg.State)
+	}
 	low, err := cfg.effortFor([]string{"next", "Fix"})
 	if err != nil || low != "low" {
 		t.Fatalf("fix effort = %q, %v", low, err)
@@ -84,6 +91,56 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	same, err := cfg.effortFor([]string{"feat", "design"})
 	if err != nil || same != "medium" {
 		t.Fatalf("feat effort = %q, %v", same, err)
+	}
+}
+
+func TestQueueReopensLogOnSIGHUP(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "queue.log")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestQueueLogHelperProcess$")
+	cmd.Env = append(os.Environ(), "FACET_QUEUE_LOG_HELPER=1", "HOME="+dir, "FACET_QUEUE_LOG="+logPath)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
+	waitFor(t, "queue log startup", func() bool {
+		b, err := os.ReadFile(logPath)
+		return err == nil && strings.Contains(string(b), "queue: up to 1 agent")
+	})
+	rotated := logPath + ".0"
+	if err := os.Rename(logPath, rotated); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "queue to write to the reopened log", func() bool {
+		b, err := os.ReadFile(logPath)
+		return err == nil && strings.Contains(string(b), "no open issue")
+	})
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("queue helper exited: %v", err)
+	}
+}
+
+func TestQueueLogHelperProcess(t *testing.T) {
+	if os.Getenv("FACET_QUEUE_LOG_HELPER") != "1" {
+		return
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer stop()
+	env := queueEnv{list: func(string, string) ([]ghx.Issue, error) { return nil, nil }}
+	cfg := queueConfig{Max: 1, Label: "next", Wait: 10 * time.Millisecond, Repos: []string{"acme/widgets"}}
+	if err := runQueueWithLog(ctx, cfg, env, os.Getenv("FACET_QUEUE_LOG")); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1624,9 +1681,9 @@ func TestQueueDoesNotStartAnIssueWithAnOpenPullRequest(t *testing.T) {
 	var buf bytes.Buffer
 	err := dryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) { return issues, nil },
-		prBranches: func(string) ([]string, error) {
+		prs: func(string) ([]ghx.OpenPR, error) {
 			// feature/20-... is another issue's branch, not #2's.
-			return []string{"feature/2-fix-the-bell", "feature/20-other", "renovate/go"}, nil
+			return []ghx.OpenPR{{HeadRefName: "feature/2-fix-the-bell"}, {HeadRefName: "feature/20-other"}, {HeadRefName: "renovate/go"}}, nil
 		},
 		out: &buf,
 	})
@@ -1642,9 +1699,9 @@ func TestQueueDoesNotStartAnIssueWithAnOpenPullRequest(t *testing.T) {
 
 	buf.Reset()
 	err = dryQueue(context.Background(), cfg, queueEnv{
-		list:       func(string, string) ([]ghx.Issue, error) { return issues, nil },
-		prBranches: func(string) ([]string, error) { return nil, errors.New("HTTP 502") },
-		out:        &buf,
+		list: func(string, string) ([]ghx.Issue, error) { return issues, nil },
+		prs:  func(string) ([]ghx.OpenPR, error) { return nil, errors.New("HTTP 502") },
+		out:  &buf,
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot tell whether a pull request is open") || strings.Contains(buf.String(), "would start") {
 		t.Fatalf("listing failed: err %v, dry-run =\n%s", err, buf.String())

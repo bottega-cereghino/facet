@@ -19,6 +19,7 @@ func newQueueCmd() *cobra.Command {
 	var (
 		configPath string
 		dryRun     bool
+		logPath    string
 	)
 	cmd := &cobra.Command{
 		Use:   "queue",
@@ -48,6 +49,13 @@ func newQueueCmd() *cobra.Command {
 			"--dry-run prints the runs the next starts would take, up to max, and does\n" +
 			"not spawn a workspace or start an agent. It runs the gate, so a gate that\n" +
 			"would refuse a start is reported instead of a start.\n\n" +
+			"With a fix block, each tick first looks for an open pull request of an\n" +
+			"issue this queue started (recorded in the state file) that is red or\n" +
+			"conflicting, and starts a fix run for it instead of new work. After\n" +
+			"fix.tries failed tries it labels the issue blocked, and leaves it. With\n" +
+			"fix.land (the default) a green one behind its base is updated by merging\n" +
+			"the base, and a green one up to date is merged, without an agent. A\n" +
+			"person's own pull request, or a fork's, is never touched.\n\n" +
 			"It does not reap workspaces. A workspace already on disk for the issue is\n" +
 			"reused, not spawned again.",
 		Args: cobra.NoArgs,
@@ -66,10 +74,11 @@ func newQueueCmd() *cobra.Command {
 			if dryRun {
 				return dryQueue(ctx, cfg, env)
 			}
-			return runQueue(ctx, cfg, env)
+			return runQueueWithLog(ctx, cfg, env, logPath)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "queue config JSON file (default: FACET_QUEUE)")
+	cmd.Flags().StringVar(&logPath, "log", "", "write queue output to this file and reopen it on SIGHUP")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what the next starts would take, without spawning or starting an agent")
 	return cmd
 }

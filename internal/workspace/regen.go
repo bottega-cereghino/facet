@@ -344,7 +344,7 @@ func Prune(s *PruneState) error {
 	}
 	var errs []error
 	for _, r := range s.Found {
-		if err := removeInClone(filepath.Join(s.Dir, r.Clone), r.Rel); err != nil {
+		if err := removeInClone(s.Dir, r.Clone, r.Rel); err != nil {
 			errs = append(errs, fmt.Errorf("%s/%s: %w", r.Clone, r.Rel, err))
 		}
 	}
@@ -358,11 +358,19 @@ func Prune(s *PruneState) error {
 // caught; os.Root would close that gap, but its Windows flaw (GO-2026-6604) is
 // fixed only in a Go newer than this module's. A path that is no longer a
 // directory is left alone, since it is not what was listed.
-func removeInClone(clone, rel string) error {
-	p := clone
-	for _, seg := range strings.Split(rel, "/") {
+func removeInClone(dir, clone, rel string) error {
+	// The workspace and the clone are steps too: either swapped for a link
+	// after the listing would be followed.
+	p := dir
+	if fi, err := os.Lstat(p); err != nil {
+		return nil
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is now a symlink; left alone", p)
+	}
+	steps := append(strings.Split(clone, "/"), strings.Split(rel, "/")...)
+	for _, seg := range steps {
 		if seg == "" || seg == "." || seg == ".." {
-			return fmt.Errorf("refusing the path %q", rel)
+			return fmt.Errorf("refusing the path %q in %q", rel, clone)
 		}
 		p = filepath.Join(p, seg)
 		fi, err := os.Lstat(p)
