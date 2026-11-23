@@ -94,10 +94,27 @@ func runArgv(ctx context.Context, dir string, argv []string) error {
 // status is about the whole queue, such as a spend cap, and the queue waits.
 const gateSkipExit = 3
 
+// gateSkipRepoExit is the gate's exit status for "not this repository": the
+// queue defers every queued issue of the run's repository for wait, so the
+// gate runs once per repository, not once per issue.
+const gateSkipRepoExit = 4
+
 // gateSkips reports that the gate exited with gateSkipExit.
 func gateSkips(err error) bool {
+	return gateExit(err) == gateSkipExit
+}
+
+// gateSkipsRepo reports that the gate exited with gateSkipRepoExit.
+func gateSkipsRepo(err error) bool {
+	return gateExit(err) == gateSkipRepoExit
+}
+
+func gateExit(err error) int {
 	var exitErr *exec.ExitError
-	return errors.As(err, &exitErr) && exitErr.ExitCode() == gateSkipExit
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return 0
 }
 
 // queueStopGrace is how long a command has to exit after the queue stops
@@ -112,6 +129,7 @@ type queueRunner struct {
 	running  int
 	done     map[string]bool
 	retryAt  map[string]time.Time
+	repoWait map[string]time.Time
 	wake     chan struct{}
 	wg       sync.WaitGroup
 }
@@ -124,6 +142,7 @@ func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		inflight: map[string]bool{},
 		done:     map[string]bool{},
 		retryAt:  map[string]time.Time{},
+		repoWait: map[string]time.Time{},
 		wake:     make(chan struct{}, 1),
 	}
 	if cfg.Priorities != "" {
@@ -178,6 +197,12 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		if ctx.Err() != nil {
 			r.logf("queue: stopping")
 			return true, nil
+		}
+		if gateSkipsRepo(err) {
+			r.logf("queue: %s#%d gate skips the repository: %s; trying the next run, %s again after %s", run[0].Repo, run[0].Issue.Number, err.Error(), run[0].Repo, r.cfg.Wait)
+			r.deferRepo(run[0].Repo)
+			r.deferAll(run, r.deferRetry)
+			return false, nil
 		}
 		if gateSkips(err) {
 			r.logf("queue: %s#%d gate skips it: %s; trying the next run, this one again after %s", run[0].Repo, run[0].Issue.Number, err.Error(), r.cfg.Wait)
@@ -358,8 +383,17 @@ func (r *queueRunner) blocked(iss queuedIssue, now time.Time) bool {
 	if r.done[k] || r.inflight[k] {
 		return true
 	}
+	if until, ok := r.repoWait[iss.Repo]; ok && now.Before(until) {
+		return true
+	}
 	until, ok := r.retryAt[k]
 	return ok && now.Before(until)
+}
+
+func (r *queueRunner) deferRepo(repo string) {
+	r.mu.Lock()
+	r.repoWait[repo] = r.env.now().Add(r.cfg.Wait)
+	r.mu.Unlock()
 }
 
 func (r *queueRunner) gate(ctx context.Context, run []queuedIssue, effort string) error {
