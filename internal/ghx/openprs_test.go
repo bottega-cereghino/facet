@@ -40,6 +40,16 @@ func TestOpenPRsFailsWhenGhFails(t *testing.T) {
 	}
 }
 
+func TestOpenPRsFailsWhenResultMayBeTruncated(t *testing.T) {
+	stdout := "[" + strings.TrimSuffix(strings.Repeat(`{"headRefName":"feature/7-bell"},`, OpenPRLimit), ",") + "]"
+	fakeGh(t, stdout, "", 0)
+	if _, err := (CLI{}).OpenPRs("acme/widgets"); err == nil ||
+		!strings.Contains(err.Error(), "reached limit 1000") ||
+		!strings.Contains(err.Error(), "results may be incomplete") {
+		t.Fatalf("OpenPRs error = %v; want an incomplete-list error", err)
+	}
+}
+
 func TestAddIssueLabelAsksGhToAddIt(t *testing.T) {
 	args := fakeGh(t, "", "", 0)
 	if err := (CLI{}).AddIssueLabel("acme/widgets", 7, "blocked"); err != nil {

@@ -537,7 +537,8 @@ for whatever still carries it.
 An issue whose branch (`feature/<number>-…`, as spawn names it) has an
 open pull request is not started, by this process or the next: its agent
 opened the pull request, and the label stays until the merge. When the
-open pull requests cannot be listed, the queue starts nothing and waits.
+open pull requests cannot be listed completely, including when the listing
+reaches its 1000-result limit, the queue starts nothing and waits.
 
 At most 1000 open issues per repository are considered. When a repository
 returns exactly that many, the queue says so: any beyond the cap are unseen.
