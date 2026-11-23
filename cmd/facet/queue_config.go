@@ -51,6 +51,9 @@ type queueConfig struct {
 	// Lanes is nil when the config has no lanes block. A lane: label is
 	// then always its own agent, as before.
 	Lanes *queueLanes
+	// Serialize is nil when the config has no serialize block. Landing then
+	// does not serialize on shared files.
+	Serialize *queueSerialize
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -107,20 +110,21 @@ func (h queueHolds) paths() []string {
 
 // queueFile is the JSON shape, before defaults and checks.
 type queueFile struct {
-	Max        *int             `json:"max"`
-	PerRepo    *int             `json:"per_repo"`
-	Hold       queueHolds       `json:"hold"`
-	Gate       []string         `json:"gate"`
-	Wait       string           `json:"wait"`
-	Label      string           `json:"label"`
-	Priorities string           `json:"priorities"`
-	Repos      []string         `json:"repos"`
-	Prompt     string           `json:"prompt"`
-	Agents     []queueAgentFile `json:"agents"`
-	Effort     queueEffortFile  `json:"effort"`
-	State      string           `json:"state"`
-	Fix        *queueFixFile    `json:"fix"`
-	Lanes      *queueLanesFile  `json:"lanes"`
+	Max        *int                `json:"max"`
+	PerRepo    *int                `json:"per_repo"`
+	Hold       queueHolds          `json:"hold"`
+	Gate       []string            `json:"gate"`
+	Wait       string              `json:"wait"`
+	Label      string              `json:"label"`
+	Priorities string              `json:"priorities"`
+	Repos      []string            `json:"repos"`
+	Prompt     string              `json:"prompt"`
+	Agents     []queueAgentFile    `json:"agents"`
+	Effort     queueEffortFile     `json:"effort"`
+	State      string              `json:"state"`
+	Fix        *queueFixFile       `json:"fix"`
+	Lanes      *queueLanesFile     `json:"lanes"`
+	Serialize  *queueSerializeFile `json:"serialize"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -132,7 +136,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, lanes", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, lanes, serialize", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -197,6 +201,10 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 		return queueConfig{}, err
 	}
 	cfg.Lanes, err = normalizeLanes(configPath, f.Lanes)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	cfg.Serialize, err = normalizeSerialize(f.Serialize)
 	if err != nil {
 		return queueConfig{}, err
 	}

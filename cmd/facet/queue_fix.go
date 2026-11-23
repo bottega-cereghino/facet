@@ -118,6 +118,7 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 	issues := orderQueued(r.startedQueued(), projects)
 	need := r.listingNeeds(issues)
 	failed := map[string]bool{}
+	mergedRepo := map[string]bool{}
 	var jobs []*fixJob
 	for _, iss := range issues {
 		if act, _ := r.canAct(iss); !act {
@@ -137,7 +138,7 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 			r.forgetStarted(iss)
 			continue
 		}
-		if job := r.judgeQueuePR(ctx, iss, pr, got.at); job != nil {
+		if job := r.judgeQueuePR(ctx, iss, pr, got, mergedRepo); job != nil {
 			jobs = append(jobs, job)
 		}
 	}
@@ -203,9 +204,9 @@ func (r *queueRunner) forgetIfGone(iss queuedIssue) {
 }
 
 // judgeQueuePR returns a fix job for pr, or nil when it is pending, green,
-// blocked, or just used its last try. listed is when pr was listed: a
+// blocked, or just used its last try. got.at is when pr was listed: a
 // listing from before a fix run settled says nothing about that run.
-func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, listed time.Time) *fixJob {
+func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, got prListing, mergedRepo map[string]bool) *fixJob {
 	verdict, reason := judgePR(pr)
 	k := iss.key()
 	r.mu.Lock()
@@ -215,7 +216,7 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 	if rec != nil {
 		runs, blocked = rec.Runs, rec.Blocked
 		// A fix run that just pushed may not have its checks listed yet.
-		settling = listed.Before(rec.Last.Add(r.cfg.Wait))
+		settling = got.at.Before(rec.Last.Add(r.cfg.Wait))
 	}
 	r.mu.Unlock()
 	// Blocked stays blocked: the issue is a person's now.
@@ -229,7 +230,7 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 			r.clearFix(k, pr.Number)
 			runs = 0
 		}
-		if !r.cfg.Fix.Land || !r.land(iss, pr, listed) {
+		if !r.cfg.Fix.Land || !r.land(iss, pr, got, mergedRepo) {
 			return nil
 		}
 		reason = "conflicts with " + baseName(pr)

@@ -635,18 +635,33 @@ clears its record, and one that is merged or closed drops the issue from the
 state.
 
 **Green but behind: update and land, no model run.** With `fix.land` (on
-unless set to `false`), a queue pull request that is green (at least one
-check, every latest one passed), not a draft, and behind its base is updated
-by merging the base into it (`gh pr update-branch`, a merge, never a
-rebase). A conflict on that update counts as red and goes through the fix
+unless set to `false`), every queue merge goes through the update-and-wait
+path, whatever the repository's branch protection requires. A queue pull
+request that is green (at least one check, every latest one passed) and not
+a draft is merged only when its head contains the base's current tip and its
+checks ran on that head. If the base moved, the queue merges the base into
+it (`gh pr update-branch`, a merge, never a rebase) and waits for green
+again. A conflict on that update counts as red and goes through the fix
 path above. One that is green and up to date is merged with the
 repository's own method, read from its settings (squash, merge or rebase,
 in that order of preference; squash where it is the only one allowed), and
 only at the head commit that was judged. Required checks and branch rules
 are GitHub's to enforce: a merge GitHub refuses is logged and tried again
-on the next listing, never forced (no `--admin`). Neither step runs an
-agent or the gate, neither takes a slot, and each pull request gets at most
-one of them per listing.
+on the next listing, never forced (no `--admin`). At most one pull request
+per repository is merged per round. Neither step runs an agent or the gate,
+neither takes a slot, and each pull request gets at most one of them per
+listing.
+
+**Serialize pull requests that touch a shared file.** Optional top-level
+`serialize` takes `paths`, a list of globs (for example `**/*baseline*`,
+`**/config.json`, `**/*.lock`, `package-lock.json`, `go.sum`). Omitted means
+no serialization. When set, the queue reads each open queue pull request's
+changed files (one call per pull request, cached with the pull request
+listing). While an open queue pull request in a repository touches a
+matching file, no other queue pull request touching a matching file in that
+repository is landed: the oldest lands first, and the others wait and are
+logged once (`waits for #<pr>, shared file <path>`). `--dry-run` lists the
+waits.
 
 | `fix` field | |
 | --- | --- |
@@ -683,7 +698,13 @@ writes no state. It runs the gate as for a start.
 `TestQueueRetriesARefusedMergeOnTheNextListing`,
 `TestQueueLandsNothingWithLandOff`, `TestQueueFixPromptNamesTheBase`,
 `TestQueueDryRunListsFixRunsFirstAndWritesNothing`,
-`TestQueueDryRunSaysWhatItWouldLand`, `TestQueueDryRunSaysItWouldClearARecord`
+`TestQueueDryRunSaysWhatItWouldLand`, `TestQueueDryRunSaysItWouldClearARecord`,
+`TestQueueSerializesTwoGreenPRsTouchingASharedFile`,
+`TestQueueLandsTwoPRsWithDisjointFiles`,
+`TestQueueBlocksMergeWhenBaseMovedAfterChecks`,
+`TestQueueOmittedSerializeChangesNothing`,
+`TestQueueDryRunListsSerializeWaitsAndAtMostOneMergePerRepo`,
+`TestQueueCachesPRFilesAndLogsWaitOncePerListing`
 and `TestQueueWithoutFixChangesNothing` hold this.
 
 ## The credential preflight
