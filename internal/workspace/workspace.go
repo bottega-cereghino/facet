@@ -156,6 +156,13 @@ func syncLink(roots config.Roots, ws string, m *manifest.Manifest, name string, 
 		origin := m.Origins[projectName]
 		switch {
 		case opt.Bootstrap && origin != "":
+			// The manifest check is lexical, so a target such as
+			// "victim/escape/new" is local even when escape is a symlink,
+			// committed in a checkout, that points outside the projects root.
+			// git clone creates the missing suffix under that resolved parent.
+			if err := bootstrapStaysInProjects(roots.Projects, target); err != nil {
+				return false, fmt.Errorf("bootstrap %s: %w\nfix: point the link at a folder under the projects root, such as \"infra-core\"", projectName, err)
+			}
 			rep.Working("%s : cloning %s -> %s", name, origin, projectName)
 			// Route through gitx.Clone so link bootstrap shares the hardened clone
 			// logic (--no-checkout + reset, LFS handling) that syncClone uses,
@@ -368,6 +375,67 @@ func Dirs(root string, includeIssue bool) ([]string, error) {
 		out = append(out, dir)
 	}
 	return out, nil
+}
+
+// bootstrapParent is the directory a bootstrap clone is created in, with
+// symlinks resolved. dest may not exist yet: the nearest existing ancestor
+// is resolved and the missing suffix is joined back on, which is where git
+// creates those directories. A symlink in that ancestor, one committed
+// inside a checkout under the projects root, therefore shows up here as a
+// parent outside it.
+func bootstrapParent(dest string) (string, error) {
+	cur := filepath.Dir(dest)
+	var missing []string
+	for {
+		_, err := os.Lstat(cur)
+		if err == nil {
+			resolved, err := filepath.EvalSymlinks(cur)
+			if err != nil {
+				return "", fmt.Errorf("resolve %s: %w", cur, err)
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		next := filepath.Dir(cur)
+		if next == cur {
+			return "", fmt.Errorf("%s does not exist", filepath.Dir(dest))
+		}
+		missing = append(missing, filepath.Base(cur))
+		cur = next
+	}
+}
+
+// bootstrapStaysInProjects refuses a clone whose resolved parent is outside
+// the projects root, or whose parent cannot be resolved.
+func bootstrapStaysInProjects(projects, dest string) error {
+	parent, err := bootstrapParent(dest)
+	if err != nil {
+		return err
+	}
+	return parentWithin(projects, parent)
+}
+
+// parentWithin reports whether parent is root or a directory beneath it.
+// root is resolved first: on macOS a temp directory is reached through a
+// symlink, and the parent already is the resolved form.
+func parentWithin(root, parent string) error {
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("projects root %s: %w", root, err)
+	}
+	rel, err := filepath.Rel(resolved, parent)
+	if err != nil {
+		return err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("would clone into %s, outside the projects root %s", parent, resolved)
+	}
+	return nil
 }
 
 // samePath compares two filesystem paths after cleaning them.
