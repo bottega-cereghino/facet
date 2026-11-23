@@ -138,9 +138,11 @@ func DemoteHeadings(md string, n int) string {
 
 // lineBreaks turns every sequence a renderer or a reader might take for a line
 // break into "\n". CommonMark ends a line at "\r" alone as well as "\r\n", and
-// U+0085, U+2028 and U+2029 are line breaks to Unicode; QuoteBody must see every
+// U+0085, U+2028 and U+2029 are line breaks to Unicode, as are U+000B and U+000C
+// (UAX #14 class BK), and Python's splitlines also splits at U+001C to U+001E; QuoteBody must see every
 // one of them, or the text after it would start a line without the quote marker.
-var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\u0085", "\n", "\u2028", "\n", "\u2029", "\n")
+var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\u0085", "\n", "\u2028", "\n", "\u2029", "\n",
+	"\v", "\n", "\f", "\n", "\x1c", "\n", "\x1d", "\n", "\x1e", "\n")
 
 // QuoteBody turns md into a markdown blockquote: every line, blank ones too,
 // starts with ">". The issue body is someone else's text, and CLAUDE.md is read
