@@ -603,9 +603,12 @@ repository's own method, read from its settings (squash, merge or rebase,
 in that order of preference; squash where it is the only one allowed), and
 only at the head commit that was judged. Required checks and branch rules
 are GitHub's to enforce: a merge GitHub refuses is logged and tried again
-on the next listing, never forced (no `--admin`). Neither step runs an
-agent or the gate, neither takes a slot, and each pull request gets at most
-one of them per listing.
+on the next listing, never forced (no `--admin`). After a successful merge,
+the queue runs `facet reap --path <workspace> --yes` for that issue. Reap's
+normal checks still apply; if it refuses, the queue logs the reason and the
+workspace can be reaped manually. Neither landing nor reaping runs an agent
+or the gate, neither takes a slot, and each pull request gets at most one
+landing attempt per listing.
 
 | `fix` field | |
 | --- | --- |

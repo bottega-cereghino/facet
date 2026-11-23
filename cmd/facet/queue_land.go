@@ -94,6 +94,11 @@ func (r *queueRunner) mergePR(iss queuedIssue, pr ghx.OpenPR) {
 	r.mu.Unlock()
 	r.saveState()
 	r.logf("queue: merged %s PR #%d (%s)", k, pr.Number, method)
+	if r.env.reap != nil {
+		if err := r.env.reap(iss.Repo, iss.Issue.Number); err != nil {
+			r.logf("queue: reap workspace for %s: %v; reap it manually", k, err)
+		}
+	}
 }
 
 // mergeMethodFor reads the repository's merge method once per process.

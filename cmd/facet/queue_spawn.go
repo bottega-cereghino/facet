@@ -3,12 +3,37 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/manifest"
 )
+
+// reapQueueWorkspace runs facet's guarded path reap for an issue workspace.
+// A missing workspace needs no cleanup; every other error is reported so the
+// operator can handle a workspace reap refused to remove.
+func reapQueueWorkspace(repo string, number int) error {
+	ws, err := findIssueWorkspace(roots.Workspaces, repo, number)
+	if err != nil {
+		return err
+	}
+	if ws == "" {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find facet executable to reap %s#%d: %w", repo, number, err)
+	}
+	cmd := exec.Command(exe, "reap", "--path", ws, "--yes")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("reap workspace for %s#%d: %w", repo, number, err)
+	}
+	return nil
+}
 
 // prepareWorkspace returns the workspace directory for repo#number, spawning
 // one only when there is not one already. It never deletes a workspace.

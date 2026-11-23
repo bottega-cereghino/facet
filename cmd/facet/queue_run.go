@@ -29,7 +29,10 @@ type queueEnv struct {
 	updateBranch func(repo string, number int) error
 	mergeMethod  func(repo string) (string, error)
 	mergePR      func(repo string, number int, method, head string) error
-	spawn        func(repo string, number int) (string, error)
+	// reap removes the issue workspace after a queue pull request merges.
+	// Nil leaves reaping to the operator.
+	reap  func(repo string, number int) error
+	spawn func(repo string, number int) (string, error)
 	// route runs spawn's routing checks for a repository, without the
 	// network. Only --dry-run calls it; nil skips it.
 	route func(repo string) error
@@ -48,6 +51,7 @@ func realQueueEnv() queueEnv {
 		updateBranch: ghx.CLI{}.UpdatePRBranch,
 		mergeMethod:  ghx.CLI{}.MergeMethod,
 		mergePR:      ghx.CLI{}.MergePR,
+		reap:         reapQueueWorkspace,
 		spawn:        prepareWorkspace,
 		route: func(repo string) error {
 			_, _, err := spawnRoute(repo)
