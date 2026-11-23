@@ -41,10 +41,7 @@ func newIssuesCmd() *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			_, _ = fmt.Fprintln(w, "WORKSPACE\tISSUE\tBRANCH\tSTATE\tPR\tSIZE")
 			for _, s := range states {
-				state := "reapable"
-				if b := s.Blockers(); len(b) > 0 {
-					state = fmt.Sprintf("held (%d)", len(b))
-				}
+				state := reapVerdict(s, offline)
 				pr := "-"
 				if s.PR != nil {
 					pr = fmt.Sprintf("#%d %s", s.PR.Number, strings.ToLower(s.PR.State))

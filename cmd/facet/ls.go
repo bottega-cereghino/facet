@@ -70,7 +70,7 @@ func newLsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("\nfrees %s if deleted; reap: %s\n", humanBytes(st.SizeBytes), reapVerdict(st))
+				fmt.Printf("\nfrees %s if deleted; reap: %s\n", humanBytes(st.SizeBytes), reapVerdict(st, false))
 			}
 			return nil
 		},
@@ -112,9 +112,9 @@ func lsRoot(out io.Writer, root string, dirs []string, size bool) error {
 		}
 		frees, verdict := "-", "-"
 		if st := states[i]; st != nil {
-			frees, verdict = humanBytes(st.SizeBytes), reapVerdict(st)
+			frees, verdict = humanBytes(st.SizeBytes), reapVerdict(st, false)
 			total += st.SizeBytes
-			if len(st.Blockers()) == 0 {
+			if len(st.Blockers()) == 0 && !st.StaleFetch() {
 				reapable += st.SizeBytes
 				nReapable++
 			}
@@ -168,10 +168,18 @@ func inspectEach(dirs []string) ([]*workspace.IssueState, []error) {
 }
 
 // reapVerdict says whether reap would delete the workspace now, in the words
-// `facet issues` uses.
-func reapVerdict(st *workspace.IssueState) string {
+// `facet issues` uses. A workspace judged against a failed fetch is "stale
+// fetch": a single reap goes ahead with a note, `reap --reapable` leaves it alone.
+// With offline set no pull-request lookup ran, so a clean verdict says so.
+func reapVerdict(st *workspace.IssueState, offline bool) string {
 	if b := st.Blockers(); len(b) > 0 {
 		return fmt.Sprintf("held (%d)", len(b))
+	}
+	if st.StaleFetch() {
+		return "stale fetch"
+	}
+	if offline {
+		return "reapable offline (PR unchecked)"
 	}
 	return "reapable"
 }
