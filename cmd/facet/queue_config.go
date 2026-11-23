@@ -44,6 +44,10 @@ type queueConfig struct {
 	Agents       []queueAgent
 	Effort       string
 	effortLabels map[string]string
+	// State is the state file's path, set when Fix is.
+	State string
+	// Fix is nil when the config has no fix block.
+	Fix *queueFix
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -111,6 +115,8 @@ type queueFile struct {
 	Prompt     string           `json:"prompt"`
 	Agents     []queueAgentFile `json:"agents"`
 	Effort     queueEffortFile  `json:"effort"`
+	State      string           `json:"state"`
+	Fix        *queueFixFile    `json:"fix"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -122,7 +128,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -182,6 +188,10 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	}
 	cfg.Effort = effort
 	cfg.effortLabels = labels
+	cfg.Fix, cfg.State, err = normalizeFix(configPath, f.State, f.Fix)
+	if err != nil {
+		return queueConfig{}, err
+	}
 	if err := cfg.validate(); err != nil {
 		return queueConfig{}, err
 	}

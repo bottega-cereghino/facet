@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -19,10 +18,18 @@ import (
 // test has to supply: the agent and the gate are commands, run by runArgv.
 type queueEnv struct {
 	list func(repo, label string) ([]ghx.Issue, error)
-	// prBranches lists the head branches of a repository's open pull
-	// requests. Nil skips the check.
-	prBranches func(repo string) ([]string, error)
-	spawn      func(repo string, number int) (string, error)
+	// prs lists a repository's open pull requests, with their checks. Nil
+	// skips the open pull request check and finds nothing to fix.
+	prs func(repo string) ([]ghx.OpenPR, error)
+	// addLabel adds a label to an issue. The fix stage uses it to block an
+	// issue that used up its tries.
+	addLabel func(repo string, number int, label string) error
+	// updateBranch, mergeMethod and mergePR land a green queue pull
+	// request (fix.land). Nil skips that step.
+	updateBranch func(repo string, number int) error
+	mergeMethod  func(repo string) (string, error)
+	mergePR      func(repo string, number int, method, head string) error
+	spawn        func(repo string, number int) (string, error)
 	// route runs spawn's routing checks for a repository, without the
 	// network. Only --dry-run calls it; nil skips it.
 	route func(repo string) error
@@ -36,8 +43,12 @@ func realQueueEnv() queueEnv {
 		list: func(repo, label string) ([]ghx.Issue, error) {
 			return gh.OpenIssues(repo, label)
 		},
-		prBranches: ghx.CLI{}.OpenPRBranches,
-		spawn:      prepareWorkspace,
+		prs:          ghx.CLI{}.OpenPRs,
+		addLabel:     ghx.CLI{}.AddIssueLabel,
+		updateBranch: ghx.CLI{}.UpdatePRBranch,
+		mergeMethod:  ghx.CLI{}.MergeMethod,
+		mergePR:      ghx.CLI{}.MergePR,
+		spawn:        prepareWorkspace,
 		route: func(repo string) error {
 			_, _, err := spawnRoute(repo)
 			return err
@@ -133,26 +144,68 @@ type queueRunner struct {
 	repoWait    map[string]time.Time
 	wake        chan struct{}
 	wg          sync.WaitGroup
+	// round caches each repository's open pull requests for one tick, so
+	// a round makes one listing call per repository.
+	round map[string]prListing
+	// The rest are the fix stage's; state is nil when the config has no
+	// fix block. prCache keeps a listing for prListTTL. landed is the
+	// listing each pull request was last updated or merged from, so one
+	// listing lands it at most once. labelRetry holds a block label that
+	// could not be added until wait has passed.
+	state        *queueState
+	fixing       map[string]bool
+	fixRetry     map[string]time.Time
+	labelRetry   map[string]time.Time
+	prCache      map[string]prListing
+	landed       map[string]time.Time
+	mergeMethods map[string]string
+	// dry is set by --dry-run: no label is added and no state is written.
+	dry bool
+}
+
+// newQueueRunner builds a runner and reads the state file when the config
+// has a fix block.
+func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, error) {
+	env.fill()
+	r := &queueRunner{
+		cfg:          cfg,
+		env:          env,
+		inflight:     map[string]bool{},
+		repoRunning:  map[string]int{},
+		done:         map[string]bool{},
+		retryAt:      map[string]time.Time{},
+		repoWait:     map[string]time.Time{},
+		wake:         make(chan struct{}, 1),
+		round:        map[string]prListing{},
+		fixing:       map[string]bool{},
+		fixRetry:     map[string]time.Time{},
+		labelRetry:   map[string]time.Time{},
+		prCache:      map[string]prListing{},
+		landed:       map[string]time.Time{},
+		mergeMethods: map[string]string{},
+		dry:          dry,
+	}
+	if cfg.Fix != nil {
+		st, err := loadQueueState(cfg.State)
+		if err != nil {
+			return nil, err
+		}
+		r.state = st
+	}
+	return r, nil
 }
 
 func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
-	env.fill()
-	r := &queueRunner{
-		cfg:         cfg,
-		env:         env,
-		inflight:    map[string]bool{},
-		repoRunning: map[string]int{},
-		done:        map[string]bool{},
-		retryAt:     map[string]time.Time{},
-		repoWait:    map[string]time.Time{},
-		wake:        make(chan struct{}, 1),
+	r, err := newQueueRunner(cfg, env, false)
+	if err != nil {
+		return err
 	}
 	if cfg.Priorities != "" {
 		r.logf("queue: up to %d agent(s), at most %d per repository, label %s, projects from %s", cfg.Max, cfg.PerRepo, cfg.Label, cfg.Priorities)
 	} else {
 		r.logf("queue: up to %d agent(s), at most %d per repository, label %s, order p1 then p2 then p3 then oldest", cfg.Max, cfg.PerRepo, cfg.Label)
 	}
-	err := r.loop(ctx)
+	err = r.loop(ctx)
 	r.wg.Wait()
 	return err
 }
@@ -171,9 +224,19 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	if stop, err := r.finishIfStopped(ctx); stop || err != nil {
 		return true, err
 	}
+	r.mu.Lock()
+	r.round = map[string]prListing{}
+	r.mu.Unlock()
+	// The fix stage looks even when every slot is taken: landing a green
+	// pull request takes no slot. Red first: the queue's own broken pull
+	// request before new work.
+	jobs := r.scanQueuePRs(ctx)
 	if r.full() {
 		r.pause(ctx)
 		return false, nil
+	}
+	if len(jobs) > 0 {
+		return r.tryFix(ctx, jobs[0])
 	}
 	run, err := r.candidate()
 	if err != nil {
@@ -278,7 +341,6 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 		return nil, err
 	}
 	ranked := orderQueued(issues, projects)
-	prs := map[string][]string{}
 	skip := map[string]bool{}
 	for {
 		r.mu.Lock()
@@ -290,7 +352,7 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 		if len(run) == 0 {
 			return nil, nil
 		}
-		hit, err := r.withOpenPR(run, prs)
+		hit, err := r.withOpenPR(run)
 		if err != nil {
 			return nil, err
 		}
@@ -299,47 +361,47 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 		}
 		for _, iss := range hit {
 			skip[iss.key()] = true
-			r.logf("queue: %s#%d has an open pull request from %s; not starting it again", iss.Repo, iss.Issue.Number, hitBranch(iss, prs[iss.Repo]))
+			pr, _ := r.openPRFor(iss)
+			r.logf("queue: %s#%d has an open pull request from %s; not starting it again", iss.Repo, iss.Issue.Number, pr.HeadRefName)
 		}
 	}
 }
 
 // withOpenPR returns the issues of run whose branch has an open pull
-// request. prs caches each repository's open branches for this pick. A
+// request. The listing is the round's, shared with the fix stage. A
 // listing that fails fails the pick: starting while it is unknown could run
 // an issue twice.
-func (r *queueRunner) withOpenPR(run []queuedIssue, prs map[string][]string) ([]queuedIssue, error) {
-	if r.env.prBranches == nil {
+func (r *queueRunner) withOpenPR(run []queuedIssue) ([]queuedIssue, error) {
+	if r.env.prs == nil {
 		return nil, nil
 	}
 	var hit []queuedIssue
 	for _, iss := range run {
-		branches, ok := prs[iss.Repo]
-		if !ok {
-			got, err := r.env.prBranches(iss.Repo)
-			if err != nil {
-				return nil, fmt.Errorf("list open pull requests in %s: %w\nfix: the queue will not start an issue while it cannot tell whether a pull request is open for it", iss.Repo, err)
-			}
-			prs[iss.Repo] = got
-			branches = got
+		_, ok, err := r.openPRForErr(iss)
+		if err != nil {
+			return nil, fmt.Errorf("list open pull requests in %s: %w\nfix: the queue will not start an issue while it cannot tell whether a pull request is open for it", iss.Repo, err)
 		}
-		if hitBranch(iss, branches) != "" {
+		if ok {
 			hit = append(hit, iss)
 		}
 	}
 	return hit, nil
 }
 
-// hitBranch is the first of branches that is iss's branch, as spawn names
-// it (feature/<number>-<slug>), or "".
-func hitBranch(iss queuedIssue, branches []string) string {
-	prefix := issueBranchName(iss.Issue.Number, "")
-	for _, b := range branches {
-		if strings.HasPrefix(b, prefix) {
-			return b
-		}
+func (r *queueRunner) openPRFor(iss queuedIssue) (ghx.OpenPR, bool) {
+	pr, ok, _ := r.openPRForErr(iss)
+	return pr, ok
+}
+
+// openPRForErr is the open pull request from iss's branch, as spawn names
+// it (feature/<number>-<slug>).
+func (r *queueRunner) openPRForErr(iss queuedIssue) (ghx.OpenPR, bool, error) {
+	prs, err := r.listPRs(iss.Repo)
+	if err != nil {
+		return ghx.OpenPR{}, false, err
 	}
-	return ""
+	pr, ok := branchPR(iss, prs)
+	return pr, ok, nil
 }
 
 func (r *queueRunner) projectOrder() ([]string, error) {
@@ -416,6 +478,7 @@ func (r *queueRunner) start(ctx context.Context, run []queuedIssue) {
 		r.inflight[iss.key()] = true
 	}
 	r.mu.Unlock()
+	r.recordStarted(run)
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
