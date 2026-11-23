@@ -381,8 +381,8 @@ func TestInterruptedCloneIsNotAdopted(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("a failed clone left a mirror at %s; it must not be adopted", path)
 	}
-	if _, err := os.Stat(path + ".incoming"); !os.IsNotExist(err) {
-		t.Errorf("the partial clone's temp dir survived: %s.incoming", path)
+	if _, err := os.Stat(incomingPath(path)); !os.IsNotExist(err) {
+		t.Errorf("the partial clone's temp dir survived: %s", incomingPath(path))
 	}
 
 	// A subsequent successful Update must create the mirror cleanly.
@@ -475,5 +475,29 @@ func TestWarnOnStaleFetchIsNotFatal(t *testing.T) {
 	}
 	if len(warnings) == 0 || !strings.Contains(warnings[0], "stale mirror") {
 		t.Errorf("expected a stale-mirror warning, got %v", warnings)
+	}
+}
+
+func TestIncomingCleanupSparesAnotherMirror(t *testing.T) {
+	root := t.TempDir()
+	other, err := PathFor(root, "https://h/o/r.git.incoming/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(other, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{Root: root, Git: mirrorFake(func(dst string) { _ = os.MkdirAll(dst, 0o777) })}
+	if _, err := s.Update("https://h/o/r"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("another repository's mirror was deleted: %v", err)
+	}
+}
+
+func TestPathForRefusesGitSegmentBeforeLast(t *testing.T) {
+	if _, err := PathFor(t.TempDir(), "https://h/o/r.git/refs/heads/x"); err == nil {
+		t.Fatal("a path inside another mirror was accepted")
 	}
 }
