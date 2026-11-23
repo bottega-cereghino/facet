@@ -21,6 +21,7 @@ reasons. Read the section of CODE.md you are about to touch.
 | `scripts/release.sh` | cuts a release with release-please (section Releases) |
 | `scripts/release/` | `package.json` and `package-lock.json` pinning the release-please the script runs |
 | `scripts/test-change.sh` | the `test-change` check: does a PR weaken the tests |
+| `scripts/gofmt-on-write.sh` | the PostToolUse hook in `.claude/settings.json`: gofmt a Go file after an agent writes it |
 
 Code moves to `internal/` when a second caller needs it, not before.
 
