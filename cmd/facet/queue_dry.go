@@ -109,19 +109,19 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 	return nil
 }
 
-// dryFixes prints the fix runs the next starts would take, up to max. stop
-// means a gate refused for the whole queue, so nothing more would start.
+// dryFixes prints the fix runs the next starts would take, up to max, and
+// the pull requests it would update or merge. stop means a gate refused
+// for the whole queue, so nothing more would start.
 func (r *queueRunner) dryFixes(ctx context.Context) (int, bool) {
 	started := 0
-	for started < r.cfg.Max {
-		if ctx.Err() != nil {
-			return started, true
-		}
-		job := r.nextFix(ctx)
-		if job == nil {
-			return started, false
+	for _, job := range r.scanQueuePRs(ctx) {
+		if started >= r.cfg.Max || ctx.Err() != nil {
+			return started, ctx.Err() != nil
 		}
 		k := job.iss.key()
+		if r.repoDeferred(job.iss.Repo) {
+			continue
+		}
 		if err := r.fixGate(ctx, job); err != nil {
 			if ctx.Err() != nil {
 				return started, true
@@ -132,9 +132,6 @@ func (r *queueRunner) dryFixes(ctx context.Context) (int, bool) {
 				r.deferRepo(job.iss.Repo)
 			case gateSkips(err):
 				r.logf("dry-run: would not fix %s PR #%d: gate skips it: %s", k, job.pr.Number, err.Error())
-				r.mu.Lock()
-				r.fixRetry[k] = r.env.now().Add(r.cfg.Wait)
-				r.mu.Unlock()
 			default:
 				r.logf("dry-run: would not fix %s PR #%d: gate: %s", k, job.pr.Number, err.Error())
 				return started, true
@@ -142,10 +139,15 @@ func (r *queueRunner) dryFixes(ctx context.Context) (int, bool) {
 			continue
 		}
 		r.logf("dry-run: would fix %s PR #%d: %s, try %d of %d", k, job.pr.Number, job.reason, job.try, r.cfg.Fix.Tries)
-		r.mu.Lock()
-		r.fixing[k] = true
-		r.mu.Unlock()
 		started++
 	}
 	return started, false
+}
+
+// repoDeferred reports a repository the gate skipped for wait.
+func (r *queueRunner) repoDeferred(repo string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	until, ok := r.repoWait[repo]
+	return ok && r.env.now().Before(until)
 }

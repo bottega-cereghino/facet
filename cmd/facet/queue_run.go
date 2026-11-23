@@ -24,7 +24,12 @@ type queueEnv struct {
 	// addLabel adds a label to an issue. The fix stage uses it to block an
 	// issue that used up its tries.
 	addLabel func(repo string, number int, label string) error
-	spawn    func(repo string, number int) (string, error)
+	// updateBranch, mergeMethod and mergePR land a green queue pull
+	// request (fix.land). Nil skips that step.
+	updateBranch func(repo string, number int) error
+	mergeMethod  func(repo string) (string, error)
+	mergePR      func(repo string, number int, method, head string) error
+	spawn        func(repo string, number int) (string, error)
 	// route runs spawn's routing checks for a repository, without the
 	// network. Only --dry-run calls it; nil skips it.
 	route func(repo string) error
@@ -38,9 +43,12 @@ func realQueueEnv() queueEnv {
 		list: func(repo, label string) ([]ghx.Issue, error) {
 			return gh.OpenIssues(repo, label)
 		},
-		prs:      ghx.CLI{}.OpenPRs,
-		addLabel: ghx.CLI{}.AddIssueLabel,
-		spawn:    prepareWorkspace,
+		prs:          ghx.CLI{}.OpenPRs,
+		addLabel:     ghx.CLI{}.AddIssueLabel,
+		updateBranch: ghx.CLI{}.UpdatePRBranch,
+		mergeMethod:  ghx.CLI{}.MergeMethod,
+		mergePR:      ghx.CLI{}.MergePR,
+		spawn:        prepareWorkspace,
 		route: func(repo string) error {
 			_, _, err := spawnRoute(repo)
 			return err
@@ -138,11 +146,18 @@ type queueRunner struct {
 	// round caches each repository's open pull requests for one tick, so
 	// a round makes one listing call per repository.
 	round map[string]prListing
-	// state, fixing and fixRetry are the fix stage's; state is nil when
-	// the config has no fix block.
-	state    *queueState
-	fixing   map[string]bool
-	fixRetry map[string]time.Time
+	// The rest are the fix stage's; state is nil when the config has no
+	// fix block. prCache keeps a listing for prListTTL. landed is the
+	// listing each pull request was last updated or merged from, so one
+	// listing lands it at most once. labelRetry holds a block label that
+	// could not be added until wait has passed.
+	state        *queueState
+	fixing       map[string]bool
+	fixRetry     map[string]time.Time
+	labelRetry   map[string]time.Time
+	prCache      map[string]prListing
+	landed       map[string]time.Time
+	mergeMethods map[string]string
 	// dry is set by --dry-run: no label is added and no state is written.
 	dry bool
 }
@@ -152,17 +167,21 @@ type queueRunner struct {
 func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, error) {
 	env.fill()
 	r := &queueRunner{
-		cfg:      cfg,
-		env:      env,
-		inflight: map[string]bool{},
-		done:     map[string]bool{},
-		retryAt:  map[string]time.Time{},
-		repoWait: map[string]time.Time{},
-		wake:     make(chan struct{}, 1),
-		round:    map[string]prListing{},
-		fixing:   map[string]bool{},
-		fixRetry: map[string]time.Time{},
-		dry:      dry,
+		cfg:          cfg,
+		env:          env,
+		inflight:     map[string]bool{},
+		done:         map[string]bool{},
+		retryAt:      map[string]time.Time{},
+		repoWait:     map[string]time.Time{},
+		wake:         make(chan struct{}, 1),
+		round:        map[string]prListing{},
+		fixing:       map[string]bool{},
+		fixRetry:     map[string]time.Time{},
+		labelRetry:   map[string]time.Time{},
+		prCache:      map[string]prListing{},
+		landed:       map[string]time.Time{},
+		mergeMethods: map[string]string{},
+		dry:          dry,
 	}
 	if cfg.Fix != nil {
 		st, err := loadQueueState(cfg.State)
@@ -203,14 +222,19 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	if stop, err := r.finishIfStopped(ctx); stop || err != nil {
 		return true, err
 	}
+	r.mu.Lock()
+	r.round = map[string]prListing{}
+	r.mu.Unlock()
+	// The fix stage looks even when every slot is taken: landing a green
+	// pull request takes no slot. Red first: the queue's own broken pull
+	// request before new work.
+	jobs := r.scanQueuePRs(ctx)
 	if r.full() {
 		r.pause(ctx)
 		return false, nil
 	}
-	r.round = map[string]prListing{}
-	// Red first: the queue's own broken pull request before new work.
-	if job := r.nextFix(ctx); job != nil {
-		return r.tryFix(ctx, job)
+	if len(jobs) > 0 {
+		return r.tryFix(ctx, jobs[0])
 	}
 	run, err := r.candidate()
 	if err != nil {
@@ -374,7 +398,7 @@ func (r *queueRunner) openPRForErr(iss queuedIssue) (ghx.OpenPR, bool, error) {
 	if err != nil {
 		return ghx.OpenPR{}, false, err
 	}
-	pr, ok := queuePR(iss, prs)
+	pr, ok := branchPR(iss, prs)
 	return pr, ok, nil
 }
 

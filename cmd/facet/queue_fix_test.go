@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -27,8 +29,93 @@ func fixQueue(t *testing.T, log string) queueConfig {
 		Prompt:     defaultFixPrompt,
 		Tries:      2,
 		BlockLabel: "blocked",
+		Land:       true,
 	}
 	return cfg
+}
+
+// recordPR writes into the state that number's queue pull request is pr.
+func recordPR(t *testing.T, path string, number, pr int) {
+	t.Helper()
+	st, err := loadQueueState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := queuedIssue{Repo: "acme/widgets", Issue: ghx.Issue{Number: number}}.key()
+	s := st.Started[k]
+	s.PR = pr
+	st.Started[k] = s
+	if err := st.save(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// landCalls records the update and merge seams. update and merge, when
+// set, answer them; otherwise they succeed.
+type landCalls struct {
+	mu     sync.Mutex
+	calls  []string
+	update func(n int) error
+	merge  func(n int) error
+}
+
+func (l *landCalls) env(e queueEnv) queueEnv {
+	e.updateBranch = func(repo string, n int) error {
+		l.record(fmt.Sprintf("update %s#%d", repo, n))
+		if l.update != nil {
+			return l.update(n)
+		}
+		return nil
+	}
+	e.mergeMethod = func(string) (string, error) { return "squash", nil }
+	e.mergePR = func(repo string, n int, method, head string) error {
+		l.record(fmt.Sprintf("merge %s#%d %s %s", repo, n, method, head))
+		if l.merge != nil {
+			return l.merge(n)
+		}
+		return nil
+	}
+	return e
+}
+
+func (l *landCalls) record(c string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.calls = append(l.calls, c)
+}
+
+func (l *landCalls) list() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.calls...)
+}
+
+// countCalls counts the calls of a seam per argument.
+type countCalls struct {
+	mu sync.Mutex
+	n  map[string]int
+}
+
+func (c *countCalls) add(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.n == nil {
+		c.n = map[string]int{}
+	}
+	c.n[key]++
+}
+
+func (c *countCalls) get(key string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n[key]
+}
+
+func landPR(number int, branch, status string) ghx.OpenPR {
+	pr := greenPR(number, branch)
+	pr.MergeStateStatus = status
+	pr.HeadRefOid = "head" + strconv.Itoa(number)
+	return pr
 }
 
 // seedState writes a state file in which the queue started each issue
@@ -127,8 +214,8 @@ func TestQueueFixesARedQueuePRBeforeANewIssue(t *testing.T) {
 	waitFor(t, "two runs", func() bool { return len(readLines(t, log)) >= 2 })
 	s.stop(t)
 	got := readLines(t, log)
-	if got[0] != "fix 1 PR 11 try 1: red: ci is FAILURE" {
-		t.Fatalf("runs = %q, want the fix first", got)
+	if got[0] != "fix 1 PR 11 try 1: red: ci is FAILURE" || got[1] != "start 5" {
+		t.Fatalf("runs = %q, want the fix, then the new issue", got)
 	}
 }
 
@@ -166,17 +253,48 @@ func TestQueueDoesNotJudgeAPendingQueuePR(t *testing.T) {
 
 func TestQueueNeverTouchesAPROfAnIssueItDidNotStart(t *testing.T) {
 	cfg := fixQueue(t, "unused")
-	seedState(t, cfg.State, []int{1}, nil)
+	seedState(t, cfg.State, []int{1, 3, 4}, nil)
+	// #3's own pull request is 13; 23 is a person's, opened later from the
+	// same branch shape.
+	recordPR(t, cfg.State, 3, 13)
+	fork := redPR(14, "feature/4-bell")
+	fork.IsCrossRepository = true
+	early := redPR(15, "feature/1-early")
+	early.CreatedAt = time.Now().Add(-72 * time.Hour).UTC().Format(time.RFC3339)
 	labels := &labelCalls{}
 	var buf bytes.Buffer
 	err := dryQueue(context.Background(), cfg, queueEnv{
-		list:     func(string, string) ([]ghx.Issue, error) { return nil, nil },
-		prs:      staticPRs(redPR(12, "feature/2-mine"), redPR(13, "feature/10-also-mine")),
+		list: func(string, string) ([]ghx.Issue, error) { return nil, nil },
+		prs: staticPRs(redPR(12, "feature/2-mine"), redPR(110, "feature/10-also-mine"),
+			greenPR(13, "feature/3-horn"), redPR(23, "feature/3-later"), fork, early),
 		addLabel: labels.add,
 		out:      &buf,
 	})
 	if err != nil || strings.Contains(buf.String(), "would fix") || len(labels.list()) != 0 {
 		t.Fatalf("err %v, labels %q, dry-run =\n%s", err, labels.list(), buf.String())
+	}
+	// The loop neither fixes nor lands them, and records none of them.
+	log := filepath.Join(t.TempDir(), "log")
+	cfg.Fix.Command = []string{appendScript(t), log, "fix {number} PR {pr}"}
+	land := &landCalls{}
+	person := greenPR(23, "feature/3-later")
+	person.MergeStateStatus = "CLEAN"
+	gone := staticPRs(redPR(12, "feature/2-mine"), person, fork, early)
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list:     func(string, string) ([]ghx.Issue, error) { return nil, nil },
+		prs:      gone,
+		addLabel: labels.add,
+	}))
+	time.Sleep(200 * time.Millisecond)
+	s.stop(t)
+	if got := readLines(t, log); len(got) != 0 || len(land.list()) != 0 || len(labels.list()) != 0 {
+		t.Fatalf("runs %q, landed %q, labels %q", got, land.list(), labels.list())
+	}
+	// Their own pull requests are gone, so the queue forgets them; it
+	// adopts none of the others.
+	st, err := loadQueueState(cfg.State)
+	if err != nil || len(st.Started) != 0 {
+		t.Fatalf("state = %+v, %v", st, err)
 	}
 }
 
@@ -244,16 +362,38 @@ func TestQueueStateSurvivesARestart(t *testing.T) {
 	})
 	waitFor(t, "the start", func() bool { return len(readLines(t, log)) >= 1 })
 	first.stop(t)
-	// A new queue sees #5's pull request red, and knows #5 is its own.
-	second := startQueue(t, cfg, queueEnv{
+	// A new queue sees #5's pull request red, knows #5 is its own, and
+	// makes one fix run. Its long wait keeps it from judging that run.
+	red := staticPRs(redPR(15, "feature/5-issue-5"))
+	slow := cfg
+	slow.Wait = time.Minute
+	second := startQueue(t, slow, queueEnv{
 		list:     func(string, string) ([]ghx.Issue, error) { return nil, nil },
-		prs:      staticPRs(redPR(15, "feature/5-issue-5")),
+		prs:      red,
 		addLabel: (&labelCalls{}).add,
 	})
-	waitFor(t, "the fix", func() bool { return len(readLines(t, log)) >= 2 })
+	waitFor(t, "the first fix", func() bool { return len(readLines(t, log)) >= 2 })
 	second.stop(t)
-	if got := readLines(t, log); got[0] != "start 5" || got[1] != "fix 5 PR 15 try 1: red: ci is FAILURE" {
-		t.Fatalf("runs = %q", got)
+	// A third queue counts on from the second's try: try 2 is the last,
+	// and then the issue is blocked.
+	labels := &labelCalls{}
+	third := startQueue(t, cfg, queueEnv{
+		list:     func(string, string) ([]ghx.Issue, error) { return nil, nil },
+		prs:      red,
+		addLabel: labels.add,
+	})
+	waitFor(t, "the block", func() bool { return len(labels.list()) >= 1 })
+	third.stop(t)
+	want := "start 5|fix 5 PR 15 try 1: red: ci is FAILURE|fix 5 PR 15 try 2: red: ci is FAILURE"
+	if got := readLines(t, log); strings.Join(got, "|") != want {
+		t.Fatalf("runs = %q\nwant %q", got, want)
+	}
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := st.Started["acme/widgets#5"]; s.PR != 15 {
+		t.Fatalf("started = %+v, want PR 15 recorded", s)
 	}
 }
 
@@ -313,18 +453,30 @@ func TestQueueDryRunListsFixRunsFirstAndWritesNothing(t *testing.T) {
 func TestQueueWithoutFixChangesNothing(t *testing.T) {
 	cfg := oneAgentConfig([]string{"acme/widgets"})
 	cfg.Max = 2
+	issues := func(string, string) ([]ghx.Issue, error) {
+		return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z"), openIssue(5, "2026-01-02T00:00:00Z")}, nil
+	}
+	green := greenPR(12, "feature/2-done")
+	green.MergeStateStatus = "CLEAN"
+	prs := staticPRs(redPR(11, "feature/1-bell"), green)
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
-		list: func(string, string) ([]ghx.Issue, error) {
-			return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z"), openIssue(5, "2026-01-02T00:00:00Z")}, nil
-		},
-		prs: staticPRs(redPR(11, "feature/1-bell")),
-		out: &buf,
-	})
+	err := dryQueue(context.Background(), cfg, queueEnv{list: issues, prs: prs, out: &buf})
 	got := buf.String()
-	if err != nil || strings.Contains(got, "fix") || !strings.Contains(got, "would start acme/widgets#5") ||
+	if err != nil || strings.Contains(got, "fix") || strings.Contains(got, "merge") || !strings.Contains(got, "would start acme/widgets#5") ||
 		!strings.Contains(got, "acme/widgets#1 has an open pull request from feature/1-bell") {
 		t.Fatalf("err %v, dry-run =\n%s", err, got)
+	}
+	// The loop starts #5 only, and fixes, labels and lands nothing.
+	log := filepath.Join(t.TempDir(), "log")
+	cfg.Agents = []queueAgent{{Command: []string{appendScript(t), log, "start {number}"}}}
+	labels := &labelCalls{}
+	land := &landCalls{}
+	s := startQueue(t, cfg, land.env(queueEnv{list: issues, prs: prs, addLabel: labels.add}))
+	waitFor(t, "the start", func() bool { return len(readLines(t, log)) >= 1 })
+	time.Sleep(200 * time.Millisecond)
+	s.stop(t)
+	if got := readLines(t, log); strings.Join(got, "|") != "start 5" || len(labels.list()) != 0 || len(land.list()) != 0 {
+		t.Fatalf("runs %q, labels %q, landed %q\n%s", got, labels.list(), land.list(), s.buf.String())
 	}
 }
 
@@ -345,9 +497,13 @@ func TestQueueFixConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || cfg.Fix.Prompt != defaultFixPrompt ||
+	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || cfg.Fix.Prompt != defaultFixPrompt || !cfg.Fix.Land ||
 		!filepath.IsAbs(cfg.State) || filepath.Base(cfg.State) != "q-state.json" {
 		t.Fatalf("fix = %+v, state %q", cfg.Fix, cfg.State)
+	}
+	off, err := loadTempConfig(t, `{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "land": false}, `+base+`}`)
+	if err != nil || off.Fix.Land {
+		t.Fatalf("land false: %+v, %v", off.Fix, err)
 	}
 	none, err := loadTempConfig(t, `{`+base+`}`)
 	if err != nil || none.Fix != nil || none.State != "" {

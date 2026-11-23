@@ -3,132 +3,13 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os/exec"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/bottega-cereghino/facet/internal/ghx"
 )
-
-// prVerdict is what the queue makes of one pull request this round.
-type prVerdict int
-
-const (
-	prGreen prVerdict = iota
-	// prPending is not judged: a check is still running, or GitHub has not
-	// worked out whether it merges.
-	prPending
-	prNeedsFix
-)
-
-// redConclusions are the check results that make a pull request red.
-var redConclusions = []string{"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
-
-// judgePR reads a pull request as `gh pr checks` would: the latest run of
-// each check by name. Pending wins over red, so a check that is running
-// again is not counted as a failure. A conflict is reported before a red
-// check, since a fix has to merge the base first.
-func judgePR(pr ghx.OpenPR) (prVerdict, string) {
-	if pr.Mergeable == "" || strings.EqualFold(pr.Mergeable, "UNKNOWN") {
-		return prPending, ""
-	}
-	latest := latestChecks(pr.Checks)
-	for _, c := range latest {
-		if checkPending(c) {
-			return prPending, ""
-		}
-	}
-	if strings.EqualFold(pr.Mergeable, "CONFLICTING") {
-		base := pr.BaseRefName
-		if base == "" {
-			base = "its base"
-		}
-		return prNeedsFix, "conflicts with " + base
-	}
-	for _, c := range latest {
-		if res := checkResult(c); isRed(res) {
-			return prNeedsFix, fmt.Sprintf("red: %s is %s", checkName(c), strings.ToUpper(res))
-		}
-	}
-	return prGreen, ""
-}
-
-func isStatus(c ghx.CheckRun) bool {
-	return c.Typename == "StatusContext" || (c.Typename == "" && c.Context != "")
-}
-
-func checkName(c ghx.CheckRun) string {
-	if isStatus(c) {
-		return c.Context
-	}
-	return c.Name
-}
-
-func checkPending(c ghx.CheckRun) bool {
-	if isStatus(c) {
-		return strings.EqualFold(c.State, "PENDING") || strings.EqualFold(c.State, "EXPECTED")
-	}
-	return !strings.EqualFold(c.Status, "COMPLETED")
-}
-
-func checkResult(c ghx.CheckRun) string {
-	if isStatus(c) {
-		return c.State
-	}
-	return c.Conclusion
-}
-
-func isRed(result string) bool {
-	for _, r := range redConclusions {
-		if strings.EqualFold(result, r) {
-			return true
-		}
-	}
-	return false
-}
-
-// latestChecks keeps the most recently started run of each check name, in
-// name order. Of two that started together, the later one listed wins.
-func latestChecks(all []ghx.CheckRun) []ghx.CheckRun {
-	byName := map[string]ghx.CheckRun{}
-	for _, c := range all {
-		name := checkName(c)
-		if prev, ok := byName[name]; ok && compareCreated(c.StartedAt, prev.StartedAt) < 0 {
-			continue
-		}
-		byName[name] = c
-	}
-	names := make([]string, 0, len(byName))
-	for n := range byName {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	out := make([]ghx.CheckRun, len(names))
-	for i, n := range names {
-		out[i] = byName[n]
-	}
-	return out
-}
-
-// prListing is one repository's open pull requests for this round.
-type prListing struct {
-	prs []ghx.OpenPR
-	err error
-}
-
-// listPRs lists repo's open pull requests once per round. Both the fix stage
-// and the open pull request check read the same listing.
-func (r *queueRunner) listPRs(repo string) ([]ghx.OpenPR, error) {
-	if got, ok := r.round[repo]; ok {
-		return got.prs, got.err
-	}
-	prs, err := r.env.prs(repo)
-	r.round[repo] = prListing{prs: prs, err: err}
-	return prs, err
-}
 
 // fixJob is one fix run about to start.
 type fixJob struct {
@@ -138,8 +19,10 @@ type fixJob struct {
 	try    int
 }
 
-// queuePR is the open pull request from iss's spawn branch, if any.
-func queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool) {
+// branchPR is the open pull request from iss's spawn branch, from anyone.
+// New work uses it: an issue with such a pull request is not started again,
+// whoever opened it.
+func branchPR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool) {
 	prefix := issueBranchName(iss.Issue.Number, "")
 	for _, pr := range prs {
 		if strings.HasPrefix(pr.HeadRefName, prefix) {
@@ -149,13 +32,66 @@ func queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool) {
 	return ghx.OpenPR{}, false
 }
 
-// startedQueued is the state's started issues as queued issues, so they sort
-// like new work.
+// prClockSkew is how much earlier than the start a queue pull request may
+// say it was opened, for a clock that is behind GitHub's.
+const prClockSkew = time.Minute
+
+// queuePR is the queue's own pull request for iss. Once the state names
+// its number, only that pull request is. Before then it is the first pull
+// request from this repository (not a fork) on the spawn branch, opened
+// after the queue started the issue; its number is then recorded. A
+// person's pull request, a fork's, or one opened before the start, is never
+// the queue's, whatever its branch is called.
+func (r *queueRunner) queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool) {
+	k := iss.key()
+	r.mu.Lock()
+	s := r.state.Started[k]
+	r.mu.Unlock()
+	if s.PR != 0 {
+		for _, pr := range prs {
+			if pr.Number == s.PR && !pr.IsCrossRepository {
+				return pr, true
+			}
+		}
+		return ghx.OpenPR{}, false
+	}
+	prefix := issueBranchName(iss.Issue.Number, "")
+	for _, pr := range prs {
+		if pr.IsCrossRepository || !strings.HasPrefix(pr.HeadRefName, prefix) || openedBefore(pr, s.At) {
+			continue
+		}
+		if !r.dry {
+			r.mu.Lock()
+			s.PR = pr.Number
+			r.state.Started[k] = s
+			r.mu.Unlock()
+			r.saveState()
+		}
+		return pr, true
+	}
+	return ghx.OpenPR{}, false
+}
+
+func openedBefore(pr ghx.OpenPR, start time.Time) bool {
+	created, err := time.Parse(time.RFC3339, pr.CreatedAt)
+	return err == nil && created.Before(start.Add(-prClockSkew))
+}
+
+// startedQueued is the state's started issues in the config's repositories,
+// as queued issues, so they sort like new work. A repository taken out of
+// the config is left alone.
 func (r *queueRunner) startedQueued() []queuedIssue {
+	repos := map[string]bool{}
+	for _, repo := range r.cfg.Repos {
+		repos[repo] = true
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]queuedIssue, 0, len(r.state.Started))
 	for _, s := range r.state.Started {
+		if !repos[s.Repo] {
+			continue
+		}
 		iss := ghx.Issue{Number: s.Number, Title: s.Title, URL: s.URL, CreatedAt: s.CreatedAt, State: "OPEN"}
 		for _, l := range s.Labels {
 			iss.Labels = append(iss.Labels, ghx.Label{Name: l})
@@ -165,12 +101,12 @@ func (r *queueRunner) startedQueued() []queuedIssue {
 	return out
 }
 
-// nextFix returns the first queue pull request that needs a fix run, in the
-// order new issues are taken, or nil. On the way it clears the record of a
-// pull request that is green or gone, and blocks an issue that used up its
-// tries. Only issues this queue started are looked at, so a person's own
-// pull request is never touched, whatever its branch is called.
-func (r *queueRunner) nextFix(ctx context.Context) *fixJob {
+// scanQueuePRs looks at every queue pull request once, in the order new
+// issues are taken, and returns those that need a fix run. On the way it
+// lands a green one (fix.land), clears the record of a green one, forgets
+// one that is merged or closed, and blocks an issue that used up its tries.
+// A repository is listed only when one of its started issues can act.
+func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 	if r.cfg.Fix == nil || r.state == nil || r.env.prs == nil {
 		return nil
 	}
@@ -179,51 +115,97 @@ func (r *queueRunner) nextFix(ctx context.Context) *fixJob {
 		r.logf("queue: %v", err)
 		return nil
 	}
+	issues := orderQueued(r.startedQueued(), projects)
+	need := r.listingNeeds(issues)
 	failed := map[string]bool{}
-	for _, iss := range orderQueued(r.startedQueued(), projects) {
-		if r.fixBusy(iss) {
+	var jobs []*fixJob
+	for _, iss := range issues {
+		if act, _ := r.canAct(iss); !act {
+			r.forgetIfGone(iss)
 			continue
 		}
-		prs, err := r.listPRs(iss.Repo)
-		if err != nil {
+		got := r.fixListing(iss.Repo, need[iss.Repo])
+		if got.err != nil {
 			if !failed[iss.Repo] {
 				failed[iss.Repo] = true
-				r.logf("queue: list open pull requests in %s: %v; starting no fix there this round", iss.Repo, err)
+				r.logf("queue: list open pull requests in %s: %v; starting no fix there this round", iss.Repo, got.err)
 			}
 			continue
 		}
-		pr, ok := queuePR(iss, prs)
+		pr, ok := r.queuePR(iss, got.prs)
 		if !ok {
 			r.forgetStarted(iss)
 			continue
 		}
-		if job := r.judgeQueuePR(ctx, iss, pr); job != nil {
-			return job
+		if job := r.judgeQueuePR(ctx, iss, pr, got.at); job != nil {
+			jobs = append(jobs, job)
 		}
 	}
-	return nil
+	return jobs
 }
 
-// fixBusy reports an issue whose agent or fix run is still going, or that
-// waits after a gate refused its fix.
-func (r *queueRunner) fixBusy(iss queuedIssue) bool {
+// listingNeeds is, per repository, the time its listing must be no older
+// than: the latest settling of the issues there that can act.
+func (r *queueRunner) listingNeeds(issues []queuedIssue) map[string]time.Time {
+	need := map[string]time.Time{}
+	for _, iss := range issues {
+		if act, after := r.canAct(iss); act && after.After(need[iss.Repo]) {
+			need[iss.Repo] = after
+		}
+	}
+	return need
+}
+
+// canAct reports whether the fix stage could do anything for iss now, and
+// the time a listing must be no older than to judge it: the end of its
+// last fix run's settling. An issue that is running, waiting, settling or
+// blocked cannot act, so its repository is not listed for it.
+func (r *queueRunner) canAct(iss queuedIssue) (bool, time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := iss.key()
-	if r.inflight[k] || r.fixing[k] {
-		return true
-	}
 	now := r.env.now()
-	if until, ok := r.repoWait[iss.Repo]; ok && now.Before(until) {
-		return true
+	if r.inflight[k] || r.fixing[k] {
+		return false, time.Time{}
 	}
-	until, ok := r.fixRetry[k]
-	return ok && now.Before(until)
+	for _, until := range []time.Time{r.repoWait[iss.Repo], r.fixRetry[k], r.labelRetry[k]} {
+		if now.Before(until) {
+			return false, time.Time{}
+		}
+	}
+	rec := r.state.Fixes[k]
+	if rec == nil {
+		return true, time.Time{}
+	}
+	settled := rec.Last.Add(r.cfg.Wait)
+	if rec.Blocked || now.Before(settled) {
+		return false, time.Time{}
+	}
+	return true, settled
+}
+
+// forgetIfGone forgets a blocked issue whose pull request is gone from a
+// listing already in hand. A blocked issue never makes the queue list.
+func (r *queueRunner) forgetIfGone(iss queuedIssue) {
+	r.mu.Lock()
+	rec := r.state.Fixes[iss.key()]
+	r.mu.Unlock()
+	if rec == nil || !rec.Blocked {
+		return
+	}
+	got, ok := r.heldListing(iss.Repo)
+	if !ok {
+		return
+	}
+	if _, open := r.queuePR(iss, got.prs); !open {
+		r.forgetStarted(iss)
+	}
 }
 
 // judgeQueuePR returns a fix job for pr, or nil when it is pending, green,
-// blocked, or just used its last try.
-func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.OpenPR) *fixJob {
+// blocked, or just used its last try. listed is when pr was listed: a
+// listing from before a fix run settled says nothing about that run.
+func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, listed time.Time) *fixJob {
 	verdict, reason := judgePR(pr)
 	k := iss.key()
 	r.mu.Lock()
@@ -233,36 +215,52 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 	if rec != nil {
 		runs, blocked = rec.Runs, rec.Blocked
 		// A fix run that just pushed may not have its checks listed yet.
-		settling = r.env.now().Before(rec.Last.Add(r.cfg.Wait))
+		settling = listed.Before(rec.Last.Add(r.cfg.Wait))
 	}
 	r.mu.Unlock()
-	switch {
-	case verdict == prPending || settling:
+	// Blocked stays blocked: the issue is a person's now.
+	if blocked || verdict == prPending || settling {
 		return nil
-	case verdict == prGreen:
+	}
+	if verdict == prGreen {
 		// No checks at all cannot tell a green PR from one whose checks
 		// have not been listed yet, so that keeps the record.
 		if rec != nil && len(pr.Checks) > 0 {
-			r.clearFix(k, fmt.Sprintf("queue: %s PR #%d is green; clearing its fix record", k, pr.Number))
+			r.clearFix(k, pr.Number)
+			runs = 0
 		}
-		return nil
-	case blocked:
-		return nil
-	case runs >= r.cfg.Fix.Tries:
+		if !r.cfg.Fix.Land || !r.land(iss, pr, listed) {
+			return nil
+		}
+		reason = "conflicts with " + baseName(pr)
+	}
+	if runs >= r.cfg.Fix.Tries {
 		r.block(ctx, iss, pr, reason, runs)
 		return nil
 	}
 	return &fixJob{iss: iss, pr: pr, reason: reason, try: runs + 1}
 }
 
+func baseName(pr ghx.OpenPR) string {
+	if pr.BaseRefName == "" {
+		return "its base"
+	}
+	return pr.BaseRefName
+}
+
 // forgetStarted drops an issue whose pull request is no longer open and
-// that is not running: merged or closed. Its fix record goes with it.
+// that is not running: merged or closed. Its fix record goes with it. A
+// dry run forgets nothing.
 func (r *queueRunner) forgetStarted(iss queuedIssue) {
+	if r.dry {
+		return
+	}
 	k := iss.key()
 	r.mu.Lock()
 	s, ok := r.state.Started[k]
 	// An issue started a moment ago may not have opened its pull request.
-	recent := ok && r.env.now().Before(s.At.Add(startedKeep))
+	// One whose pull request was seen has opened it.
+	recent := ok && s.PR == 0 && r.env.now().Before(s.At.Add(startedKeep))
 	_, fixed := r.state.Fixes[k]
 	if !ok || (recent && !fixed) {
 		r.mu.Unlock()
@@ -280,18 +278,26 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 // in the state. Its agent may still be about to open one.
 const startedKeep = 24 * time.Hour
 
-func (r *queueRunner) clearFix(k, msg string) {
+// clearFix drops the fix record of a pull request that turned green. A dry
+// run says it would.
+func (r *queueRunner) clearFix(k string, pr int) {
+	if r.dry {
+		r.logf("dry-run: would clear the fix record of %s: PR #%d is green", k, pr)
+		return
+	}
 	r.mu.Lock()
 	delete(r.state.Fixes, k)
 	r.mu.Unlock()
-	r.logf("%s", msg)
+	r.logf("queue: %s PR #%d is green; clearing its fix record", k, pr)
 	r.saveState()
 }
 
 // block labels the issue and stops fixing it. A label that cannot be added
-// is tried again next round, so the issue is not left looking free.
+// is tried again after wait, not every tick, so the issue is not left
+// looking free and a missing label does not cost a call per tick.
 func (r *queueRunner) block(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, reason string, runs int) {
 	fix := r.cfg.Fix
+	k := iss.key()
 	if r.dry {
 		r.logf("dry-run: would label %s#%d %s: PR #%d is %s after %d fix run(s)", iss.Repo, iss.Issue.Number, fix.BlockLabel, pr.Number, reason, runs)
 		return
@@ -301,13 +307,20 @@ func (r *queueRunner) block(ctx context.Context, iss queuedIssue, pr ghx.OpenPR,
 		return
 	}
 	if err := r.env.addLabel(iss.Repo, iss.Issue.Number, fix.BlockLabel); err != nil {
-		r.logf("queue: %s#%d: add label %s: %v; trying again next round", iss.Repo, iss.Issue.Number, fix.BlockLabel, err)
+		r.mu.Lock()
+		r.labelRetry[k] = r.env.now().Add(r.cfg.Wait)
+		r.mu.Unlock()
+		r.logf("queue: %s#%d: add label %s: %v\nfix: create the label %s in %s, or set fix.blockLabel to a label that exists; trying again after %s",
+			iss.Repo, iss.Issue.Number, fix.BlockLabel, err, fix.BlockLabel, iss.Repo, r.cfg.Wait)
 		return
 	}
 	r.mu.Lock()
-	if rec := r.state.Fixes[iss.key()]; rec != nil {
-		rec.Blocked = true
+	rec := r.state.Fixes[k]
+	if rec == nil {
+		rec = &fixRecord{PR: pr.Number, Runs: runs}
+		r.state.Fixes[k] = rec
 	}
+	rec.Blocked = true
 	r.mu.Unlock()
 	r.saveState()
 	r.logf("queue: %s#%d PR #%d is still %s after %d fix run(s); labelled %s, no more fixes", iss.Repo, iss.Issue.Number, pr.Number, reason, runs, fix.BlockLabel)
@@ -338,6 +351,7 @@ func (r *queueRunner) fixVars(job *fixJob, ws string) map[string]string {
 	vars := queueVars(r.cfg, []queuedIssue{job.iss}, ws, effort)
 	vars["pr"] = strconv.Itoa(job.pr.Number)
 	vars["branch"] = job.pr.HeadRefName
+	vars["base"] = baseName(job.pr)
 	vars["reason"] = job.reason
 	vars["try"] = strconv.Itoa(job.try)
 	vars["prompt"] = expand(r.cfg.Fix.Prompt, vars)
@@ -445,6 +459,11 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 	err = r.env.run(ctx, ws, expandArgv(r.cfg.Fix.Command, vars))
 	var exitErr *exec.ExitError
 	switch {
+	case err != nil && ctx.Err() != nil:
+		// Stopped with the queue: the run did not get to finish, so it
+		// is not a try.
+		r.logf("queue: fix %s PR #%d stopped with the queue; not counted as a try", k, job.pr.Number)
+		return false
 	case err == nil:
 		r.logf("queue: fix %s PR #%d exited", k, job.pr.Number)
 	case errors.As(err, &exitErr):

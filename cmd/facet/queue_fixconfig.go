@@ -14,7 +14,7 @@ const (
 
 // defaultFixPrompt is what a fix run is told when fix.prompt is empty.
 const defaultFixPrompt = "Pull request #{pr} on {branch} in {repo} is {reason}. This is try {try}. " +
-	"The workspace is {workspace}. Make CI green on the same branch. If it conflicts, merge origin/<base> into it. " +
+	"The workspace is {workspace}. Make CI green on the same branch. If it conflicts, merge origin/{base} into it. " +
 	"Never weaken a test without the repository's own rule for that. Push, then exit."
 
 // queueFix is the validated fix block: how the queue repairs its own red or
@@ -26,6 +26,9 @@ type queueFix struct {
 	Tries      int
 	BlockLabel string
 	Notify     []string
+	// Land updates a green queue pull request that is behind its base, and
+	// merges one that is up to date, without a model run.
+	Land bool
 }
 
 // queueFixFile is the JSON shape of fix, before defaults.
@@ -36,6 +39,7 @@ type queueFixFile struct {
 	Tries      *int     `json:"tries"`
 	BlockLabel string   `json:"blockLabel"`
 	Notify     []string `json:"notify"`
+	Land       *bool    `json:"land"`
 }
 
 // normalizeFix resolves the fix block and the state path. Without fix the
@@ -58,6 +62,7 @@ func normalizeFix(configPath, state string, raw *queueFixFile) (*queueFix, strin
 		Tries:      defaultFixTries,
 		BlockLabel: defaultFixBlockLabel,
 		Notify:     raw.Notify,
+		Land:       raw.Land == nil || *raw.Land,
 	}
 	if strings.TrimSpace(raw.Prompt) != "" {
 		fix.Prompt = raw.Prompt

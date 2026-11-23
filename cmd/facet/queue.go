@@ -51,8 +51,10 @@ func newQueueCmd() *cobra.Command {
 			"With a fix block, each tick first looks for an open pull request of an\n" +
 			"issue this queue started (recorded in the state file) that is red or\n" +
 			"conflicting, and starts a fix run for it instead of new work. After\n" +
-			"fix.tries failed tries it labels the issue blocked. A person's own pull\n" +
-			"request is never touched.\n\n" +
+			"fix.tries failed tries it labels the issue blocked, and leaves it. With\n" +
+			"fix.land (the default) a green one behind its base is updated by merging\n" +
+			"the base, and a green one up to date is merged, without an agent. A\n" +
+			"person's own pull request, or a fork's, is never touched.\n\n" +
 			"It does not reap workspaces. A workspace already on disk for the issue is\n" +
 			"reused, not spawned again.",
 		Args: cobra.NoArgs,

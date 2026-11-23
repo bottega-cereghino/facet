@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -26,6 +28,10 @@ type startedIssue struct {
 	URL       string    `json:"url,omitempty"`
 	CreatedAt string    `json:"createdAt,omitempty"`
 	Labels    []string  `json:"labels,omitempty"`
+	// PR is the queue's pull request for the issue, recorded the first
+	// time one is seen after the start. From then on only that pull
+	// request is the queue's.
+	PR int `json:"pr,omitempty"`
 }
 
 // fixRecord counts the fix runs made for one issue's pull request.
@@ -64,8 +70,13 @@ func loadQueueState(path string) (*queueState, error) {
 	return st, nil
 }
 
-// save writes the state atomically: a temp file beside it, then a rename,
-// so a crash leaves the old file or the new one, never half of one.
+// syncFile flushes a file or a directory to disk. Tests replace it to see
+// what is synced, and when.
+var syncFile = func(f *os.File) error { return f.Sync() }
+
+// save writes the state atomically: a temp file beside it, flushed to disk,
+// then a rename, then the directory flushed, so a crash or a power loss
+// leaves the old file or the new one, never half of one or none.
 func (st *queueState) save(path string) error {
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
@@ -77,14 +88,31 @@ func (st *queueState) save(path string) error {
 	}
 	name := tmp.Name()
 	_, werr := tmp.Write(append(b, '\n'))
+	serr := syncFile(tmp)
 	cerr := tmp.Close()
-	if werr != nil || cerr != nil {
+	if err := firstErr(werr, serr, cerr); err != nil {
 		_ = os.Remove(name)
-		return fmt.Errorf("write queue state %s: %w", path, firstErr(werr, cerr))
+		return fmt.Errorf("write queue state %s: %w", path, err)
 	}
 	if err := os.Rename(name, path); err != nil {
 		_ = os.Remove(name)
 		return fmt.Errorf("write queue state %s: %w", path, err)
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// syncDir flushes a directory, so a rename in it survives a power loss. A
+// file system that cannot sync a directory (EINVAL, ENOTSUP) is not an
+// error: the rename is then as durable as that file system makes it.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("write queue state: open %s to sync it: %w", dir, err)
+	}
+	err = syncFile(d)
+	_ = d.Close()
+	if err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
+		return fmt.Errorf("write queue state: sync %s: %w", dir, err)
 	}
 	return nil
 }

@@ -78,7 +78,8 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 		t.Fatalf("example effort = %q", cfg.Effort)
 	}
 	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || len(cfg.Fix.Gate) == 0 || len(cfg.Fix.Notify) == 0 ||
-		!strings.Contains(cfg.Fix.Prompt, "{reason}") || filepath.Base(cfg.State) != "facet-queue.state.json" {
+		!strings.Contains(cfg.Fix.Prompt, "{reason}") || !strings.Contains(cfg.Fix.Prompt, "origin/{base}") || !cfg.Fix.Land ||
+		filepath.Base(cfg.State) != "facet-queue.state.json" {
 		t.Fatalf("example fix = %+v, state %q", cfg.Fix, cfg.State)
 	}
 	low, err := cfg.effortFor([]string{"next", "Fix"})
