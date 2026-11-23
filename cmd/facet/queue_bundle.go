@@ -105,11 +105,11 @@ func joinsBundle(cfg queueConfig, primary, iss queuedIssue, who, effort string) 
 	return ok && gotWho == who && strings.EqualFold(gotEffort, effort)
 }
 
-func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string) ([]string, string, error) {
+func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string) ([]string, string, string, error) {
 	iss := run[0]
 	label, cmd, err := r.cfg.commandFor(iss.Issue.LabelNames())
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	vars := queueVars(r.cfg, run, ws, effort)
 	// prompt is expanded first, then dropped in as a single value, so a title
@@ -124,7 +124,7 @@ func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string) ([]string, s
 	if who == "" {
 		who = "default"
 	}
-	return out, who, nil
+	return out, who, commandSummary(cmd, out), nil
 }
 
 // queueVars is the placeholders one run substitutes. {prompt} is added by

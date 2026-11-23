@@ -46,6 +46,8 @@ type queueConfig struct {
 	State string
 	// Fix is nil when the config has no fix block.
 	Fix *queueFix
+	// Decisions is the JSONL file where dispatch decisions are appended.
+	Decisions string
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -114,6 +116,7 @@ type queueFile struct {
 	Effort     queueEffortFile  `json:"effort"`
 	State      string           `json:"state"`
 	Fix        *queueFixFile    `json:"fix"`
+	Decisions  string           `json:"decisions"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -125,7 +128,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, decisions", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -184,6 +187,12 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg.Fix, cfg.State, err = normalizeFix(configPath, f.State, f.Fix)
 	if err != nil {
 		return queueConfig{}, err
+	}
+	if p := strings.TrimSpace(f.Decisions); p != "" {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(filepath.Dir(configPath), p)
+		}
+		cfg.Decisions = p
 	}
 	if err := cfg.validate(); err != nil {
 		return queueConfig{}, err

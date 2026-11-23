@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -160,6 +161,10 @@ type queueRunner struct {
 	mergeMethods map[string]string
 	// dry is set by --dry-run: no label is added and no state is written.
 	dry bool
+	// lastHeld is the hold file path last recorded in the decision log, so
+	// held/released is emitted once per change rather than once per poll.
+	lastHeld   string
+	decisionMu sync.Mutex
 }
 
 // newQueueRunner builds a runner and reads the state file when the config
@@ -182,6 +187,9 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		landed:       map[string]time.Time{},
 		mergeMethods: map[string]string{},
 		dry:          dry,
+	}
+	if !dry && cfg.Decisions != "" {
+		r.lastHeld = lastHoldPath(cfg.Decisions)
 	}
 	if cfg.Fix != nil {
 		st, err := loadQueueState(cfg.State)
@@ -252,6 +260,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	effort, err := r.cfg.effortFor(run[0].Issue.LabelNames())
 	if err != nil {
 		r.logf("queue: %s#%d: %v", run[0].Repo, run[0].Issue.Number, err)
+		r.recordDecision(run[0].Repo, strconv.Itoa(run[0].Issue.Number), r.laneFor(run[0]), "skip", firstErrorLine(err.Error()))
 		r.deferAll(run, r.deferRetry)
 		r.pause(ctx)
 		return false, nil
@@ -292,6 +301,7 @@ func (r *queueRunner) finishIfStopped(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, err
 	}
+	r.recordHold(held)
 	if held != "" {
 		r.logf("queue: hold file %s exists; starting nothing", held)
 		return true, nil
@@ -339,6 +349,7 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 		return nil, err
 	}
 	ranked := orderQueued(issues, projects)
+	r.recordDoneSkips(ranked)
 	skip := map[string]bool{}
 	for {
 		r.mu.Lock()
@@ -361,7 +372,30 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 			skip[iss.key()] = true
 			pr, _ := r.openPRFor(iss)
 			r.logf("queue: %s#%d has an open pull request from %s; not starting it again", iss.Repo, iss.Issue.Number, pr.HeadRefName)
+			why := "open pull request from " + pr.HeadRefName
+			if pr.Number != 0 {
+				why = fmt.Sprintf("open pull request #%d from %s", pr.Number, pr.HeadRefName)
+			}
+			r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), r.laneFor(iss), "skip", why)
 		}
+	}
+}
+
+func (r *queueRunner) recordDoneSkips(ranked []queuedIssue) {
+	if r.dry || r.cfg.Decisions == "" {
+		return
+	}
+	r.mu.Lock()
+	var skipped []queuedIssue
+	for _, iss := range ranked {
+		k := iss.key()
+		if r.done[k] && !r.inflight[k] {
+			skipped = append(skipped, iss)
+		}
+	}
+	r.mu.Unlock()
+	for _, iss := range skipped {
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), r.laneFor(iss), "skip", "already started in this process")
 	}
 }
 
@@ -513,15 +547,19 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue) {
 	}
 	held, err := holdFile(r.cfg.Hold)
 	if err != nil || held != "" {
+		if held != "" {
+			r.recordHold(held)
+		}
 		return
 	}
-	argv, who, err := r.argvFor(run, ws, effort)
+	argv, who, cmdSummary, err := r.argvFor(run, ws, effort)
 	if err != nil {
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
 		r.deferAll(run, r.deferRetry)
 		return
 	}
 	r.logf("queue: %s#%d agent %s effort %s bundle %d in %s", iss.Repo, iss.Issue.Number, who, effort, len(run), ws)
+	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, "start", cmdSummary)
 	err = r.env.run(ctx, ws, argv)
 	if err == nil {
 		r.logf("queue: %s#%d agent exited, bundle %d", iss.Repo, iss.Issue.Number, len(run))
