@@ -466,10 +466,11 @@ never passed through a shell.
 | `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}`. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
-| `state` | the state file's path. A relative path is beside the config file. Required when `fix` is set; unused without it. |
+| `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. |
 | `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
 | `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
+| `cap` | how often the queue starts standards or CI work, once that repository's own check passes (below). Omitted means no cap. |
 
 For example, a local newsyslog rule can use the PID file as its signal target:
 
@@ -583,6 +584,44 @@ start, and the issues are not listed.
 `TestQueueRetriesASpawnThatFailed`,
 `TestQueueRetriesWhenTheAgentCannotStart` and
 `TestQueueUsesAWorkspaceThatAlreadyExists` hold this.
+
+### Cap standards and CI work
+
+Optional `cap` limits how often the queue starts standards or CI work in one
+repository, once that repository's own check already passes. Omitted, there
+is no cap, and those issues start like any other.
+
+| `cap` field | |
+| --- | --- |
+| `labels` | the issue labels that count as standards or CI work. The match ignores case and is the whole label, so `Standards` counts and `standards-extra` does not. Omitted means `standards` and `ci`. |
+| `share` | `[1, 3]` means at most 1 of every 3 issues the queue started in that repository. The first number is at least 1 and no greater than the second. Omitted means `[1, 3]`. |
+| `passes` | an argument list, run once per round per repository, with `{repo}`. Exit 0 means the check passes and the cap applies. Any other exit, a command that cannot be started, or omitting `passes`, means the cap does not apply: the repository is still catching up. |
+
+The window is that repository's last `share[1]` starts recorded in the state
+file, newest first. The file keeps a start after the fix stage drops an
+issue whose pull request has merged, so the window still counts that run. A
+candidate that carries a cap label is not started while the window already
+holds `share[0]` such starts. It is skipped for the round and logged once
+(`capped: owner/repo#n, 1 of the last 3 runs in owner/repo was standards work`),
+and the next candidate is taken. A fix run and a landing are never capped.
+While `cap` is set, an issue with a cap label is a run of one, so a batch
+cannot carry two of them.
+
+`--dry-run` applies the cap and prints each issue it skipped. It writes no
+state. A restart reads the state file, so the window is the same one.
+
+`cap` needs `state`, the same file `fix` uses.
+
+`TestQueueCapSecondStandardsIssueWaitsBehindProduct`,
+`TestQueueCapStartsStandardsWhenTheWindowHasNone`,
+`TestQueueCapPassesFailingDisablesTheCap`,
+`TestQueueCapLabelsMatchWholeAndIgnoreCase`,
+`TestQueueCapOmittedChangesNothing`,
+`TestQueueCapRestartKeepsTheWindow`,
+`TestQueueCapDryRunSkipsTheSecondStandardsIssue`,
+`TestQueueCapPassesRunsOncePerRepository`,
+`TestQueueCapFixAndLandAreNotCapped` and
+`TestQueueCapKeepsAStartAfterThePullRequestIsGone` hold this.
 
 ### The queue fixes its own red pull requests first
 
