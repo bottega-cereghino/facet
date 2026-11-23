@@ -63,9 +63,9 @@ The feature map of facet. States: shipped (on main), in progress (an open PR), p
 | F35 | `AGENTS.md`, `CONTRIBUTING.md`, `docs/CODE.md` | House rules | shipped | [#200](https://github.com/bottega-cereghino/facet/pull/200) |
 | F36 | shfmt in `make check` and CI |  | in progress | [#441](https://github.com/bottega-cereghino/facet/pull/441) |
 | F37 | Format Go on write via `.claude/settings.json` hook |  | in progress | [#442](https://github.com/bottega-cereghino/facet/pull/442) |
-| F38 | Decision records in `docs/decisions/` |  | in progress | [#440](https://github.com/bottega-cereghino/facet/pull/440) |
+| F38 | Decision records in `docs/decisions/` |  | shipped | [#440](https://github.com/bottega-cereghino/facet/pull/440) |
 | F39 | Same hook and shfmt tracked as issues |  | planned | [#439](https://github.com/bottega-cereghino/facet/issues/439) |
-| F40 | `FEATURES.md`, this map | Fleet standard features-file | in progress | [#450](https://github.com/bottega-cereghino/facet/issues/450) |
+| F40 | `FEATURES.md`, this map | Fleet standard features-file | shipped | [#451](https://github.com/bottega-cereghino/facet/pull/451) |
 
 ## Removed
 
