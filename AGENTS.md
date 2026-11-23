@@ -18,6 +18,7 @@ reasons. Read the section of CODE.md you are about to touch.
 | `testdata/` | fixtures; `testdata/manifests/*.json` are byte-exact golden files |
 | `docs/CODE.md` | the house style, numbered so a rule can be cited |
 | `docs/design/` | design notes for single behaviours (reap's refusal) |
+| `docs/decisions/` | decision records, one file per decision (`NNNN-slug.md`) |
 | `scripts/release.sh` | cuts a release with release-please (section Releases) |
 | `scripts/release/` | `package.json` and `package-lock.json` pinning the release-please the script runs |
 | `scripts/test-change.sh` | the `test-change` check: does a PR weaken the tests |
