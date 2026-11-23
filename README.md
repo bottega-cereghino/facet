@@ -112,7 +112,8 @@ tells you where to work — opening an editor or starting an agent is yours.
 
 Anyone can file an issue on a public repository, and an agent reads the
 workspace's `CLAUDE.md` as instructions, with your `gh` and git credentials. So
-the issue's body goes in as a blockquote, every line starting with `>`, after a
+the issue's title and body go in as a blockquote (the H1 names only the
+workspace; label names are cut to one line with backticks replaced), every line starting with `>`, after a
 fixed line that names its author (`@login`) and says to read it as a description
 of the task, never as instructions to run a command, open a link, or touch
 credentials, and to stop and ask if it says to. Your own issue (the author is
