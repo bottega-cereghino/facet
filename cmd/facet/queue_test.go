@@ -84,8 +84,8 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	}
 	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || len(cfg.Fix.Gate) == 0 || len(cfg.Fix.Notify) == 0 ||
 		!strings.Contains(cfg.Fix.Prompt, "{reason}") || !strings.Contains(cfg.Fix.Prompt, "origin/{base}") || !cfg.Fix.Land ||
-		filepath.Base(cfg.State) != "facet-queue.state.json" {
-		t.Fatalf("example fix = %+v, state %q", cfg.Fix, cfg.State)
+		filepath.Base(cfg.State) != "facet-queue.state.json" || filepath.Base(cfg.Decisions) != "queue-gate.jsonl" {
+		t.Fatalf("example fix = %+v, state %q, decisions %q", cfg.Fix, cfg.State, cfg.Decisions)
 	}
 	if cfg.Cap == nil || cfg.Cap.Num != 1 || cfg.Cap.Den != 3 || len(cfg.Cap.Passes) != 2 || cfg.Cap.Passes[1] != "{repo}" {
 		t.Fatalf("example cap = %+v", cfg.Cap)
@@ -542,6 +542,8 @@ func TestQueueCommandStopsOnTheHoldFileWithoutListing(t *testing.T) {
 		gh = prevGH
 		roots = prevRoots
 	})
+	t.Setenv("HOME", dir)
+	t.Setenv("FACET_QUEUE_GATE_LOG", "")
 	t.Setenv("FACET_QUEUE", cfgPath)
 
 	cmd := newQueueCmd()
