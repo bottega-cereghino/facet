@@ -1,5 +1,6 @@
 {
   "max": 6,
+  "per_repo": 2,
   "hold": "facet-queue.hold",
   "gate": ["gate", "{repo}", "{number}", "{labels}"],
   "wait": "30s",

@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	defaultQueueMax    = 6
-	defaultQueueWait   = 30 * time.Second
-	defaultQueueLabel  = "next"
-	defaultQueueEffort = "medium"
+	defaultQueueMax     = 6
+	defaultQueuePerRepo = 2
+	defaultQueueWait    = 30 * time.Second
+	defaultQueueLabel   = "next"
+	defaultQueueEffort  = "medium"
 	// maxQueueBundle is the most issues one agent run takes. One is the
 	// default, and a larger batch hides which issue failed.
 	maxQueueBundle = 5
@@ -32,6 +33,7 @@ const defaultQueuePrompt = "Do each issue below, in order. The workspace is {wor
 // queueConfig is a validated queue file. Durations and defaults are resolved.
 type queueConfig struct {
 	Max          int
+	PerRepo      int
 	Hold         []string
 	Gate         []string
 	Wait         time.Duration
@@ -99,6 +101,7 @@ func (h queueHolds) paths() []string {
 // queueFile is the JSON shape, before defaults and checks.
 type queueFile struct {
 	Max        *int             `json:"max"`
+	PerRepo    *int             `json:"per_repo"`
 	Hold       queueHolds       `json:"hold"`
 	Gate       []string         `json:"gate"`
 	Wait       string           `json:"wait"`
@@ -119,7 +122,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, priorities, repos, prompt, agents, effort", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -129,15 +132,19 @@ func loadQueueConfig(path string) (queueConfig, error) {
 
 func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg := queueConfig{
-		Max:    defaultQueueMax,
-		Hold:   f.Hold.paths(),
-		Gate:   f.Gate,
-		Wait:   defaultQueueWait,
-		Label:  defaultQueueLabel,
-		Prompt: defaultQueuePrompt,
+		Max:     defaultQueueMax,
+		PerRepo: defaultQueuePerRepo,
+		Hold:    f.Hold.paths(),
+		Gate:    f.Gate,
+		Wait:    defaultQueueWait,
+		Label:   defaultQueueLabel,
+		Prompt:  defaultQueuePrompt,
 	}
 	if f.Max != nil {
 		cfg.Max = *f.Max
+	}
+	if f.PerRepo != nil {
+		cfg.PerRepo = *f.PerRepo
 	}
 	if strings.TrimSpace(f.Label) != "" {
 		cfg.Label = strings.TrimSpace(f.Label)
@@ -184,6 +191,9 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 func (c queueConfig) validate() error {
 	if c.Max < 1 {
 		return fmt.Errorf("queue config: max must be at least 1\nfix: set max to how many agents may run at once (a hold file is how you pause)")
+	}
+	if c.PerRepo < 1 {
+		return fmt.Errorf("queue config: per_repo must be at least 1\nfix: set per_repo to how many agents one repository may run at once")
 	}
 	if c.Wait <= 0 {
 		return fmt.Errorf("queue config: wait must be greater than zero\nfix: use a Go duration such as 30s, or a hold file to stop the queue")

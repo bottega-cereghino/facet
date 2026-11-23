@@ -19,12 +19,13 @@ import (
 func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 	env.fill()
 	r := &queueRunner{
-		cfg:      cfg,
-		env:      env,
-		inflight: map[string]bool{},
-		done:     map[string]bool{},
-		retryAt:  map[string]time.Time{},
-		repoWait: map[string]time.Time{},
+		cfg:         cfg,
+		env:         env,
+		inflight:    map[string]bool{},
+		repoRunning: map[string]int{},
+		done:        map[string]bool{},
+		retryAt:     map[string]time.Time{},
+		repoWait:    map[string]time.Time{},
 	}
 	held, err := holdFile(cfg.Hold)
 	if err != nil {
@@ -92,6 +93,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 			r.logf("dry-run: %s#%d: %s", iss.Repo, iss.Issue.Number, iss.Issue.Title)
 		}
 		r.mu.Lock()
+		r.repoRunning[run[0].Repo]++
 		for _, iss := range run {
 			r.inflight[iss.key()] = true
 		}
