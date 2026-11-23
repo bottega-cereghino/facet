@@ -80,6 +80,9 @@ func newQueueCmd() *cobra.Command {
 			if dryRun {
 				return dryQueue(ctx, cfg, env)
 			}
+			if cfg.Decisions == "" {
+				cfg.Decisions = defaultQueueDecisionPath()
+			}
 			return runQueueWithLog(ctx, cfg, env, logPath)
 		},
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -456,8 +457,11 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 		return false
 	}
 	vars := r.fixVars(job, ws)
+	argv := expandArgv(r.cfg.Fix.Command, vars)
 	r.logf("queue: fix %s PR #%d: %s, try %d of %d, in %s", k, job.pr.Number, job.reason, job.try, r.cfg.Fix.Tries, ws)
-	err = r.env.run(ctx, ws, expandArgv(r.cfg.Fix.Command, vars))
+	why := fmt.Sprintf("PR #%d (%s, try %d): %s", job.pr.Number, job.reason, job.try, commandSummary(r.cfg.Fix.Command, argv))
+	r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", "fix_start", why)
+	err = r.env.run(ctx, ws, argv)
 	var exitErr *exec.ExitError
 	switch {
 	case err != nil && ctx.Err() != nil:

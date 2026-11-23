@@ -19,6 +19,7 @@
     }
   },
   "state": "facet-queue.state.json",
+  "decisions": "queue-gate.jsonl",
   "fix": {
     "command": ["agent", "--effort", "{effort}", "{prompt}"],
     "prompt": "Pull request #{pr} on {branch} in {repo} is {reason}. This is try {try}. The workspace is {workspace}. Make CI green on the same branch. If it conflicts, merge origin/{base} into it. Never weaken a test without the repository's own rule for that. Push, then exit.",
