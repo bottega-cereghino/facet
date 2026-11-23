@@ -19,6 +19,7 @@ func newQueueCmd() *cobra.Command {
 	var (
 		configPath string
 		dryRun     bool
+		logPath    string
 	)
 	cmd := &cobra.Command{
 		Use:   "queue",
@@ -73,10 +74,11 @@ func newQueueCmd() *cobra.Command {
 			if dryRun {
 				return dryQueue(ctx, cfg, env)
 			}
-			return runQueue(ctx, cfg, env)
+			return runQueueWithLog(ctx, cfg, env, logPath)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "queue config JSON file (default: FACET_QUEUE)")
+	cmd.Flags().StringVar(&logPath, "log", "", "write queue output to this file and reopen it on SIGHUP")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what the next starts would take, without spawning or starting an agent")
 	return cmd
 }
