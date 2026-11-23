@@ -427,6 +427,27 @@ Nothing in the binary names an agent. An issue's labels pick the entry; the
 first match wins; the entry whose label is empty runs when none of the others
 match. Labels match without regard to case.
 
+A label `lane:NAME` is a preference for the agent that carries it. When `lanes`
+is set, the queue runs `lanes.command` once before each start (no shell, three
+seconds). The command prints JSON, `{"lanes":[{"lane":"name","room":"yes"}]}`,
+with `room` of `yes`, `no` or `unknown`. `key` is read as well as `lane`. When
+the matched agent's lane has room `no`, that same tick starts the empty-label
+agent instead. The queue does not choose among plans itself: the empty-label
+command does. The start is logged with `fallback_from`, and `{fallback_from}`
+in the command is the lane name (empty when the labelled agent runs). When
+`lanes.log` is set, the queue appends one JSON line there:
+
+```json
+{"at":"2026-11-23T18:00:00Z","repo":"acme/widgets","issue":7,"fallback_from":"grok","agent":"default"}
+```
+
+A relative `lanes.log` is beside the config file. A dry run prints the
+fallback and writes no line. Any room other than `no`, a lane the answer does
+not name, or a command that fails or prints nothing usable, keeps the labelled
+agent: a missing answer is not "no room". A `model:` label is not a preference.
+It keeps its agent, so an issue that needs that agent waits on it. With `lanes`
+omitted, a `lane:` label is an ordinary agent label.
+
 The command is an argument list, not a shell command. One argument contains
 `{prompt}`, and that is where the task text goes. The issue title is
 substituted into the text, and a title is someone else's words, so it is
@@ -434,18 +455,20 @@ never passed through a shell.
 
 | field | |
 | --- | --- |
-| `max` | how many agents run at once. Omitted means 6. |
+| `max` | how many agents run at once across all repositories. Omitted means 6. |
+| `per_repo` | how many agents from one repository may run at once. Omitted means 2. |
 | `hold` | a file path, or a list of them. When one exists, the queue starts nothing and stops. An agent already running is left to finish. |
 | `gate` | a command run before each start. Its arguments are expanded with the issue about to start (`{repo}` `{number}` `{title}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`). `{workspace}` is empty, because the gate runs before a workspace is spawned, and `{prompt}` is not substituted. Exit 3 skips that run: its issues are tried again after `wait`, and the queue goes straight on to the next run, so a refusal about one repository (a red pull request there, a `blocked` label) does not hold the others. Exit 4 skips the run's whole repository the same way: every queued issue there waits `wait`, so the gate runs once per repository. Any other non-zero exit waits `wait`, starts nothing, and tries later: a refusal about the whole queue, such as a spend cap. Omitted means there is no gate. |
 | `wait` | how long to wait before looking again. Omitted means 30s. |
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
-| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`. `{labels}` is the issue's labels, comma-separated. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}`. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` is set; unused without it. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
+| `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
 
 For example, a local newsyslog rule can use the PID file as its signal target:
 
@@ -542,6 +565,9 @@ start, and the issues are not listed.
 `TestQueueDryRunStopsOnTheHoldFileWithoutListing`,
 `TestQueueDryRunGivesAFreeSlotToTheNextProjectDown`,
 `TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
+`TestQueueStartsAFullLaneOnTheDefaultAgentWithinTheTick`,
+`TestQueueKeepsALaneLabelWhenTheLanesCommandFails`,
+`TestQueueDryRunNamesTheFallbackAndWritesNoLedger`,
 `TestQueueTakesTheOldestIssueFirst`,
 `TestQueueTakesP1BeforeAnOlderIssue`,
 `TestQueuePassesTheEffortForTheIssueLabel`,
@@ -781,9 +807,16 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`sync` writes only inside the workspace.** A clone or link key must be one
   directory name and a link target a folder under the projects root; a manifest
   naming `../x`, `a/b` or `/abs` is refused when it is read, before anything is
-  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`). The one
-  write outside it is git's own, in a checkout a clone becomes a worktree of:
-  a fetch of `origin`, and the worktree's entry in that checkout's `.git`.
+  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`).
+  `--bootstrap` (and `restore`, and `facet add link` when it records an origin)
+  is the other write: it clones a missing link target under the projects root.
+  The destination's parent is resolved first, and a parent outside that root
+  is refused, so a symlink committed inside a checkout cannot send the clone
+  elsewhere
+  (`TestSyncBootstrapRefusesACloneThroughASymlinkOutOfTheProjectsRoot`).
+  The remaining write outside the workspace is git's own, in a checkout a clone
+  becomes a worktree of: a fetch of `origin`, and the worktree's entry in that
+  checkout's `.git`.
 - **A manifest URL is never read as a git option.** Every git call that takes a
   URL, path or remote name from the manifest puts `--` before it, so a URL such
   as `--upload-pack=<command>` is looked up as a repository and fails
@@ -891,7 +924,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   the workspace by name with `--force`
   (`TestReapHoldsContentInAGitDirObjectStore`). The landing proof names the
   default branch by its full ref, so a local branch called `origin/main` is not
-  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`).
+  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`). A ref that is
+  itself symbolic is not taken for it either, so a chain from
+  `refs/remotes/origin/HEAD` through another symref to a local branch cannot
+  pass by comparing that branch with itself
+  (`TestReapHoldsABranchASymbolicDefaultRefNames`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
   gh's "no pull requests found" counts as none; a repository gh cannot resolve
   (renamed, transferred, unreadable) holds the workspace
