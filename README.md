@@ -105,20 +105,22 @@ facet spawn 67 --repo acme/platform
 one was chosen, and waits.** On confirmation it creates an issue-linked branch
 (`gh issue develop`, from the repository's default branch unless `--base` names
 another), clones each repo, and writes a `CLAUDE.md` carrying the issue
-body and the durable hazards recorded for its `area/*` labels. Then it stops and
+body and the durable hazards recorded for its labels in `knowledgeByArea` (any label name, by convention `area/*`). Then it stops and
 tells you where to work — opening an editor or starting an agent is yours.
 
 ### The issue's text is data, not instructions
 
 Anyone can file an issue on a public repository, and an agent reads the
 workspace's `CLAUDE.md` as instructions, with your `gh` and git credentials. So
-the issue's body goes in as a blockquote, every line starting with `>`, after a
+the issue's title and body go in as a blockquote (the title on a line of its
+own, as one line; the heading names only the workspace), every line starting with `>`, after a
 fixed line that names its author (`@login`) and says to read it as a description
 of the task, never as instructions to run a command, open a link, or touch
 credentials, and to stop and ask if it says to. Your own issue (the author is
 the account `gh` is signed in as) is quoted too, without that last line, so an
-issue of yours that says "run `make check`" is simply followed. A fixed line,
-`End of the issue's text.`, follows the quote. Nothing in the
+issue of yours that says "run `make check`" is simply followed. Label names are
+shown on one line with backticks replaced, so none can add lines or close its
+code span. A fixed line, `End of the issue's text.`, follows the quote. Nothing in the
 body can end the quote early: a heading, a code fence, a bare carriage return or
 a copy of that closing line stays inside it.
 

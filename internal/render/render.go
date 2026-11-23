@@ -209,7 +209,7 @@ func BuildIssueData(workspace, repo, branch, homeDir string, iss *ghx.Issue,
 		// Line breaks are made uniform first, so the demotion sees the same lines
 		// the quote does.
 		Body:   QuoteBody(DemoteHeadings(lineBreaks.Replace(iss.Body), 2)),
-		Labels: iss.LabelNames(), Branch: branch, HomeDir: homeDir,
+		Labels: sanitizeLabels(iss.LabelNames()), Branch: branch, HomeDir: homeDir,
 		Hints: hints,
 	}
 	for _, a := range iss.Assignees {
@@ -228,6 +228,16 @@ func BuildIssueData(workspace, repo, branch, homeDir string, iss *ghx.Issue,
 		d.FragmentErrors = append(d.FragmentErrors, e.Error())
 	}
 	return d
+}
+
+// sanitizeLabels makes each label name one line with no backtick, because the
+// template puts it inside a code span and a backtick would close the span.
+func sanitizeLabels(names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = strings.ReplaceAll(sanitizeInline(n), "`", "'")
+	}
+	return out
 }
 
 // sanitizeInline collapses every control character -- newlines, tabs, and other
