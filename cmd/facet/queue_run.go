@@ -133,16 +133,17 @@ func gateExit(err error) int {
 const queueStopGrace = 10 * time.Second
 
 type queueRunner struct {
-	cfg      queueConfig
-	env      queueEnv
-	mu       sync.Mutex
-	inflight map[string]bool
-	running  int
-	done     map[string]bool
-	retryAt  map[string]time.Time
-	repoWait map[string]time.Time
-	wake     chan struct{}
-	wg       sync.WaitGroup
+	cfg         queueConfig
+	env         queueEnv
+	mu          sync.Mutex
+	inflight    map[string]bool
+	running     int
+	repoRunning map[string]int
+	done        map[string]bool
+	retryAt     map[string]time.Time
+	repoWait    map[string]time.Time
+	wake        chan struct{}
+	wg          sync.WaitGroup
 	// round caches each repository's open pull requests for one tick, so
 	// a round makes one listing call per repository.
 	round map[string]prListing
@@ -170,6 +171,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		cfg:          cfg,
 		env:          env,
 		inflight:     map[string]bool{},
+		repoRunning:  map[string]int{},
 		done:         map[string]bool{},
 		retryAt:      map[string]time.Time{},
 		repoWait:     map[string]time.Time{},
@@ -199,9 +201,9 @@ func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		return err
 	}
 	if cfg.Priorities != "" {
-		r.logf("queue: up to %d agent(s), label %s, projects from %s", cfg.Max, cfg.Label, cfg.Priorities)
+		r.logf("queue: up to %d agent(s), at most %d per repository, label %s, projects from %s", cfg.Max, cfg.PerRepo, cfg.Label, cfg.Priorities)
 	} else {
-		r.logf("queue: up to %d agent(s), label %s, order p1 then p2 then p3 then oldest", cfg.Max, cfg.Label)
+		r.logf("queue: up to %d agent(s), at most %d per repository, label %s, order p1 then p2 then p3 then oldest", cfg.Max, cfg.PerRepo, cfg.Label)
 	}
 	err = r.loop(ctx)
 	r.wg.Wait()
@@ -445,6 +447,9 @@ func (r *queueRunner) blocked(iss queuedIssue, now time.Time) bool {
 	if r.done[k] || r.inflight[k] {
 		return true
 	}
+	if r.repoRunning[iss.Repo] >= r.cfg.PerRepo {
+		return true
+	}
 	if until, ok := r.repoWait[iss.Repo]; ok && now.Before(until) {
 		return true
 	}
@@ -468,6 +473,7 @@ func (r *queueRunner) gate(ctx context.Context, run []queuedIssue, effort string
 func (r *queueRunner) start(ctx context.Context, run []queuedIssue) {
 	r.mu.Lock()
 	r.running++
+	r.repoRunning[run[0].Repo]++
 	for _, iss := range run {
 		r.inflight[iss.key()] = true
 	}
@@ -480,6 +486,7 @@ func (r *queueRunner) start(ctx context.Context, run []queuedIssue) {
 		defer func() {
 			r.mu.Lock()
 			r.running--
+			r.repoRunning[run[0].Repo]--
 			for _, iss := range run {
 				delete(r.inflight, iss.key())
 			}
