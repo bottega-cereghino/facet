@@ -54,6 +54,8 @@ type queueConfig struct {
 	// Serialize is nil when the config has no serialize block. Landing then
 	// does not serialize on shared files.
 	Serialize *queueSerialize
+	// Heartbeat is the heartbeat file's path; empty means none.
+	Heartbeat string
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -125,6 +127,7 @@ type queueFile struct {
 	Fix        *queueFixFile       `json:"fix"`
 	Lanes      *queueLanesFile     `json:"lanes"`
 	Serialize  *queueSerializeFile `json:"serialize"`
+	Heartbeat  string              `json:"heartbeat"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -136,7 +139,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, lanes, serialize", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, lanes, serialize, heartbeat", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -207,6 +210,12 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg.Serialize, err = normalizeSerialize(f.Serialize)
 	if err != nil {
 		return queueConfig{}, err
+	}
+	if p := strings.TrimSpace(f.Heartbeat); p != "" {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(filepath.Dir(configPath), p)
+		}
+		cfg.Heartbeat = p
 	}
 	if err := cfg.validate(); err != nil {
 		return queueConfig{}, err

@@ -175,6 +175,10 @@ type queueRunner struct {
 	rooms map[string]string
 	// fallbackMu keeps two runs from appending the lanes log at once.
 	fallbackMu sync.Mutex
+	// active, lastError and heartbeatMu back the heartbeat file.
+	active      map[string]heartbeatRun
+	lastError   string
+	heartbeatMu sync.Mutex
 }
 
 // newQueueRunner builds a runner and reads the state file when the config
@@ -198,6 +202,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		landed:       map[string]time.Time{},
 		waited:       map[string]string{},
 		mergeMethods: map[string]string{},
+		active:       map[string]heartbeatRun{},
 		dry:          dry,
 	}
 	if cfg.Fix != nil {
@@ -239,6 +244,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	if stop, err := r.finishIfStopped(ctx); stop || err != nil {
 		return true, err
 	}
+	r.writeHeartbeat()
 	r.mu.Lock()
 	r.round = map[string]prListing{}
 	r.mu.Unlock()
@@ -260,11 +266,15 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	}
 	run, err := r.candidate()
 	if err != nil {
+		r.setLastError(err.Error())
+		r.writeHeartbeat()
 		r.logf("queue: %s", err.Error())
 		r.pause(ctx)
 		return false, nil
 	}
+	r.setLastError("")
 	if len(run) == 0 {
+		r.writeHeartbeat()
 		r.logf("queue: no open issue labelled %s to start; waiting %s", r.cfg.Label, r.cfg.Wait)
 		r.pause(ctx)
 		return false, nil
@@ -273,6 +283,8 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	// start, and the gate would otherwise judge a run that never begins.
 	effort, err := r.cfg.effortFor(run[0].Issue.LabelNames())
 	if err != nil {
+		r.setLastError(err.Error())
+		r.writeHeartbeat()
 		r.logf("queue: %s#%d: %v", run[0].Repo, run[0].Issue.Number, err)
 		r.deferAll(run, r.deferRetry)
 		r.pause(ctx)
@@ -294,6 +306,8 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 			r.deferAll(run, r.deferRetry)
 			return false, nil
 		}
+		r.setLastError(err.Error())
+		r.writeHeartbeat()
 		r.logf("queue: %s#%d gate: %s; waiting %s", run[0].Repo, run[0].Issue.Number, err.Error(), r.cfg.Wait)
 		r.pause(ctx)
 		return false, nil
@@ -312,9 +326,12 @@ func (r *queueRunner) finishIfStopped(ctx context.Context) (bool, error) {
 	}
 	held, err := holdFile(r.cfg.Hold)
 	if err != nil {
+		r.setLastError(err.Error())
+		r.writeHeartbeat()
 		return true, err
 	}
 	if held != "" {
+		r.writeHeartbeat()
 		r.logf("queue: hold file %s exists; starting nothing", held)
 		return true, nil
 	}
@@ -488,17 +505,26 @@ func (r *queueRunner) gate(ctx context.Context, run []queuedIssue, effort string
 	if len(r.cfg.Gate) == 0 {
 		return nil
 	}
+	stop := r.pulseHeartbeat(ctx)
+	defer stop()
 	return r.env.run(ctx, "", gateArgv(r.cfg, run, effort))
 }
 
 func (r *queueRunner) start(ctx context.Context, run []queuedIssue, rooms map[string]string) {
+	agent := "default"
+	if a, _, err := r.cfg.resolveAgent(run[0].Issue.LabelNames(), rooms); err == nil && a.Label != "" {
+		agent = a.Label
+	}
+	key := run[0].key()
 	r.mu.Lock()
 	r.running++
 	r.repoRunning[run[0].Repo]++
 	for _, iss := range run {
 		r.inflight[iss.key()] = true
 	}
+	r.active[key] = heartbeatRun{Issue: key, Agent: agent, Since: r.env.now().UTC()}
 	r.mu.Unlock()
+	r.writeHeartbeat()
 	r.recordStarted(run)
 	r.wg.Add(1)
 	go func() {
@@ -511,7 +537,9 @@ func (r *queueRunner) start(ctx context.Context, run []queuedIssue, rooms map[st
 			for _, iss := range run {
 				delete(r.inflight, iss.key())
 			}
+			delete(r.active, key)
 			r.mu.Unlock()
+			r.writeHeartbeat()
 		}()
 		r.runOne(ctx, run, rooms)
 	}()
@@ -526,12 +554,14 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	// not an issue to start, and a workspace would only sit there.
 	effort, err := r.cfg.effortFor(iss.Issue.LabelNames())
 	if err != nil {
+		r.setLastError(err.Error())
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
 		r.deferAll(run, r.deferRetry)
 		return
 	}
 	ws, err := r.env.spawn(iss.Repo, iss.Issue.Number)
 	if err != nil {
+		r.setLastError(err.Error())
 		r.logf("queue: spawn %s#%d: %v", iss.Repo, iss.Issue.Number, err)
 		r.deferAll(run, r.deferRetry)
 		return
@@ -545,6 +575,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	}
 	argv, who, from, err := r.argvFor(run, ws, effort, rooms)
 	if err != nil {
+		r.setLastError(err.Error())
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
 		r.deferAll(run, r.deferRetry)
 		return
@@ -570,6 +601,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 		r.deferAll(run, r.markDone)
 		return
 	}
+	r.setLastError(err.Error())
 	r.logf("queue: %s#%d did not start: %v", iss.Repo, iss.Issue.Number, err)
 	if ctx.Err() != nil {
 		return

@@ -467,6 +467,7 @@ never passed through a shell.
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` is set; unused without it. |
+| `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
 | `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
 
@@ -582,6 +583,67 @@ start, and the issues are not listed.
 `TestQueueRetriesASpawnThatFailed`,
 `TestQueueRetriesWhenTheAgentCannotStart` and
 `TestQueueUsesAWorkspaceThatAlreadyExists` hold this.
+
+### Heartbeat and `facet queue status`
+
+When `heartbeat` is set in the config, the queue writes one JSON object
+atomically (temp file, flushed to disk, renamed) on every tick, while a gate
+is running, and whenever a run starts or ends:
+
+```json
+{
+  "at": "2026-11-23T22:00:00Z",
+  "pid": 12345,
+  "version": "v0.8.0",
+  "running": [
+    {
+      "issue": "acme/widgets#42",
+      "agent": "default",
+      "since": "2026-11-23T21:58:00Z"
+    }
+  ],
+  "held": [],
+  "last_error": ""
+}
+```
+
+`facet queue status [--config FILE] [--json]` reads the heartbeat file and
+checks the configured hold files. It runs no gate and makes zero GitHub or
+network calls, so a watcher can run it every minute.
+
+| exit code | state | meaning |
+| --- | --- | --- |
+| `0` | `ok` | heartbeat is younger than `3 * wait` (and no hold file exists) |
+| `1` | `stale` / `missing` / `error` | heartbeat is older than `3 * wait`, missing, or unreadable (queue is down or stuck) |
+| `2` | `held` | a configured hold file exists (even when the heartbeat is fresh) |
+
+Without `--json`, it prints one line per fact (`state`, `at`, `age`, `pid`,
+`version`, `running`, `held`, `last_error`). With `--json`, it prints the
+heartbeat object with `age_seconds` and `state` added.
+
+For example, a `launchd` user agent can run a watcher script every 60 seconds:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.facet-queue-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>/usr/local/bin/facet queue status --config /path/to/queue.json || [ $? -eq 2 ] || /path/to/notify "facet queue is down"</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+```
 
 ### The queue fixes its own red pull requests first
 
