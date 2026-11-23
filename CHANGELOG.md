@@ -6,6 +6,22 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.14.0](https://github.com/bottega-cereghino/facet/compare/v0.13.0...v0.14.0) (2026-11-23)
+
+
+### Added
+
+* **queue:** fix its own red or conflicting pull requests before new work ([#452](https://github.com/bottega-cereghino/facet/issues/452)) ([e1be009](https://github.com/bottega-cereghino/facet/commit/e1be0099e727cb06a3eabbf5e2e44e333f1da775))
+* **reap:** add --closed to limit --reapable to merged or closed pull requests ([#435](https://github.com/bottega-cereghino/facet/issues/435)) ([01e28a1](https://github.com/bottega-cereghino/facet/commit/01e28a1c9db1ea8d2477e5023a53bd5d6b6bb71a)), refs [#429](https://github.com/bottega-cereghino/facet/issues/429)
+
+
+### Fixed
+
+* **issues:** say reapable offline and stale fetch where the check did not run in full ([#449](https://github.com/bottega-cereghino/facet/issues/449)) ([57ea8a1](https://github.com/bottega-cereghino/facet/commit/57ea8a16fddb21b5a6773d1fd7d54cc80b4de5cd))
+* mirror temp dir and prune symlink checks ([#447](https://github.com/bottega-cereghino/facet/issues/447)) ([b9f9125](https://github.com/bottega-cereghino/facet/commit/b9f9125532884935ab3ae6c438462bdeab5cdb60))
+* **prune:** delete only what the confirmed listing named ([#445](https://github.com/bottega-cereghino/facet/issues/445)) ([0347198](https://github.com/bottega-cereghino/facet/commit/0347198545e08f855cb51c2424ac6abed1d7d1be))
+* **sync:** prune keeps a declared link whose name differs only in case ([#448](https://github.com/bottega-cereghino/facet/issues/448)) ([cf76347](https://github.com/bottega-cereghino/facet/commit/cf76347c4480afae4913318a39d1bc6d4982aa73))
+
 ## [0.13.0](https://github.com/bottega-cereghino/facet/compare/v0.12.0...v0.13.0) (2026-11-23)
 
 
