@@ -427,6 +427,27 @@ Nothing in the binary names an agent. An issue's labels pick the entry; the
 first match wins; the entry whose label is empty runs when none of the others
 match. Labels match without regard to case.
 
+A label `lane:NAME` is a preference for the agent that carries it. When `lanes`
+is set, the queue runs `lanes.command` once before each start (no shell, three
+seconds). The command prints JSON, `{"lanes":[{"lane":"name","room":"yes"}]}`,
+with `room` of `yes`, `no` or `unknown`. `key` is read as well as `lane`. When
+the matched agent's lane has room `no`, that same tick starts the empty-label
+agent instead. The queue does not choose among plans itself: the empty-label
+command does. The start is logged with `fallback_from`, and `{fallback_from}`
+in the command is the lane name (empty when the labelled agent runs). When
+`lanes.log` is set, the queue appends one JSON line there:
+
+```json
+{"at":"2026-11-23T18:00:00Z","repo":"acme/widgets","issue":7,"fallback_from":"grok","agent":"default"}
+```
+
+A relative `lanes.log` is beside the config file. A dry run prints the
+fallback and writes no line. Any room other than `no`, a lane the answer does
+not name, or a command that fails or prints nothing usable, keeps the labelled
+agent: a missing answer is not "no room". A `model:` label is not a preference.
+It keeps its agent, so an issue that needs that agent waits on it. With `lanes`
+omitted, a `lane:` label is an ordinary agent label.
+
 The command is an argument list, not a shell command. One argument contains
 `{prompt}`, and that is where the task text goes. The issue title is
 substituted into the text, and a title is someone else's words, so it is
@@ -434,19 +455,21 @@ never passed through a shell.
 
 | field | |
 | --- | --- |
-| `max` | how many agents run at once. Omitted means 6. |
+| `max` | how many agents run at once across all repositories. Omitted means 6. |
+| `per_repo` | how many agents from one repository may run at once. Omitted means 2. |
 | `hold` | a file path, or a list of them. When one exists, the queue starts nothing and stops. An agent already running is left to finish. |
 | `gate` | a command run before each start. Its arguments are expanded with the issue about to start (`{repo}` `{number}` `{title}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`). `{workspace}` is empty, because the gate runs before a workspace is spawned, and `{prompt}` is not substituted. Exit 3 skips that run: its issues are tried again after `wait`, and the queue goes straight on to the next run, so a refusal about one repository (a red pull request there, a `blocked` label) does not hold the others. Exit 4 skips the run's whole repository the same way: every queued issue there waits `wait`, so the gate runs once per repository. Any other non-zero exit waits `wait`, starts nothing, and tries later: a refusal about the whole queue, such as a spend cap. Omitted means there is no gate. |
 | `wait` | how long to wait before looking again. Omitted means 30s. |
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
-| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`. `{labels}` is the issue's labels, comma-separated. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}`. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` is set; unused without it. |
 | `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
+| `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
 
 For example, a local newsyslog rule can use the PID file as its signal target:
 
@@ -515,7 +538,8 @@ for whatever still carries it.
 An issue whose branch (`feature/<number>-…`, as spawn names it) has an
 open pull request is not started, by this process or the next: its agent
 opened the pull request, and the label stays until the merge. When the
-open pull requests cannot be listed, the queue starts nothing and waits.
+open pull requests cannot be listed completely, including when the listing
+reaches its 1000-result limit, the queue starts nothing and waits.
 
 At most 1000 open issues per repository are considered. When a repository
 returns exactly that many, the queue says so: any beyond the cap are unseen.
@@ -543,6 +567,9 @@ start, and the issues are not listed.
 `TestQueueDryRunStopsOnTheHoldFileWithoutListing`,
 `TestQueueDryRunGivesAFreeSlotToTheNextProjectDown`,
 `TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
+`TestQueueStartsAFullLaneOnTheDefaultAgentWithinTheTick`,
+`TestQueueKeepsALaneLabelWhenTheLanesCommandFails`,
+`TestQueueDryRunNamesTheFallbackAndWritesNoLedger`,
 `TestQueueTakesTheOldestIssueFirst`,
 `TestQueueTakesP1BeforeAnOlderIssue`,
 `TestQueuePassesTheEffortForTheIssueLabel`,
@@ -609,18 +636,33 @@ clears its record, and one that is merged or closed drops the issue from the
 state.
 
 **Green but behind: update and land, no model run.** With `fix.land` (on
-unless set to `false`), a queue pull request that is green (at least one
-check, every latest one passed), not a draft, and behind its base is updated
-by merging the base into it (`gh pr update-branch`, a merge, never a
-rebase). A conflict on that update counts as red and goes through the fix
+unless set to `false`), every queue merge goes through the update-and-wait
+path, whatever the repository's branch protection requires. A queue pull
+request that is green (at least one check, every latest one passed) and not
+a draft is merged only when its head contains the base's current tip and its
+checks ran on that head. If the base moved, the queue merges the base into
+it (`gh pr update-branch`, a merge, never a rebase) and waits for green
+again. A conflict on that update counts as red and goes through the fix
 path above. One that is green and up to date is merged with the
 repository's own method, read from its settings (squash, merge or rebase,
 in that order of preference; squash where it is the only one allowed), and
 only at the head commit that was judged. Required checks and branch rules
 are GitHub's to enforce: a merge GitHub refuses is logged and tried again
-on the next listing, never forced (no `--admin`). Neither step runs an
-agent or the gate, neither takes a slot, and each pull request gets at most
-one of them per listing.
+on the next listing, never forced (no `--admin`). At most one pull request
+per repository is merged per round. Neither step runs an agent or the gate,
+neither takes a slot, and each pull request gets at most one of them per
+listing.
+
+**Serialize pull requests that touch a shared file.** Optional top-level
+`serialize` takes `paths`, a list of globs (for example `**/*baseline*`,
+`**/config.json`, `**/*.lock`, `package-lock.json`, `go.sum`). Omitted means
+no serialization. When set, the queue reads each open queue pull request's
+changed files (one call per pull request, cached with the pull request
+listing). While an open queue pull request in a repository touches a
+matching file, no other queue pull request touching a matching file in that
+repository is landed: the oldest lands first, and the others wait and are
+logged once (`waits for #<pr>, shared file <path>`). `--dry-run` lists the
+waits.
 
 | `fix` field | |
 | --- | --- |
@@ -657,7 +699,13 @@ writes no state. It runs the gate as for a start.
 `TestQueueRetriesARefusedMergeOnTheNextListing`,
 `TestQueueLandsNothingWithLandOff`, `TestQueueFixPromptNamesTheBase`,
 `TestQueueDryRunListsFixRunsFirstAndWritesNothing`,
-`TestQueueDryRunSaysWhatItWouldLand`, `TestQueueDryRunSaysItWouldClearARecord`
+`TestQueueDryRunSaysWhatItWouldLand`, `TestQueueDryRunSaysItWouldClearARecord`,
+`TestQueueSerializesTwoGreenPRsTouchingASharedFile`,
+`TestQueueLandsTwoPRsWithDisjointFiles`,
+`TestQueueBlocksMergeWhenBaseMovedAfterChecks`,
+`TestQueueOmittedSerializeChangesNothing`,
+`TestQueueDryRunListsSerializeWaitsAndAtMostOneMergePerRepo`,
+`TestQueueCachesPRFilesAndLogsWaitOncePerListing`
 and `TestQueueWithoutFixChangesNothing` hold this.
 
 ## The credential preflight
@@ -782,9 +830,16 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`sync` writes only inside the workspace.** A clone or link key must be one
   directory name and a link target a folder under the projects root; a manifest
   naming `../x`, `a/b` or `/abs` is refused when it is read, before anything is
-  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`). The one
-  write outside it is git's own, in a checkout a clone becomes a worktree of:
-  a fetch of `origin`, and the worktree's entry in that checkout's `.git`.
+  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`).
+  `--bootstrap` (and `restore`, and `facet add link` when it records an origin)
+  is the other write: it clones a missing link target under the projects root.
+  The destination's parent is resolved first, and a parent outside that root
+  is refused, so a symlink committed inside a checkout cannot send the clone
+  elsewhere
+  (`TestSyncBootstrapRefusesACloneThroughASymlinkOutOfTheProjectsRoot`).
+  The remaining write outside the workspace is git's own, in a checkout a clone
+  becomes a worktree of: a fetch of `origin`, and the worktree's entry in that
+  checkout's `.git`.
 - **A manifest URL is never read as a git option.** Every git call that takes a
   URL, path or remote name from the manifest puts `--` before it, so a URL such
   as `--upload-pack=<command>` is looked up as a repository and fails
@@ -892,7 +947,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   the workspace by name with `--force`
   (`TestReapHoldsContentInAGitDirObjectStore`). The landing proof names the
   default branch by its full ref, so a local branch called `origin/main` is not
-  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`).
+  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`). A ref that is
+  itself symbolic is not taken for it either, so a chain from
+  `refs/remotes/origin/HEAD` through another symref to a local branch cannot
+  pass by comparing that branch with itself
+  (`TestReapHoldsABranchASymbolicDefaultRefNames`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
   gh's "no pull requests found" counts as none; a repository gh cannot resolve
   (renamed, transferred, unreadable) holds the workspace
@@ -1125,11 +1184,24 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `TestPruneHoldsWhenTheProcessProbeFails`).
 - **`reap` refuses while a loaded launchd job runs from the workspace**, running
   or not: a scheduled job between runs holds nothing open, so `lsof` misses it,
-  and its next run would fail. A job counts when its `Program`, an absolute path
-  in its `ProgramArguments`, or its `WorkingDirectory` is inside the workspace;
-  only jobs `launchctl list` shows count, since a plist that is not loaded starts
+  and its next run would fail. A job counts when any plist string value names
+  a path inside the workspace. This includes `Program`, paths in
+  `ProgramArguments` (including values after `=`), `WorkingDirectory`, standard
+  output/error paths, and watched or queued directories.
+  The last element of that path is kept as named, so a program that is a
+  symlink to an interpreter outside (a venv's python) and a workspace link to
+  a project both still count
+  (`TestGrillUnderHoldsAJobRunThroughASymlinkInsideTheDirectory`,
+  `TestGrillReapHoldsAJobRunningThroughAWorkspaceLink`,
+  `TestGrillPruneHoldsAVenvALoadedJobRuns`). On a volume that folds case the
+  spellings compare equal, so `facet reap SVC` still sees the job whose plist
+  names `svc`
+  (`TestGrillUnderMatchesACaseVariantOfTheDirectory`,
+  `TestGrillReapByACaseVariantNameKeepsTheLaunchdHold`).
+  Only jobs `launchctl list` shows count, since a plist that is not loaded starts
   nothing. A loaded job's plist is read wherever it is: from the LaunchAgents
-  folders, or from the file `launchctl print` says it was loaded from
+  folders, or from the file `launchctl print` says it was loaded from (which
+  takes precedence over a stale LaunchAgents copy)
   (`TestUnderFindsAJobLoadedFromAPlistElsewhere`). Unload the job, or move it out, then reap
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
   that fails holds every workspace, since no job can be ruled out; only a

@@ -47,7 +47,7 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Max != 6 || cfg.Label != "next" || cfg.Wait != 30*time.Second {
+	if cfg.Max != 6 || cfg.PerRepo != 2 || cfg.Label != "next" || cfg.Wait != 30*time.Second {
 		t.Fatalf("defaults from the example: %+v", cfg)
 	}
 	if len(cfg.Hold) == 0 || len(cfg.Gate) == 0 || len(cfg.Repos) != 2 || len(cfg.Agents) != 3 || cfg.Priorities == "" {
@@ -59,6 +59,9 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "widgets,other" {
 		t.Fatalf("example priorities = %q", names)
+	}
+	if cfg.Lanes == nil || cfg.Lanes.Command[0] != "lanes" || filepath.Base(cfg.Lanes.Log) != "runs.jsonl" {
+		t.Fatalf("example lanes = %+v", cfg.Lanes)
 	}
 	if cfg.Agents[0].Label != "codex" || cfg.Agents[1].Label != "gemini" || cfg.Agents[2].Label != "" {
 		t.Fatalf("agents = %+v", cfg.Agents)
@@ -152,7 +155,7 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok.Max != defaultQueueMax || ok.Wait != defaultQueueWait || ok.Label != defaultQueueLabel {
+	if ok.Max != defaultQueueMax || ok.PerRepo != defaultQueuePerRepo || ok.Wait != defaultQueueWait || ok.Label != defaultQueueLabel {
 		t.Fatalf("defaults: %+v", ok)
 	}
 	if !strings.Contains(ok.Prompt, "Merge when the checks are green") {
@@ -166,6 +169,10 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	}
 	if ok.Agents[0].Bundle != 1 {
 		t.Fatalf("default bundle = %d, want 1", ok.Agents[0].Bundle)
+	}
+	limited, err := loadTempConfig(t, `{"per_repo": 3, "repos": ["acme/widgets"], "agents": [{"command": ["agent", "{prompt}"]}]}`)
+	if err != nil || limited.PerRepo != 3 {
+		t.Fatalf("per_repo = %d, %v; want 3", limited.PerRepo, err)
 	}
 	bundled, err := loadTempConfig(t, `{
 		"prompt": "Do {issues}",
@@ -183,6 +190,7 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	}{
 		{"unknown field", `{"maxAgents": 1, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "maxAgents"},
 		{"max zero", `{"max": 0, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "at least 1"},
+		{"per_repo zero", `{"per_repo": 0, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "per_repo must be at least 1"},
 		{"order is not a field", `{"order": "oldest", "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "unknown field"},
 		{"bad repo", `{"repos": ["widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "owner/name"},
 		{"duplicate repo", `{"repos": ["acme/widgets", "acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "twice"},
@@ -264,10 +272,10 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 2, "2026-01-02T00:00:00Z", "Hinge", "next", "fix"),
 		qIssue("acme/widgets", 3, "2026-01-03T00:00:00Z", "Bolt", "next", "chore"),
 	}
-	run := bundleFor(cfg, orderQueued(small, nil), open)
+	run := bundleFor(cfg, orderQueued(small, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1", "acme/widgets#2", "acme/widgets#3")
 
-	run = bundleFor(bundleConfig(2), orderQueued(small, nil), open)
+	run = bundleFor(bundleConfig(2), orderQueued(small, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1", "acme/widgets#2")
 
 	// A feature stops the run even when its effort matches the small issues.
@@ -277,7 +285,7 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 4, "2026-01-02T00:00:00Z", "Panel", "next", "Feat"),
 		qIssue("acme/widgets", 3, "2026-01-03T00:00:00Z", "Bolt", "next", "fix"),
 	}
-	run = bundleFor(cfg, orderQueued(stopped, nil), open)
+	run = bundleFor(cfg, orderQueued(stopped, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	alone := []queuedIssue{
@@ -285,7 +293,7 @@ func TestBundleFor(t *testing.T) {
 		small[0],
 		small[1],
 	}
-	run = bundleFor(cfg, orderQueued(alone, nil), open)
+	run = bundleFor(cfg, orderQueued(alone, nil), open, nil)
 	wantRun(t, run, "acme/widgets#5")
 
 	// feature is not feat. Same effort, so the two share a run.
@@ -293,28 +301,28 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 6, "2026-01-01T00:00:00Z", "Named", "next", "fix", "feature"),
 		small[1],
 	}
-	run = bundleFor(cfg, orderQueued(word, nil), open)
+	run = bundleFor(cfg, orderQueued(word, nil), open, nil)
 	wantRun(t, run, "acme/widgets#6", "acme/widgets#2")
 
 	repos := []queuedIssue{
 		small[0],
 		qIssue("acme/other", 7, "2026-01-02T00:00:00Z", "Other", "next", "fix"),
 	}
-	run = bundleFor(cfg, orderQueued(repos, nil), open)
+	run = bundleFor(cfg, orderQueued(repos, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	agents := []queuedIssue{
 		small[0],
 		qIssue("acme/widgets", 8, "2026-01-02T00:00:00Z", "Codex", "next", "fix", "codex"),
 	}
-	run = bundleFor(cfg, orderQueued(agents, nil), open)
+	run = bundleFor(cfg, orderQueued(agents, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	effort := []queuedIssue{
 		small[0],
 		qIssue("acme/widgets", 9, "2026-01-02T00:00:00Z", "Design", "next", "design"),
 	}
-	run = bundleFor(cfg, orderQueued(effort, nil), open)
+	run = bundleFor(cfg, orderQueued(effort, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	// An issue whose labels disagree is not bundled past, and it is not taken.
@@ -323,16 +331,16 @@ func TestBundleFor(t *testing.T) {
 		qIssue("acme/widgets", 10, "2026-01-02T00:00:00Z", "Both", "next", "fix", "design"),
 		small[2],
 	}
-	run = bundleFor(cfg, orderQueued(bad, nil), open)
+	run = bundleFor(cfg, orderQueued(bad, nil), open, nil)
 	wantRun(t, run, "acme/widgets#1")
 
 	// An issue already in flight is skipped. The next one that fits still joins.
 	run = bundleFor(cfg, orderQueued(small, nil), func(iss queuedIssue) bool {
 		return iss.Issue.Number == 2
-	})
+	}, nil)
 	wantRun(t, run, "acme/widgets#1", "acme/widgets#3")
 
-	run = bundleFor(cfg, orderQueued(small, nil), func(queuedIssue) bool { return true })
+	run = bundleFor(cfg, orderQueued(small, nil), func(queuedIssue) bool { return true }, nil)
 	wantRun(t, run)
 
 	projects := []string{"widgets", "other"}
@@ -342,7 +350,7 @@ func TestBundleFor(t *testing.T) {
 	}, projects)
 	run = bundleFor(cfg, ranked, func(iss queuedIssue) bool {
 		return iss.Repo == "acme/widgets"
-	})
+	}, nil)
 	wantRun(t, run, "acme/other#2")
 }
 
@@ -1032,6 +1040,37 @@ func TestQueueRunsAtMostMaxAgents(t *testing.T) {
 	s.stop(t)
 }
 
+func TestQueueCapsConcurrentAgentsPerRepository(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	script := writeExe(t, "block-repo", "#!/bin/sh\nprintf '%s#%s\\n' \"$2\" \"$3\" >> \"$1\"\ndir=$(dirname \"$1\")\nwhile [ ! -f \"$dir/release\" ]; do sleep 0.02; done\n")
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 3
+	cfg.PerRepo = 1
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Agents = []queueAgent{{Command: []string{script, out, "{repo}", "{number}", "{prompt}"}}}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			switch repo {
+			case "acme/widgets":
+				return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z"), openIssue(2, "2026-01-02T00:00:00Z")}, nil
+			case "acme/other":
+				return []ghx.Issue{openIssue(3, "2026-01-03T00:00:00Z")}, nil
+			default:
+				return nil, fmt.Errorf("unexpected repo %s", repo)
+			}
+		},
+	})
+	waitFor(t, "one agent per repository", func() bool { return len(readLines(t, out)) >= 2 })
+	time.Sleep(200 * time.Millisecond)
+	s.stop(t)
+	got := readLines(t, out)
+	sort.Strings(got)
+	if strings.Join(got, ",") != "acme/other#3,acme/widgets#1" {
+		t.Fatalf("started %v, want one issue from each repository", got)
+	}
+}
+
 func TestQueueWaitsWhenTheGateFails(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out")
@@ -1478,12 +1517,13 @@ func oneAgentConfig(repos []string) queueConfig {
 		repos = []string{"acme/widgets"}
 	}
 	return queueConfig{
-		Max:    1,
-		Wait:   20 * time.Millisecond,
-		Label:  "next",
-		Repos:  repos,
-		Prompt: defaultQueuePrompt,
-		Agents: []queueAgent{{Command: []string{"agent", "{prompt}"}}},
+		Max:     1,
+		PerRepo: defaultQueuePerRepo,
+		Wait:    20 * time.Millisecond,
+		Label:   "next",
+		Repos:   repos,
+		Prompt:  defaultQueuePrompt,
+		Agents:  []queueAgent{{Command: []string{"agent", "{prompt}"}}},
 	}
 }
 
@@ -1707,6 +1747,15 @@ func TestQueueDoesNotStartAnIssueWithAnOpenPullRequest(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot tell whether a pull request is open") || strings.Contains(buf.String(), "would start") {
 		t.Fatalf("listing failed: err %v, dry-run =\n%s", err, buf.String())
+	}
+	buf.Reset()
+	err = dryQueue(context.Background(), cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) { return issues, nil },
+		prs:  func(string) ([]ghx.OpenPR, error) { return nil, errors.New("results may be incomplete") },
+		out:  &buf,
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot tell whether a pull request is open") || strings.Contains(buf.String(), "would start") {
+		t.Fatalf("incomplete listing: err %v, dry-run =\n%s", err, buf.String())
 	}
 }
 

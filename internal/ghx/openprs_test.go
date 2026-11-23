@@ -40,6 +40,16 @@ func TestOpenPRsFailsWhenGhFails(t *testing.T) {
 	}
 }
 
+func TestOpenPRsFailsWhenResultMayBeTruncated(t *testing.T) {
+	stdout := "[" + strings.TrimSuffix(strings.Repeat(`{"headRefName":"feature/7-bell"},`, OpenPRLimit), ",") + "]"
+	fakeGh(t, stdout, "", 0)
+	if _, err := (CLI{}).OpenPRs("acme/widgets"); err == nil ||
+		!strings.Contains(err.Error(), "reached limit 1000") ||
+		!strings.Contains(err.Error(), "results may be incomplete") {
+		t.Fatalf("OpenPRs error = %v; want an incomplete-list error", err)
+	}
+}
+
 func TestAddIssueLabelAsksGhToAddIt(t *testing.T) {
 	args := fakeGh(t, "", "", 0)
 	if err := (CLI{}).AddIssueLabel("acme/widgets", 7, "blocked"); err != nil {
@@ -112,5 +122,58 @@ func TestMergePRNeverForces(t *testing.T) {
 	}
 	if err := (CLI{}).MergePR("acme/widgets", 4, "--admin", "abc"); err == nil {
 		t.Fatal("an unknown method was passed to gh")
+	}
+}
+
+func TestPRFilesListsChangedFilesAcrossPages(t *testing.T) {
+	args := fakeGh(t,
+		`[{"filename":"a.go"},{"filename":"new.json","previous_filename":"old.json"}][{"filename":"go.sum"}]`,
+		"", 0)
+	got, err := (CLI{}).PRFiles("acme/widgets", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFiles := "a.go|new.json|old.json|go.sum"
+	if strings.Join(got, "|") != wantFiles {
+		t.Fatalf("PRFiles = %q, want %q", got, wantFiles)
+	}
+	wantArgs := []string{"api", "--paginate", "repos/acme/widgets/pulls/4/files?per_page=100"}
+	if strings.Join(args(), "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Errorf("gh args = %q\nwant %q", args(), wantArgs)
+	}
+	fakeGh(t, "", "HTTP 502", 1)
+	if _, err := (CLI{}).PRFiles("acme/widgets", 4); err == nil {
+		t.Fatal("a failed PRFiles returned no error")
+	}
+}
+
+func TestHeadBehindBaseReadsCompareStatus(t *testing.T) {
+	for _, tc := range []struct {
+		out  string
+		want bool
+	}{
+		{`{"status":"ahead","behind_by":0}`, false},
+		{`{"status":"identical","behind_by":0}`, false},
+		{`{"status":"behind","behind_by":2}`, true},
+		{`{"status":"diverged","behind_by":1}`, true},
+		{`{"status":"ahead","behind_by":1}`, true},
+	} {
+		args := fakeGh(t, tc.out, "", 0)
+		got, err := (CLI{}).HeadBehindBase("acme/widgets", "release/1", "abc123")
+		if err != nil || got != tc.want {
+			t.Errorf("%s: HeadBehindBase = %v, %v; want %v", tc.out, got, err, tc.want)
+		}
+		wantArgs := []string{"api", "repos/acme/widgets/compare/release%2F1...abc123"}
+		if strings.Join(args(), "\x00") != strings.Join(wantArgs, "\x00") {
+			t.Errorf("gh args = %q\nwant %q", args(), wantArgs)
+		}
+	}
+	fakeGh(t, `{}`, "", 0)
+	if _, err := (CLI{}).HeadBehindBase("acme/widgets", "main", "abc123"); err == nil {
+		t.Fatal("empty status returned no error")
+	}
+	fakeGh(t, "", "HTTP 502", 1)
+	if _, err := (CLI{}).HeadBehindBase("acme/widgets", "main", "abc123"); err == nil {
+		t.Fatal("failed compare returned no error")
 	}
 }

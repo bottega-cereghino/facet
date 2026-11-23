@@ -130,6 +130,7 @@ func TestQueueDecisionsStartAndFixStart(t *testing.T) {
 	// 1. Normal start with a labelled agent.
 	cfg := queueConfig{
 		Max:       1,
+		PerRepo:   defaultQueuePerRepo,
 		Wait:      10 * time.Millisecond,
 		Label:     "next",
 		Repos:     []string{"acme/widgets"},
@@ -180,6 +181,7 @@ func TestQueueDecisionsStartAndFixStart(t *testing.T) {
 	}
 	fixCfg := queueConfig{
 		Max:       1,
+		PerRepo:   defaultQueuePerRepo,
 		Wait:      10 * time.Millisecond,
 		Label:     "next",
 		Repos:     []string{"acme/widgets"},
@@ -249,6 +251,7 @@ func TestQueueDecisionsSkipOpenPRAndDoneAndEffortConflict(t *testing.T) {
 
 	cfg := queueConfig{
 		Max:       1,
+		PerRepo:   defaultQueuePerRepo,
 		Wait:      10 * time.Millisecond,
 		Label:     "next",
 		Repos:     []string{"acme/widgets"},
@@ -386,5 +389,57 @@ func TestQueueDecisionDefaultPathAndConfigRelative(t *testing.T) {
 	}
 	if filepath.Base(cfg.Decisions) != "decisions.jsonl" || !filepath.IsAbs(cfg.Decisions) {
 		t.Fatalf("relative decisions = %q", cfg.Decisions)
+	}
+}
+
+func TestQueueDecisionsSkipPerRepoCap(t *testing.T) {
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "queue-gate.jsonl")
+
+	cfg := queueConfig{
+		Max:       2,
+		PerRepo:   1,
+		Wait:      10 * time.Millisecond,
+		Label:     "next",
+		Repos:     []string{"acme/widgets"},
+		Prompt:    "Do {issues}",
+		Decisions: logFile,
+		Agents:    []queueAgent{{Label: "", Bundle: 1, Command: []string{"agent", "{prompt}"}}},
+	}
+	release := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	var started atomic.Int32
+	var ticks atomic.Int32
+	err := runQueue(ctx, cfg, queueEnv{
+		out: &bytes.Buffer{},
+		list: func(string, string) ([]ghx.Issue, error) {
+			if started.Load() > 0 && ticks.Add(1) >= 2 {
+				close(release)
+				cancel()
+			}
+			return []ghx.Issue{
+				{Number: 1, Title: "first", State: "OPEN", CreatedAt: "2026-01-01T00:00:00Z", Labels: []ghx.Label{{Name: "next"}}},
+				{Number: 2, Title: "second", State: "OPEN", CreatedAt: "2026-01-02T00:00:00Z", Labels: []ghx.Label{{Name: "next"}}},
+			}, nil
+		},
+		spawn: func(string, int) (string, error) { return dir, nil },
+		run: func(context.Context, string, []string) error {
+			started.Add(1)
+			<-release
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := readDecisionLines(t, logFile)
+	var sawCapSkip bool
+	for _, row := range rows {
+		if row.Issue == "2" && row.Decision == "skip" && strings.Contains(row.Why, "per-repo cap") {
+			sawCapSkip = true
+		}
+	}
+	if !sawCapSkip {
+		t.Fatalf("expected per-repo cap skip for issue 2 in %+v", rows)
 	}
 }

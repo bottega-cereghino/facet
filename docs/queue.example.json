@@ -1,5 +1,6 @@
 {
   "max": 6,
+  "per_repo": 2,
   "hold": "facet-queue.hold",
   "gate": ["gate", "{repo}", "{number}", "{labels}"],
   "wait": "30s",
@@ -27,6 +28,13 @@
     "blockLabel": "blocked",
     "notify": ["notify", "{repo}#{number} PR #{pr}: {reason}"],
     "land": true
+  },
+  "lanes": {
+    "command": ["lanes", "--json"],
+    "log": "runs.jsonl"
+  },
+  "serialize": {
+    "paths": ["**/*baseline*", "**/config.json", "**/*.lock", "package-lock.json", "go.sum"]
   },
   "agents": [
     {

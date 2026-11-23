@@ -7,11 +7,13 @@ import (
 )
 
 // prListing is one repository's open pull requests, and when they were
-// listed.
+// listed. files caches each pull request's changed-file list for the life
+// of the listing.
 type prListing struct {
-	prs []ghx.OpenPR
-	err error
-	at  time.Time
+	prs   []ghx.OpenPR
+	files map[int][]string
+	err   error
+	at    time.Time
 }
 
 // prListTTL is how long the fix stage reuses a repository's listing. Every
@@ -37,7 +39,11 @@ func (r *queueRunner) roundListing(repo string) prListing {
 		return got
 	}
 	prs, err := r.env.prs(repo)
-	got = prListing{prs: prs, err: err, at: r.env.now()}
+	var files map[int][]string
+	if err == nil {
+		files = map[int][]string{}
+	}
+	got = prListing{prs: prs, files: files, err: err, at: r.env.now()}
 	r.mu.Lock()
 	r.round[repo] = got
 	if err == nil {
@@ -81,4 +87,27 @@ func (r *queueRunner) forgetListing(repo string) {
 	r.mu.Lock()
 	delete(r.prCache, repo)
 	r.mu.Unlock()
+}
+
+// prFiles returns pull request number's changed files, cached with got so
+// each pull request is read at most once per listing.
+func (r *queueRunner) prFiles(repo string, number int, got prListing) ([]string, error) {
+	if got.files != nil {
+		r.mu.Lock()
+		cached, ok := got.files[number]
+		r.mu.Unlock()
+		if ok {
+			return cached, nil
+		}
+	}
+	files, err := r.env.prFiles(repo, number)
+	if err != nil {
+		return nil, err
+	}
+	if got.files != nil {
+		r.mu.Lock()
+		got.files[number] = files
+		r.mu.Unlock()
+	}
+	return files, nil
 }

@@ -25,16 +25,22 @@ type queueEnv struct {
 	// addLabel adds a label to an issue. The fix stage uses it to block an
 	// issue that used up its tries.
 	addLabel func(repo string, number int, label string) error
-	// updateBranch, mergeMethod and mergePR land a green queue pull
-	// request (fix.land). Nil skips that step.
+	// updateBranch, mergeMethod, mergePR, behindBase and prFiles land a
+	// green queue pull request (fix.land) and serialize on shared files.
+	// Nil skips that step.
 	updateBranch func(repo string, number int) error
 	mergeMethod  func(repo string) (string, error)
 	mergePR      func(repo string, number int, method, head string) error
+	behindBase   func(repo, base, head string) (bool, error)
+	prFiles      func(repo string, number int) ([]string, error)
 	spawn        func(repo string, number int) (string, error)
 	// route runs spawn's routing checks for a repository, without the
 	// network. Only --dry-run calls it; nil skips it.
 	route func(repo string) error
 	run   func(ctx context.Context, dir string, argv []string) error
+	// lanes runs the lanes command and returns its standard output. Nil
+	// uses runLanes. A test sets it so the suite does not start a program.
+	lanes func(ctx context.Context, argv []string) ([]byte, error)
 	now   func() time.Time
 	out   io.Writer
 }
@@ -49,6 +55,8 @@ func realQueueEnv() queueEnv {
 		updateBranch: ghx.CLI{}.UpdatePRBranch,
 		mergeMethod:  ghx.CLI{}.MergeMethod,
 		mergePR:      ghx.CLI{}.MergePR,
+		behindBase:   ghx.CLI{}.HeadBehindBase,
+		prFiles:      ghx.CLI{}.PRFiles,
 		spawn:        prepareWorkspace,
 		route: func(repo string) error {
 			_, _, err := spawnRoute(repo)
@@ -134,16 +142,17 @@ func gateExit(err error) int {
 const queueStopGrace = 10 * time.Second
 
 type queueRunner struct {
-	cfg      queueConfig
-	env      queueEnv
-	mu       sync.Mutex
-	inflight map[string]bool
-	running  int
-	done     map[string]bool
-	retryAt  map[string]time.Time
-	repoWait map[string]time.Time
-	wake     chan struct{}
-	wg       sync.WaitGroup
+	cfg         queueConfig
+	env         queueEnv
+	mu          sync.Mutex
+	inflight    map[string]bool
+	running     int
+	repoRunning map[string]int
+	done        map[string]bool
+	retryAt     map[string]time.Time
+	repoWait    map[string]time.Time
+	wake        chan struct{}
+	wg          sync.WaitGroup
 	// round caches each repository's open pull requests for one tick, so
 	// a round makes one listing call per repository.
 	round map[string]prListing
@@ -158,6 +167,7 @@ type queueRunner struct {
 	labelRetry   map[string]time.Time
 	prCache      map[string]prListing
 	landed       map[string]time.Time
+	waited       map[string]string
 	mergeMethods map[string]string
 	// dry is set by --dry-run: no label is added and no state is written.
 	dry bool
@@ -165,6 +175,11 @@ type queueRunner struct {
 	// held/released is emitted once per change rather than once per poll.
 	lastHeld   string
 	decisionMu sync.Mutex
+	// rooms is this tick's lanes answer. Nil means a lane label keeps its
+	// agent. The map is not mutated after refreshRooms returns.
+	rooms map[string]string
+	// fallbackMu keeps two runs from appending the lanes log at once.
+	fallbackMu sync.Mutex
 }
 
 // newQueueRunner builds a runner and reads the state file when the config
@@ -175,6 +190,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		cfg:          cfg,
 		env:          env,
 		inflight:     map[string]bool{},
+		repoRunning:  map[string]int{},
 		done:         map[string]bool{},
 		retryAt:      map[string]time.Time{},
 		repoWait:     map[string]time.Time{},
@@ -185,6 +201,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		labelRetry:   map[string]time.Time{},
 		prCache:      map[string]prListing{},
 		landed:       map[string]time.Time{},
+		waited:       map[string]string{},
 		mergeMethods: map[string]string{},
 		dry:          dry,
 	}
@@ -207,9 +224,9 @@ func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		return err
 	}
 	if cfg.Priorities != "" {
-		r.logf("queue: up to %d agent(s), label %s, projects from %s", cfg.Max, cfg.Label, cfg.Priorities)
+		r.logf("queue: up to %d agent(s), at most %d per repository, label %s, projects from %s", cfg.Max, cfg.PerRepo, cfg.Label, cfg.Priorities)
 	} else {
-		r.logf("queue: up to %d agent(s), label %s, order p1 then p2 then p3 then oldest", cfg.Max, cfg.Label)
+		r.logf("queue: up to %d agent(s), at most %d per repository, label %s, order p1 then p2 then p3 then oldest", cfg.Max, cfg.PerRepo, cfg.Label)
 	}
 	err = r.loop(ctx)
 	r.wg.Wait()
@@ -243,6 +260,11 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	}
 	if len(jobs) > 0 {
 		return r.tryFix(ctx, jobs[0])
+	}
+	r.refreshRooms(ctx)
+	if ctx.Err() != nil {
+		r.logf("queue: stopping")
+		return true, nil
 	}
 	run, err := r.candidate()
 	if err != nil {
@@ -288,7 +310,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	if stop, err := r.finishIfStopped(ctx); stop || err != nil {
 		return true, err
 	}
-	r.start(ctx, run)
+	r.start(ctx, run, r.rooms)
 	return false, nil
 }
 
@@ -349,14 +371,15 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 		return nil, err
 	}
 	ranked := orderQueued(issues, projects)
-	r.recordDoneSkips(ranked)
+	r.recordBlockedSkips(ranked)
 	skip := map[string]bool{}
 	for {
 		r.mu.Lock()
 		now := r.env.now()
+		rooms := r.rooms
 		run := bundleFor(r.cfg, ranked, func(iss queuedIssue) bool {
 			return skip[iss.key()] || r.blocked(iss, now)
-		})
+		}, rooms)
 		r.mu.Unlock()
 		if len(run) == 0 {
 			return nil, nil
@@ -381,21 +404,35 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 	}
 }
 
-func (r *queueRunner) recordDoneSkips(ranked []queuedIssue) {
+func (r *queueRunner) recordBlockedSkips(ranked []queuedIssue) {
 	if r.dry || r.cfg.Decisions == "" {
 		return
 	}
+	type skipEntry struct {
+		iss queuedIssue
+		why string
+	}
 	r.mu.Lock()
-	var skipped []queuedIssue
+	var skipped []skipEntry
 	for _, iss := range ranked {
 		k := iss.key()
-		if r.done[k] && !r.inflight[k] {
-			skipped = append(skipped, iss)
+		if r.inflight[k] {
+			continue
+		}
+		if r.done[k] {
+			skipped = append(skipped, skipEntry{iss: iss, why: "already started in this process"})
+			continue
+		}
+		if r.cfg.PerRepo > 0 && r.repoRunning[iss.Repo] >= r.cfg.PerRepo {
+			skipped = append(skipped, skipEntry{
+				iss: iss,
+				why: fmt.Sprintf("per-repo cap (%d/%d running)", r.repoRunning[iss.Repo], r.cfg.PerRepo),
+			})
 		}
 	}
 	r.mu.Unlock()
-	for _, iss := range skipped {
-		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), r.laneFor(iss), "skip", "already started in this process")
+	for _, s := range skipped {
+		r.recordDecision(s.iss.Repo, strconv.Itoa(s.iss.Issue.Number), r.laneFor(s.iss), "skip", s.why)
 	}
 }
 
@@ -479,6 +516,9 @@ func (r *queueRunner) blocked(iss queuedIssue, now time.Time) bool {
 	if r.done[k] || r.inflight[k] {
 		return true
 	}
+	if r.repoRunning[iss.Repo] >= r.cfg.PerRepo {
+		return true
+	}
 	if until, ok := r.repoWait[iss.Repo]; ok && now.Before(until) {
 		return true
 	}
@@ -499,9 +539,10 @@ func (r *queueRunner) gate(ctx context.Context, run []queuedIssue, effort string
 	return r.env.run(ctx, "", gateArgv(r.cfg, run, effort))
 }
 
-func (r *queueRunner) start(ctx context.Context, run []queuedIssue) {
+func (r *queueRunner) start(ctx context.Context, run []queuedIssue, rooms map[string]string) {
 	r.mu.Lock()
 	r.running++
+	r.repoRunning[run[0].Repo]++
 	for _, iss := range run {
 		r.inflight[iss.key()] = true
 	}
@@ -514,16 +555,17 @@ func (r *queueRunner) start(ctx context.Context, run []queuedIssue) {
 		defer func() {
 			r.mu.Lock()
 			r.running--
+			r.repoRunning[run[0].Repo]--
 			for _, iss := range run {
 				delete(r.inflight, iss.key())
 			}
 			r.mu.Unlock()
 		}()
-		r.runOne(ctx, run)
+		r.runOne(ctx, run, rooms)
 	}()
 }
 
-func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue) {
+func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[string]string) {
 	if ctx.Err() != nil || len(run) == 0 {
 		return
 	}
@@ -552,11 +594,15 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue) {
 		}
 		return
 	}
-	argv, who, cmdSummary, err := r.argvFor(run, ws, effort)
+	argv, who, from, cmdSummary, err := r.argvFor(run, ws, effort, rooms)
 	if err != nil {
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
 		r.deferAll(run, r.deferRetry)
 		return
+	}
+	if from != "" {
+		r.logf("queue: %s#%d lane %s has no room; fallback_from %s", iss.Repo, iss.Issue.Number, from, from)
+		r.noteFallback(iss, from)
 	}
 	r.logf("queue: %s#%d agent %s effort %s bundle %d in %s", iss.Repo, iss.Issue.Number, who, effort, len(run), ws)
 	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, "start", cmdSummary)
