@@ -69,10 +69,10 @@ func fillBundle(cfg queueConfig, primary queuedIssue, rest []queuedIssue, blocke
 }
 
 // runLimit is how many issues may follow the primary, including it.
-// A feature or research issue is one. A missing agent is one, and the
-// start reports that.
+// A feature or research issue is one, and so is a standards or CI issue
+// while cap is set. A missing agent is one, and the start reports that.
 func runLimit(cfg queueConfig, primary queuedIssue, rooms map[string]string) int {
-	if issueStaysAlone(primary.Issue.LabelNames()) {
+	if cfg.staysAlone(primary.Issue.LabelNames()) {
 		return 1
 	}
 	a, _, err := cfg.resolveAgent(primary.Issue.LabelNames(), rooms)
@@ -98,7 +98,7 @@ func bundleKey(cfg queueConfig, iss queuedIssue, rooms map[string]string) (strin
 }
 
 func joinsBundle(cfg queueConfig, primary, iss queuedIssue, who, effort string, rooms map[string]string) bool {
-	if iss.Repo != primary.Repo || issueStaysAlone(iss.Issue.LabelNames()) {
+	if iss.Repo != primary.Repo || cfg.staysAlone(iss.Issue.LabelNames()) {
 		return false
 	}
 	gotWho, gotEffort, ok := bundleKey(cfg, iss, rooms)

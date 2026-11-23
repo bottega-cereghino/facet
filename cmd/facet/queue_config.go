@@ -54,6 +54,9 @@ type queueConfig struct {
 	// Serialize is nil when the config has no serialize block. Landing then
 	// does not serialize on shared files.
 	Serialize *queueSerialize
+	// Cap is nil when the config has no cap block. Standards and CI issues
+	// then start like any other issue.
+	Cap *queueCap
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -125,6 +128,7 @@ type queueFile struct {
 	Fix        *queueFixFile       `json:"fix"`
 	Lanes      *queueLanesFile     `json:"lanes"`
 	Serialize  *queueSerializeFile `json:"serialize"`
+	Cap        *queueCapFile       `json:"cap"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -136,7 +140,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, lanes, serialize", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, lanes, serialize, cap", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -207,6 +211,16 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg.Serialize, err = normalizeSerialize(f.Serialize)
 	if err != nil {
 		return queueConfig{}, err
+	}
+	cfg.Cap, err = normalizeCap(f.Cap)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	if cfg.Cap != nil && cfg.State == "" {
+		cfg.State = resolveQueueState(configPath, f.State)
+		if cfg.State == "" {
+			return queueConfig{}, fmt.Errorf("queue config: cap is set and state is not\nfix: set state to a file path, where the queue records the issues it started")
+		}
 	}
 	if err := cfg.validate(); err != nil {
 		return queueConfig{}, err

@@ -52,7 +52,13 @@ func newQueueCmd() *cobra.Command {
 			"exists, it starts nothing and stops; an agent already running is left to finish.\n\n" +
 			"--dry-run prints the runs the next starts would take, up to max, and does\n" +
 			"not spawn a workspace or start an agent. It runs the gate, so a gate that\n" +
-			"would refuse a start is reported instead of a start.\n\n" +
+			"would refuse a start is reported instead of a start. It also applies cap,\n" +
+			"and prints each standards or CI issue the cap skipped.\n\n" +
+			"cap, when set, starts at most share[0] standards or CI issues in every\n" +
+			"share[1] issues the queue started in that repository, once passes exits\n" +
+			"0 for it. A skipped issue is logged once and the next issue is taken.\n" +
+			"Omitting passes, or any other exit, leaves the cap off. A fix run and a\n" +
+			"landing are never capped.\n\n" +
 			"With a fix block, each tick first looks for an open pull request of an\n" +
 			"issue this queue started (recorded in the state file) that is red or\n" +
 			"conflicting, and starts a fix run for it instead of new work. After\n" +

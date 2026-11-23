@@ -16,6 +16,10 @@ import (
 type queueState struct {
 	Started map[string]startedIssue `json:"started"`
 	Fixes   map[string]*fixRecord   `json:"fixes"`
+	// Starts is every issue the queue started, kept after Started drops a
+	// merged one, so the cap window still counts that run. Empty when the
+	// config has no cap.
+	Starts []startedIssue `json:"starts,omitempty"`
 }
 
 // startedIssue is one issue the queue started. The issue's fields are kept

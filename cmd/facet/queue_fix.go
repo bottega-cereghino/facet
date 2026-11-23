@@ -269,6 +269,10 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 	}
 	delete(r.state.Fixes, k)
 	if !recent {
+		// The pull request is gone. The cap still counts the run.
+		if r.cfg.Cap != nil {
+			r.state.noteStart(s)
+		}
 		delete(r.state.Started, k)
 	}
 	r.mu.Unlock()
@@ -477,17 +481,21 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 }
 
 // recordStarted remembers the issues of a run, so their pull requests are
-// the queue's own after a restart.
+// the queue's own after a restart, and so the cap window counts them.
 func (r *queueRunner) recordStarted(run []queuedIssue) {
-	if r.cfg.Fix == nil || r.state == nil {
+	if r.state == nil {
 		return
 	}
 	r.mu.Lock()
 	for _, iss := range run {
-		r.state.Started[iss.key()] = startedIssue{
+		rec := startedIssue{
 			Repo: iss.Repo, Number: iss.Issue.Number, At: r.env.now(),
 			Title: iss.Issue.Title, URL: iss.Issue.URL, CreatedAt: iss.Issue.CreatedAt,
 			Labels: iss.Issue.LabelNames(),
+		}
+		r.state.Started[iss.key()] = rec
+		if r.cfg.Cap != nil {
+			r.state.noteStart(rec)
 		}
 	}
 	r.mu.Unlock()

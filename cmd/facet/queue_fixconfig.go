@@ -42,18 +42,28 @@ type queueFixFile struct {
 	Land       *bool    `json:"land"`
 }
 
+// resolveQueueState makes a relative state path sit beside the config file.
+// An empty path stays empty; the caller says which block required it.
+func resolveQueueState(configPath, state string) string {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return ""
+	}
+	if !filepath.IsAbs(state) {
+		return filepath.Join(filepath.Dir(configPath), state)
+	}
+	return state
+}
+
 // normalizeFix resolves the fix block and the state path. Without fix the
 // queue behaves as before and needs no state file.
 func normalizeFix(configPath, state string, raw *queueFixFile) (*queueFix, string, error) {
-	state = strings.TrimSpace(state)
 	if raw == nil {
 		return nil, "", nil
 	}
+	state = resolveQueueState(configPath, state)
 	if state == "" {
 		return nil, "", fmt.Errorf("queue config: fix is set and state is not\nfix: set state to a file path, where the queue records the issues it started and the fix runs it made")
-	}
-	if !filepath.IsAbs(state) {
-		state = filepath.Join(filepath.Dir(configPath), state)
 	}
 	fix := &queueFix{
 		Command:    raw.Command,
