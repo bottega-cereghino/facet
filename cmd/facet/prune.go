@@ -126,6 +126,19 @@ func runPrune(w io.Writer, dirs []string, git gitx.Runner, live workspace.LiveCh
 			_, _ = fmt.Fprintf(w, "%s: held since the listing, left alone\n", filepath.Base(st.Dir))
 			continue
 		}
+		// Delete only what the user confirmed: a directory that appeared
+		// while the prompt waited was never listed.
+		listed := make(map[[2]string]bool, len(st.Found))
+		for _, r := range st.Found {
+			listed[[2]string{r.Clone, r.Rel}] = true
+		}
+		kept := again.Found[:0:0]
+		for _, r := range again.Found {
+			if listed[[2]string{r.Clone, r.Rel}] {
+				kept = append(kept, r)
+			}
+		}
+		again.Found = kept
 		if err := workspace.Prune(again); err != nil {
 			errs = append(errs, err)
 			continue
