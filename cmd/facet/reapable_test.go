@@ -331,6 +331,32 @@ func TestReapReapableCommandReadsTheRoot(t *testing.T) {
 	}
 }
 
+func TestReapSafeCommandReapsOnlyWhatIsReapableWithoutPrompt(t *testing.T) {
+	root, free, held := reapableRoot(t)
+	roots.Workspaces = root
+	cmd := newReapCmd()
+	cmd.SetArgs([]string{"--safe"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if exists(t, free) || !exists(t, filepath.Join(held, "plan.md")) {
+		t.Fatalf("--safe must delete the reapable workspace and preserve the held one")
+	}
+}
+
+func TestReapSafeRejectsNamedAndForcedTargets(t *testing.T) {
+	reapableRoot(t)
+	for _, args := range [][]string{{"--safe", "workspace"}, {"--safe", "--force"}} {
+		cmd := newReapCmd()
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Errorf("reap %v unexpectedly succeeded", args)
+		}
+	}
+}
+
 // sweepProjects makes a projects root holding the two layouts facet#275 lost
 // data in, and one worktree the sweep is for:
 //   - app, a bare repository in app/.bare with the everyday checkout at

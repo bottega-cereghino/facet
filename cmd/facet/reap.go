@@ -79,6 +79,7 @@ func newReapCmd() *cobra.Command {
 		reapable bool
 		dryRun   bool
 		closed   bool
+		safe     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "reap",
@@ -112,6 +113,13 @@ func newReapCmd() *cobra.Command {
 			"open, or pull request lookup failed.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if safe {
+				if force || path != "" || len(args) > 0 {
+					return fmt.Errorf("--safe sweeps only reapable workspaces and worktrees; it cannot be combined with --force or a named target")
+				}
+				reapable = true
+				yes = true
+			}
 			if dryRun && !reapable {
 				return fmt.Errorf("--dry-run lists what --reapable would delete; add --reapable")
 			}
@@ -263,6 +271,7 @@ func newReapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&reapable, "reapable", false, "delete every workspace at the root that reap would delete now, after one confirmation")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --reapable: print the list, delete nothing")
 	cmd.Flags().BoolVar(&closed, "closed", false, "with --reapable: only issue workspaces whose pull request is merged or closed")
+	cmd.Flags().BoolVar(&safe, "safe", false, "delete only reapable workspaces and worktrees, without prompting; never forces")
 	return cmd
 }
 

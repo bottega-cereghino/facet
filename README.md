@@ -323,6 +323,12 @@ each repository once, however many worktree clones share it. `--dry-run`
 prints the list, worktrees included, and stops there; `facet ls --size` shows
 the workspaces without deleting.
 
+For unattended cleanup, `facet reap --safe` runs the same sweep without a
+prompt. It can delete only what `--reapable` would, never forces, and reports
+each removed workspace. Add `--closed` to further restrict it to issue
+workspaces with a closed or merged pull request. A dry run remains available
+with `--safe --dry-run`.
+
 `facet reap --reapable --closed` is narrower, for a run nobody watches: it
 takes only an issue workspace whose branch has a merged or closed pull request
 and no open one, and reap would still delete it now. A pull request is found by
@@ -377,6 +383,10 @@ alone (`[tool.ruff]`, `[flake8]`) still count for that tool's cache. Without
 such a file the directory is kept, and the listing says so on a `kept:` line.
 `.terraform` is never named: it keeps the selected `terraform workspace`, and
 a fresh `init` would quietly plan against `default`.
+
+`facet prune --safe` applies that same pruning without a prompt. It still skips
+workspaces that are active, held, or inside the idle window, and prints each
+cache directory it removes. Use `facet prune` first to review the list.
 
 ## The issue graph was removed
 

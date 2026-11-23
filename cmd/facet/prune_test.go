@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/manifest"
@@ -91,11 +92,36 @@ func TestPruneListsWithoutApplyAndDeletesOnlyWhatNothingHolds(t *testing.T) {
 	if exists(t, idleDeps) {
 		t.Error("the idle workspace's node_modules survived --apply")
 	}
+	if !strings.Contains(out.String(), "removed repo/node_modules") {
+		t.Errorf("--apply did not log the removed cache:\n%s", out.String())
+	}
 	if !exists(t, busyDeps) {
 		t.Error("--apply deleted from a workspace a session runs in")
 	}
 	if !exists(t, filepath.Join(idleWS, "repo", "only-copy-of-notes.md")) {
 		t.Error("--apply deleted an untracked file that git does not ignore")
+	}
+}
+
+func TestPruneSafeCommandAppliesWithoutPrompt(t *testing.T) {
+	root := t.TempDir()
+	ws, deps := pruneWorkspace(t, root, "idle")
+	savedRoots, savedGit := roots, git
+	t.Cleanup(func() { roots, git = savedRoots, savedGit })
+	roots = config.Roots{Workspaces: root}
+	git = gitx.Git{}
+	cmd := newPruneCmd()
+	cmd.SetArgs([]string{"--safe", "--idle-days", "0"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if exists(t, deps) {
+		t.Fatal("--safe did not prune the idle rebuildable cache")
+	}
+	if !exists(t, filepath.Join(ws, "repo", "only-copy-of-notes.md")) {
+		t.Fatal("--safe removed a non-cache file")
 	}
 }
 

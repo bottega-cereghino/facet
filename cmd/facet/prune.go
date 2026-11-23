@@ -19,6 +19,7 @@ func newPruneCmd() *cobra.Command {
 		apply    bool
 		yes      bool
 		idleDays int
+		safe     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "prune [workspace]",
@@ -45,6 +46,10 @@ func newPruneCmd() *cobra.Command {
 			"just before deleting.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if safe {
+				apply = true
+				yes = true
+			}
 			if idleDays < 0 {
 				return fmt.Errorf("--idle-days %d is negative; pass 0 to prune regardless of age", idleDays)
 			}
@@ -75,6 +80,7 @@ func newPruneCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&apply, "apply", false, "delete what is listed, after one confirmation; without it prune only lists")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	cmd.Flags().IntVar(&idleDays, "idle-days", 14, "hold a workspace used within this many days; 0 holds none for age")
+	cmd.Flags().BoolVar(&safe, "safe", false, "delete only rebuildable caches in idle, unheld workspaces, without prompting")
 	return cmd
 }
 
@@ -142,6 +148,9 @@ func runPrune(w io.Writer, dirs []string, git gitx.Runner, live workspace.LiveCh
 		if err := workspace.Prune(again); err != nil {
 			errs = append(errs, err)
 			continue
+		}
+		for _, r := range again.Found {
+			_, _ = fmt.Fprintf(w, "removed %s/%s (%s)\n", r.Clone, r.Rel, humanBytes(r.Bytes))
 		}
 		freed += again.Frees()
 	}
