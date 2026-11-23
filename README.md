@@ -415,6 +415,11 @@ across every repository in the config. The default is 6.
 facet queue --config queue.json
 ```
 
+Pass `--log FILE` to have the queue write its own log file. It reopens the
+file on SIGHUP, so a rotation can rename the current file and then signal the
+queue. A running queue writes its PID to
+`~/.local/state/fleet/queue.pid` and removes the file when it exits.
+
 `--config` is a JSON file. With the flag omitted, `FACET_QUEUE` names it.
 `docs/queue.example.json` is a complete file: the commands in it are
 placeholders, and you replace them with the argument list you actually run.
@@ -441,6 +446,15 @@ never passed through a shell.
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` is set; unused without it. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
+
+For example, a local newsyslog rule can use the PID file as its signal target:
+
+```text
+~/Library/Logs/facet-queue.log cerre:staff 644 5 1024 * JB ~/.local/state/fleet/queue.pid SIGHUP
+```
+
+The queue does not install this system rule; configure it where your system's
+newsyslog rules live.
 
 The order is fixed. When `priorities` is set, the queue reads that file
 again before each start. A line is a repository name (`widgets` for
