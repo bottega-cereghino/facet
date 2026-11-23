@@ -330,6 +330,8 @@ func TestGithubRepo(t *testing.T) {
 		"https://github.com/o/repo.git":   "o/repo",
 		"https://github.com/o/repo":       "o/repo",
 		"ssh://git@github.com/o/repo.git": "o/repo",
+		"https://user@github.com/o/repo":  "o/repo",
+		"https://github.com/o/repo/":      "o/repo",
 		"git@gitlab.com:o/repo.git":       "",
 		"/local/path/repo.git":            "",
 		"https://github.com/o":            "",
