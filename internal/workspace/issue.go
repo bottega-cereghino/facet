@@ -66,15 +66,16 @@ type CloneState struct {
 	// set and there are unpushed commits to disclaim.
 	StaleRemotes []string
 	// DefaultBranchUnresolved is set when origin's default branch could not be
-	// determined -- no refs/remotes/origin/HEAD and no origin/main, which is a
-	// hand-built remote, an old fetch config, or a repo whose default is not
-	// main -- *and* there were unpushed candidates that needed it. Nothing can
-	// be proven to have landed on a branch that cannot be named, so proofLanded
-	// fails safe and every candidate is counted unpushed. Without this the
-	// operator is told about unpushed commits and never about the real cause
-	// (facet#80). Like StaleRemotes it is a disclaimer on that line and never a
-	// blocker of its own: it is set only when the fail-safe actually decided
-	// something, so a clean workspace on such a remote still reaps.
+	// determined -- no refs/remotes/origin/HEAD and no direct origin/main, which
+	// is a hand-built remote, an old fetch config, a repo whose default is not
+	// main, or a symref standing where that direct ref should be (#408) -- *and*
+	// there were unpushed candidates that needed it. Nothing can be proven to
+	// have landed on a branch that cannot be named, so proofLanded fails safe
+	// and every candidate is counted unpushed. Without this the operator is
+	// told about unpushed commits and never about the real cause (facet#80).
+	// Like StaleRemotes it is a disclaimer on that line and never a blocker of
+	// its own: it is set only when the fail-safe actually decided something, so
+	// a clean workspace on such a remote still reaps.
 	DefaultBranchUnresolved bool
 	// IgnoredFiles names what the clone ignores that nothing rebuilds
 	// (unrebuiltIgnored): a .env, a local config. Non-empty is a blocker.
@@ -1093,20 +1094,40 @@ func currentRef(git gitx.Runner, dir string) (branch string, detached bool, err 
 // case callers must not guess. Never the short "origin/main": git resolves
 // that to a local branch or tag of that name first, and a local branch named
 // origin/main would then pass the landing proof with commits no remote has.
+//
+// A symbolic ref is not a default branch either. fetch --prune never deletes
+// one and does not overwrite it, so refs/remotes/origin/HEAD can name
+// refs/remotes/origin/main while that name points at refs/heads/wip. git
+// symbolic-ref follows the chain, and rev-parse --verify follows it too, so
+// either name would make the landing proof compare that branch with itself
+// (#408). Only a ref symbolic-ref -q refuses to read as symbolic is returned.
 func remoteDefaultBranch(git gitx.Runner, dir string) string {
 	if out, err := git.Run(dir, nil, "symbolic-ref", "refs/remotes/origin/HEAD"); err == nil {
-		if s := strings.TrimSpace(out); strings.HasPrefix(s, "refs/remotes/origin/") {
+		if s := strings.TrimSpace(out); strings.HasPrefix(s, "refs/remotes/origin/") && !symbolicRef(git, dir, s) {
 			return s
 		}
 	}
 	// refs/remotes/origin/HEAD is set by a normal clone, but is not
 	// guaranteed (a hand-built remote, an old fetch config). "main" is the
 	// default branch of every repository facet has been used on, not a bare
-	// guess, so fall back to it if it exists.
-	if _, err := git.Run(dir, nil, "rev-parse", "--verify", "refs/remotes/origin/main"); err == nil {
-		return "refs/remotes/origin/main"
+	// guess, so fall back to it when it exists as a direct ref.
+	const main = "refs/remotes/origin/main"
+	if _, err := git.Run(dir, nil, "rev-parse", "--verify", main); err == nil && !symbolicRef(git, dir, main) {
+		return main
 	}
 	return ""
+}
+
+// symbolicRef reports whether git symbolic-ref -q reads ref as a symbolic
+// ref. A probe that fails for any other reason counts as one too: a default
+// branch that cannot be told from a symref must not clear the landing proof.
+func symbolicRef(git gitx.Runner, dir, ref string) bool {
+	_, err := git.Run(dir, nil, "symbolic-ref", "-q", ref)
+	if err == nil {
+		return true
+	}
+	var gitErr *gitx.Error
+	return !errors.As(err, &gitErr) || gitErr.ExitCode != 1
 }
 
 // ListIssues inspects every issue workspace under the workspaces root. One that

@@ -924,7 +924,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   the workspace by name with `--force`
   (`TestReapHoldsContentInAGitDirObjectStore`). The landing proof names the
   default branch by its full ref, so a local branch called `origin/main` is not
-  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`).
+  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`). A ref that is
+  itself symbolic is not taken for it either, so a chain from
+  `refs/remotes/origin/HEAD` through another symref to a local branch cannot
+  pass by comparing that branch with itself
+  (`TestReapHoldsABranchASymbolicDefaultRefNames`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
   gh's "no pull requests found" counts as none; a repository gh cannot resolve
   (renamed, transferred, unreadable) holds the workspace

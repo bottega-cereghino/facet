@@ -39,7 +39,7 @@ The feature map of facet. States: shipped (on main), in progress (an open PR), p
 | F21 | `prune` deletes only what the listing named | Confirmed listing is what goes | shipped | [#445](https://github.com/bottega-cereghino/facet/pull/445) |
 | F22 | `reap --closed` | Limit `--reapable` to merged or closed PRs | in progress | [#435](https://github.com/bottega-cereghino/facet/pull/435) |
 | F23 | `issues` and `ls --size` offline wording | Say reapable offline and stale fetch where the check did not run in full | in progress | [#449](https://github.com/bottega-cereghino/facet/pull/449) |
-| F24 | Landing proof follows symbolic ref chains | Reap sees a branch behind a symbolic ref | planned | [#408](https://github.com/bottega-cereghino/facet/issues/408) |
+| F24 | Landing proof follows symbolic ref chains | Reap sees a branch behind a symbolic ref | shipped | [#478](https://github.com/bottega-cereghino/facet/pull/478) |
 | F25 | Launchd hold: plist path and case handling | Read the loaded plist; match without resolving last element | planned | [#329](https://github.com/bottega-cereghino/facet/issues/329) |
 | F26 | Failing plutil or launchctl holds the workspace | Today it drops the job | planned | [#291](https://github.com/bottega-cereghino/facet/issues/291) |
 | F27 | Prune symlink checks on clone and workspace dirs | Check the directories, not only steps below | planned | [#301](https://github.com/bottega-cereghino/facet/issues/301) |
