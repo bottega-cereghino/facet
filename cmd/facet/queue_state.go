@@ -1,0 +1,99 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// queueState is the state file: the issues this queue started, and the fix
+// runs it made per issue. It is what lets a restarted queue tell its own
+// pull requests from a person's, and keep counting tries.
+type queueState struct {
+	Started map[string]startedIssue `json:"started"`
+	Fixes   map[string]*fixRecord   `json:"fixes"`
+}
+
+// startedIssue is one issue the queue started. The issue's fields are kept
+// so a fix can be ordered like new work without listing the issue again.
+type startedIssue struct {
+	Repo      string    `json:"repo"`
+	Number    int       `json:"number"`
+	At        time.Time `json:"at"`
+	Title     string    `json:"title,omitempty"`
+	URL       string    `json:"url,omitempty"`
+	CreatedAt string    `json:"createdAt,omitempty"`
+	Labels    []string  `json:"labels,omitempty"`
+}
+
+// fixRecord counts the fix runs made for one issue's pull request.
+type fixRecord struct {
+	PR      int       `json:"pr"`
+	Runs    int       `json:"runs"`
+	Last    time.Time `json:"last"`
+	Blocked bool      `json:"blocked,omitempty"`
+}
+
+func newQueueState() *queueState {
+	return &queueState{Started: map[string]startedIssue{}, Fixes: map[string]*fixRecord{}}
+}
+
+// loadQueueState reads the state file. A missing file is an empty state. A
+// file that cannot be parsed is a refusal: starting from empty would forget
+// which pull requests are the queue's and how many tries each had.
+func loadQueueState(path string) (*queueState, error) {
+	st := newQueueState()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return st, nil
+		}
+		return nil, fmt.Errorf("read queue state %s: %w\nfix: the queue keeps its state there; make the file readable", path, err)
+	}
+	if err := json.Unmarshal(b, st); err != nil {
+		return nil, fmt.Errorf("queue state %s: %w\nfix: repair the file, or move it away to start with no record of earlier starts and fix runs", path, err)
+	}
+	if st.Started == nil {
+		st.Started = map[string]startedIssue{}
+	}
+	if st.Fixes == nil {
+		st.Fixes = map[string]*fixRecord{}
+	}
+	return st, nil
+}
+
+// save writes the state atomically: a temp file beside it, then a rename,
+// so a crash leaves the old file or the new one, never half of one.
+func (st *queueState) save(path string) error {
+	b, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
+	if err != nil {
+		return fmt.Errorf("write queue state: %w\nfix: the directory of state must exist and be writable", err)
+	}
+	name := tmp.Name()
+	_, werr := tmp.Write(append(b, '\n'))
+	cerr := tmp.Close()
+	if werr != nil || cerr != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("write queue state %s: %w", path, firstErr(werr, cerr))
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("write queue state %s: %w", path, err)
+	}
+	return nil
+}
+
+func firstErr(errs ...error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -1624,9 +1624,9 @@ func TestQueueDoesNotStartAnIssueWithAnOpenPullRequest(t *testing.T) {
 	var buf bytes.Buffer
 	err := dryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) { return issues, nil },
-		prBranches: func(string) ([]string, error) {
+		prs: func(string) ([]ghx.OpenPR, error) {
 			// feature/20-... is another issue's branch, not #2's.
-			return []string{"feature/2-fix-the-bell", "feature/20-other", "renovate/go"}, nil
+			return []ghx.OpenPR{{HeadRefName: "feature/2-fix-the-bell"}, {HeadRefName: "feature/20-other"}, {HeadRefName: "renovate/go"}}, nil
 		},
 		out: &buf,
 	})
@@ -1642,9 +1642,9 @@ func TestQueueDoesNotStartAnIssueWithAnOpenPullRequest(t *testing.T) {
 
 	buf.Reset()
 	err = dryQueue(context.Background(), cfg, queueEnv{
-		list:       func(string, string) ([]ghx.Issue, error) { return issues, nil },
-		prBranches: func(string) ([]string, error) { return nil, errors.New("HTTP 502") },
-		out:        &buf,
+		list: func(string, string) ([]ghx.Issue, error) { return issues, nil },
+		prs:  func(string) ([]ghx.OpenPR, error) { return nil, errors.New("HTTP 502") },
+		out:  &buf,
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot tell whether a pull request is open") || strings.Contains(buf.String(), "would start") {
 		t.Fatalf("listing failed: err %v, dry-run =\n%s", err, buf.String())
