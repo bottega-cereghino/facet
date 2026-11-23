@@ -428,6 +428,8 @@ never passed through a shell.
 | `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`. `{labels}` is the issue's labels, comma-separated. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
+| `state` | the state file's path. A relative path is beside the config file. Required when `fix` is set; unused without it. |
+| `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
 
 The order is fixed. When `priorities` is set, the queue reads that file
 again before each start. A line is a repository name (`widgets` for
@@ -528,6 +530,61 @@ start, and the issues are not listed.
 `TestQueueRetriesASpawnThatFailed`,
 `TestQueueRetriesWhenTheAgentCannotStart` and
 `TestQueueUsesAWorkspaceThatAlreadyExists` hold this.
+
+### The queue fixes its own red pull requests first
+
+With a `fix` block, each tick looks at the queue's own pull requests before
+it picks a new issue. A **queue pull request** is an open pull request whose
+head branch is the spawn branch (`feature/<number>-…`) of an issue this queue
+started. The queue records each issue it starts in the `state` file (JSON,
+written to a temp file and renamed), so a restarted queue still knows them.
+**A pull request from an issue the queue never started is never touched**,
+even when its branch has the same shape: a person's own pull request is
+theirs.
+
+A queue pull request needs fixing when it is red (the latest run of a check
+by name, as `gh pr checks` reads them, concluded `FAILURE`, `TIMED_OUT`,
+`ACTION_REQUIRED`, `STARTUP_FAILURE` or `ERROR`) or conflicting (`mergeable`
+is `CONFLICTING`). A pull request with any check still pending, or whose
+mergeable state is `UNKNOWN`, is not judged that round. Nor is one whose fix
+run ended less than `wait` ago, since its new checks may not be listed yet.
+
+When one needs fixing and a slot is free, the queue starts a **fix run**
+for it instead of new work, in the order new issues are taken. Still one
+start per tick, and a fix run counts as one agent toward `max`. It runs in
+the issue's workspace, spawned again when it is gone. The pull requests are
+listed once per repository per round, with their checks, and that listing
+also tells new work which issues already have a pull request. A listing that
+fails starts no fix in that repository, and is logged.
+
+A pull request still red or conflicting once CI has finished after a fix run
+is a failed try. After `fix.tries` failed tries the queue adds the
+`fix.blockLabel` label to the issue, logs it, runs `fix.notify` once, and
+starts no other fix for it. A pull request that turns green (with at least
+one check) clears its record, and one that is merged or closed drops it.
+
+| `fix` field | |
+| --- | --- |
+| `command` | the fix run's argument list, with `{prompt}`. Placeholders: those of a start, plus `{pr}` (the number), `{branch}`, `{reason}` (`red: <check> is FAILURE` or `conflicts with <base>`) and `{try}`, from 1. |
+| `prompt` | the fix run's task text, expanded the same way. Omitted means a prompt that says: make CI green on the same branch, merge the base into it if it conflicts, never weaken a test without the repository's own rule for that, push, exit. |
+| `gate` | run before a fix start, with the same placeholders; exit 3 and 4 and any other non-zero exit act as for new work. Omitted means the main `gate` runs. A gate that refuses a repository with a red pull request needs a different gate here. |
+| `tries` | failed tries before the issue is blocked, 1 to 5. Omitted means 2. |
+| `blockLabel` | the label a blocked issue gets. Omitted means `blocked`. |
+| `notify` | an argument list run once when an issue is blocked: `{repo}` `{number}` `{pr}` `{reason}`. Omitted means none. |
+
+`--dry-run` lists the fix runs first (`would fix <repo>#<n> PR #<pr>:
+<reason>, try <k> of <tries>`), then new starts, together up to `max`, and
+an issue it would block (`would label …`). It adds no label and writes no
+state. It runs the gate as for a start.
+
+`TestQueueFixesARedQueuePRBeforeANewIssue`,
+`TestQueueFixesAConflictingQueuePR`, `TestQueueDoesNotJudgeAPendingQueuePR`,
+`TestQueueNeverTouchesAPROfAnIssueItDidNotStart`,
+`TestQueueBlocksAfterTheLastFailedTry`,
+`TestQueueClearsTheRecordOfAPRThatTurnedGreen`,
+`TestQueueStateSurvivesARestart`, `TestQueueStartsNoFixWhenThePRListingFails`,
+`TestQueueDryRunListsFixRunsFirstAndWritesNothing` and
+`TestQueueWithoutFixChangesNothing` hold this.
 
 ## The credential preflight
 
