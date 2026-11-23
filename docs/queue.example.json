@@ -27,6 +27,10 @@
     "notify": ["notify", "{repo}#{number} PR #{pr}: {reason}"],
     "land": true
   },
+  "lanes": {
+    "command": ["lanes", "--json"],
+    "log": "runs.jsonl"
+  },
   "agents": [
     {
       "label": "codex",
