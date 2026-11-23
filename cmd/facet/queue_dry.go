@@ -93,6 +93,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 			r.logf("dry-run: %s#%d: %s", iss.Repo, iss.Issue.Number, iss.Issue.Title)
 		}
 		r.mu.Lock()
+		r.repoRunning[run[0].Repo]++
 		for _, iss := range run {
 			r.inflight[iss.key()] = true
 		}

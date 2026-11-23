@@ -47,7 +47,7 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Max != 6 || cfg.Label != "next" || cfg.Wait != 30*time.Second {
+	if cfg.Max != 6 || cfg.PerRepo != 2 || cfg.Label != "next" || cfg.Wait != 30*time.Second {
 		t.Fatalf("defaults from the example: %+v", cfg)
 	}
 	if len(cfg.Hold) == 0 || len(cfg.Gate) == 0 || len(cfg.Repos) != 2 || len(cfg.Agents) != 3 || cfg.Priorities == "" {
@@ -152,7 +152,7 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok.Max != defaultQueueMax || ok.Wait != defaultQueueWait || ok.Label != defaultQueueLabel {
+	if ok.Max != defaultQueueMax || ok.PerRepo != defaultQueuePerRepo || ok.Wait != defaultQueueWait || ok.Label != defaultQueueLabel {
 		t.Fatalf("defaults: %+v", ok)
 	}
 	if !strings.Contains(ok.Prompt, "Merge when the checks are green") {
@@ -166,6 +166,10 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	}
 	if ok.Agents[0].Bundle != 1 {
 		t.Fatalf("default bundle = %d, want 1", ok.Agents[0].Bundle)
+	}
+	limited, err := loadTempConfig(t, `{"per_repo": 3, "repos": ["acme/widgets"], "agents": [{"command": ["agent", "{prompt}"]}]}`)
+	if err != nil || limited.PerRepo != 3 {
+		t.Fatalf("per_repo = %d, %v; want 3", limited.PerRepo, err)
 	}
 	bundled, err := loadTempConfig(t, `{
 		"prompt": "Do {issues}",
@@ -183,6 +187,7 @@ func TestQueueConfigDefaultsAndRefusals(t *testing.T) {
 	}{
 		{"unknown field", `{"maxAgents": 1, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "maxAgents"},
 		{"max zero", `{"max": 0, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "at least 1"},
+		{"per_repo zero", `{"per_repo": 0, "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "per_repo must be at least 1"},
 		{"order is not a field", `{"order": "oldest", "repos": ["acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "unknown field"},
 		{"bad repo", `{"repos": ["widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "owner/name"},
 		{"duplicate repo", `{"repos": ["acme/widgets", "acme/widgets"], "agents": [{"command": ["a", "{prompt}"]}]}`, "twice"},
@@ -1030,6 +1035,37 @@ func TestQueueRunsAtMostMaxAgents(t *testing.T) {
 	s.stop(t)
 }
 
+func TestQueueCapsConcurrentAgentsPerRepository(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	script := writeExe(t, "block-repo", "#!/bin/sh\nprintf '%s#%s\\n' \"$2\" \"$3\" >> \"$1\"\ndir=$(dirname \"$1\")\nwhile [ ! -f \"$dir/release\" ]; do sleep 0.02; done\n")
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 3
+	cfg.PerRepo = 1
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Agents = []queueAgent{{Command: []string{script, out, "{repo}", "{number}", "{prompt}"}}}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			switch repo {
+			case "acme/widgets":
+				return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z"), openIssue(2, "2026-01-02T00:00:00Z")}, nil
+			case "acme/other":
+				return []ghx.Issue{openIssue(3, "2026-01-03T00:00:00Z")}, nil
+			default:
+				return nil, fmt.Errorf("unexpected repo %s", repo)
+			}
+		},
+	})
+	waitFor(t, "one agent per repository", func() bool { return len(readLines(t, out)) >= 2 })
+	time.Sleep(200 * time.Millisecond)
+	s.stop(t)
+	got := readLines(t, out)
+	sort.Strings(got)
+	if strings.Join(got, ",") != "acme/other#3,acme/widgets#1" {
+		t.Fatalf("started %v, want one issue from each repository", got)
+	}
+}
+
 func TestQueueWaitsWhenTheGateFails(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "out")
@@ -1476,12 +1512,13 @@ func oneAgentConfig(repos []string) queueConfig {
 		repos = []string{"acme/widgets"}
 	}
 	return queueConfig{
-		Max:    1,
-		Wait:   20 * time.Millisecond,
-		Label:  "next",
-		Repos:  repos,
-		Prompt: defaultQueuePrompt,
-		Agents: []queueAgent{{Command: []string{"agent", "{prompt}"}}},
+		Max:     1,
+		PerRepo: defaultQueuePerRepo,
+		Wait:    20 * time.Millisecond,
+		Label:   "next",
+		Repos:   repos,
+		Prompt:  defaultQueuePrompt,
+		Agents:  []queueAgent{{Command: []string{"agent", "{prompt}"}}},
 	}
 }
 
