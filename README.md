@@ -925,7 +925,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   the workspace by name with `--force`
   (`TestReapHoldsContentInAGitDirObjectStore`). The landing proof names the
   default branch by its full ref, so a local branch called `origin/main` is not
-  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`).
+  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`). A ref that is
+  itself symbolic is not taken for it either, so a chain from
+  `refs/remotes/origin/HEAD` through another symref to a local branch cannot
+  pass by comparing that branch with itself
+  (`TestReapHoldsABranchASymbolicDefaultRefNames`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
   gh's "no pull requests found" counts as none; a repository gh cannot resolve
   (renamed, transferred, unreadable) holds the workspace
@@ -1159,8 +1163,18 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`reap` refuses while a loaded launchd job runs from the workspace**, running
   or not: a scheduled job between runs holds nothing open, so `lsof` misses it,
   and its next run would fail. A job counts when its `Program`, an absolute path
-  in its `ProgramArguments`, or its `WorkingDirectory` is inside the workspace;
-  only jobs `launchctl list` shows count, since a plist that is not loaded starts
+  in its `ProgramArguments`, or its `WorkingDirectory` is inside the workspace.
+  The last element of that path is kept as named, so a program that is a
+  symlink to an interpreter outside (a venv's python) and a workspace link to
+  a project both still count
+  (`TestGrillUnderHoldsAJobRunThroughASymlinkInsideTheDirectory`,
+  `TestGrillReapHoldsAJobRunningThroughAWorkspaceLink`,
+  `TestGrillPruneHoldsAVenvALoadedJobRuns`). On a volume that folds case the
+  spellings compare equal, so `facet reap SVC` still sees the job whose plist
+  names `svc`
+  (`TestGrillUnderMatchesACaseVariantOfTheDirectory`,
+  `TestGrillReapByACaseVariantNameKeepsTheLaunchdHold`).
+  Only jobs `launchctl list` shows count, since a plist that is not loaded starts
   nothing. A loaded job's plist is read wherever it is: from the LaunchAgents
   folders, or from the file `launchctl print` says it was loaded from
   (`TestUnderFindsAJobLoadedFromAPlistElsewhere`). Unload the job, or move it out, then reap
