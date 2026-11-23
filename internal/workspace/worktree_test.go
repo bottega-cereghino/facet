@@ -342,6 +342,20 @@ func TestPlainWorktreeIsHeldByItsBranchsPullRequest(t *testing.T) {
 	}
 }
 
+func TestPlainWorktreeWithAnAliasedOriginHasUnknownPullRequestState(t *testing.T) {
+	_, _, _, checkout := worktreeSetup(t)
+	wt := plainWorktree(t, checkout, "topic")
+	gitOut(t, checkout, "remote", "set-url", "origin", "git@github-work:acme/repo.git")
+
+	st, err := InspectWorktree(wt, gitx.Git{}, fakePR{pr: &ghx.PR{Number: 7, State: "OPEN"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.PRUnknown {
+		t.Errorf("an origin that cannot be named is read as no pull request: %v", st.Blockers())
+	}
+}
+
 func TestReapRemovesAPlainWorktreeAndKeepsItsBranch(t *testing.T) {
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")

@@ -217,7 +217,8 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 	if top = strings.TrimSpace(top); realPath(top) != realPath(dir) {
 		return nil, fmt.Errorf("%s is a folder inside the worktree %s, not a worktree\nfix: facet reap %s", dir, top, top)
 	}
-	repo, clonePR := githubRepo(gitx.Origin(git, dir)), pr
+	origin := gitx.Origin(git, dir)
+	repo, clonePR := githubRepo(origin), pr
 	if repo == "" {
 		clonePR = nil
 	}
@@ -233,6 +234,11 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 		} else {
 			st.PRUnknown = true
 		}
+	} else if pr != nil && origin != "" && repo == "" && c.Branch != "" && c.Branch != "HEAD" {
+		// An origin that is not plain github.com (an SSH host alias, an
+		// Enterprise host) cannot be asked about its pull requests: an open one
+		// cannot be ruled out, so the state is unknown, not "none" (#325).
+		st.PRUnknown = true
 	}
 	st.checkRunning(dir, mux)
 	st.SizeBytes = freedBytes(dir)
