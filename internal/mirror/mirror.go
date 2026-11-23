@@ -115,9 +115,15 @@ func PathFor(root, raw string) (string, error) {
 	}
 
 	segs := []string{root, host}
-	for _, s := range strings.Split(repoPath, "/") {
+	parts := strings.Split(repoPath, "/")
+	for i, s := range parts {
 		if unsafeSegment(s) {
 			return "", fmt.Errorf("%q: unsafe path segment %q", raw, s)
+		}
+		// A segment ending in .git before the last would put this mirror inside
+		// another bare mirror.
+		if i < len(parts)-1 && strings.HasSuffix(s, ".git") {
+			return "", fmt.Errorf("%q: path segment %q ends in .git before the last", raw, s)
 		}
 		segs = append(segs, s)
 	}
@@ -130,6 +136,13 @@ func PathFor(root, raw string) (string, error) {
 		return "", fmt.Errorf("%q: resolves outside the mirror root", raw)
 	}
 	return out, nil
+}
+
+// incomingPath is the temporary clone directory for the mirror at path: a
+// dot-prefixed sibling ending in ".incoming". PathFor results always end in
+// ".git", so none can equal it, and none can sit inside it.
+func incomingPath(path string) string {
+	return filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".incoming")
 }
 
 // unsafeSegment reports whether s cannot be used as a single path component:
@@ -190,7 +203,7 @@ func (s *Store) Update(raw string) (string, error) {
 			// early but not all its packs; renaming atomically means the mirror at
 			// `path` is only ever a *finished* clone, never a half-written one that
 			// the next run would adopt and hardlink corrupt objects from.
-			tmp := path + ".incoming"
+			tmp := incomingPath(path)
 			if err := os.RemoveAll(tmp); err != nil { // clear a prior crash's leftover
 				return err
 			}

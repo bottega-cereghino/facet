@@ -26,15 +26,33 @@ import (
 // workspace keeps the manifest's name, and the list must say which directory
 // goes.
 func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(string) bool) error {
+	return reapBatch(out, dirs, yes, dryRun, nil, ask)
+}
+
+// reapBatch is reapReapable with a narrowing: when narrow is set, a workspace
+// is a candidate only when narrow gives no reason to leave it out and reap
+// would delete it now. A workspace narrow leaves out is listed with that
+// reason rather than with what holds it. Narrow is asked again just before
+// each deletion. A narrowing only takes away; it never adds a workspace reap
+// would keep.
+func reapBatch(out io.Writer, dirs []string, yes, dryRun bool, narrow func(*workspace.IssueState) string, ask func(string) bool) error {
 	states, inspectErrs := inspectEach(dirs)
 	var picked, heldBy []*workspace.IssueState
-	var held, unchecked int
+	leftOut := map[string][]*workspace.IssueState{}
+	var held, unchecked, narrowed int
 	var total int64
 	for i, st := range states {
+		why := ""
+		if st != nil {
+			why = narrowReason(narrow, st)
+		}
 		switch {
 		case st == nil:
 			unchecked++
 			_, _ = fmt.Fprintf(out, "could not check %s, left alone: %v\n", filepath.Base(dirs[i]), inspectErrs[i])
+		case why != "":
+			narrowed++
+			leftOut[why] = append(leftOut[why], st)
 		case len(st.Blockers()) > 0:
 			held++
 			heldBy = append(heldBy, st)
@@ -47,11 +65,15 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 		}
 	}
 	left := fmt.Sprintf("%d held", held)
+	if narrowed > 0 {
+		left += fmt.Sprintf(", %d left out by --closed", narrowed)
+	}
 	if unchecked > 0 {
 		left += fmt.Sprintf(" and %d that could not be checked", unchecked)
 	}
 	if len(picked) == 0 {
 		printHeld(out, heldBy)
+		printLeftOut(out, leftOut)
 		_, _ = fmt.Fprintf(out, "nothing to reap: %s. `facet reap <name>` says all that holds one.\n", left)
 		return nil
 	}
@@ -65,6 +87,7 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 		return err
 	}
 	printHeld(out, heldBy)
+	printLeftOut(out, leftOut)
 	_, _ = fmt.Fprintf(out, "\n%d reapable, freeing %s; %s left alone.\n", len(picked), humanBytes(total), left)
 	if dryRun {
 		_, _ = fmt.Fprintln(out, "dry run: nothing was deleted.")
@@ -115,6 +138,10 @@ func reapReapable(out io.Writer, dirs []string, yes, dryRun bool, ask func(strin
 		}
 		if again.StaleFetch() {
 			_, _ = fmt.Fprintf(out, "skipped %s: %s\n", reapName(again), staleReason(again))
+			continue
+		}
+		if why := narrowReason(narrow, again); why != "" {
+			_, _ = fmt.Fprintf(out, "skipped %s: since the list was made, %s\n", reapName(again), why)
 			continue
 		}
 		// As in reap: a live session holds file handles on the tree.

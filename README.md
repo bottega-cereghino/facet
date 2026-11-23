@@ -323,6 +323,17 @@ each repository once, however many worktree clones share it. `--dry-run`
 prints the list, worktrees included, and stops there; `facet ls --size` shows
 the workspaces without deleting.
 
+`facet reap --reapable --closed` is narrower, for a run nobody watches: it
+takes only an issue workspace whose branch has a merged or closed pull request
+and no open one, and reap would still delete it now. A pull request is found by
+the branch, or, when there is none, as the merged pull request that had the home
+clone's HEAD, so a squash merge whose branch is gone is found too. Every other
+workspace is left alone and listed, grouped by reason: "not an issue
+workspace", "no pull request", "pull request open" or "pull request lookup
+failed". A lookup that fails holds the workspace; it is never read as closed.
+`--closed` never adds a workspace `--reapable` alone would keep, and works with
+`--dry-run` and `-y`.
+
 `reap` also takes a plain git worktree: one made with `git worktree add`, by
 hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
 `facet reap <path>` refuses while it has uncommitted or untracked files,
@@ -993,6 +1004,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`, and with `--dry-run` it deletes nothing
   (`TestReapReapableDryRunDeletesNothing`).
+- **`reap --reapable --closed` takes only issue workspaces whose pull request
+  is merged or closed**, and keeps the rest with their reason, a failed lookup
+  among them (`TestReapClosedReapsOnlyMergedOrClosedPullRequests`,
+  `TestReapClosedFindsAMergeByTheHomeCommit`). It only narrows: a merged pull
+  request does not take a workspace with unpushed commits
+  (`TestReapClosedStillHoldsUnpushedCommits`).
 - **`reap --reapable` sweeps only worktrees inside their checkout**, never
   one elsewhere and never a bare repository's, so an everyday checkout that is
   a worktree, or a service run from one, keeps its ignored files
