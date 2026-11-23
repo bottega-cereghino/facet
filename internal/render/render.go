@@ -39,8 +39,8 @@ type IssueData struct {
 	Workspace string
 	Repo      string
 	Issue     *ghx.Issue
-	// Title is Issue.Title with control characters stripped, safe to interpolate
-	// into the single-line H1. Issue.Title itself is left untouched for callers
+	// Title is Issue.Title with control characters stripped, safe to print on one line
+	// inside the quote. Issue.Title itself is left untouched for callers
 	// that want the raw value.
 	Title string
 	// Author is the login of whoever opened the issue, with control characters
@@ -211,7 +211,7 @@ func BuildIssueData(workspace, repo, branch, homeDir string, iss *ghx.Issue,
 		// Line breaks are made uniform first, so the demotion sees the same lines
 		// the quote does.
 		Body:   QuoteBody(DemoteHeadings(lineBreaks.Replace(iss.Body), 2)),
-		Labels: iss.LabelNames(), Branch: branch, HomeDir: homeDir,
+		Labels: safeLabels(iss.LabelNames()), Branch: branch, HomeDir: homeDir,
 		Hints: hints,
 	}
 	for _, a := range iss.Assignees {
@@ -248,6 +248,20 @@ func sanitizeInline(s string) string {
 		b.WriteRune(r)
 	}
 	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// safeLabels makes each label name one line with no backtick, so it cannot add a
+// line of its own or close the code span it is printed in. Anyone with triage
+// rights can name a label.
+func safeLabels(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		n = strings.ReplaceAll(sanitizeInline(n), "`", "'")
+		if n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // Slug turns an issue title into a short, filesystem-safe branch component.
