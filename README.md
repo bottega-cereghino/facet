@@ -467,6 +467,7 @@ never passed through a shell.
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` is set; unused without it. |
+| `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
 | `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
 
@@ -665,9 +666,8 @@ or a check result that changed, resets the count. After five refusals of
 the same head the queue stops trying that pull request, adds
 `fix.blockLabel`, runs `fix.notify` with the refusal text, and logs it. At
 most one pull request per repository is merged per round. Neither step runs
-an agent or the gate,
-neither takes a slot, and each pull request gets at most one of them per
-listing.
+an agent or the gate, and neither takes a slot. An update of a pull request
+that is behind is once per listing. A merge GitHub refuses waits as above.
 
 **Serialize pull requests that touch a shared file.** Optional top-level
 `serialize` takes `paths`, a list of globs (for example `**/*baseline*`,
@@ -1207,8 +1207,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `TestPruneHoldsWhenTheProcessProbeFails`).
 - **`reap` refuses while a loaded launchd job runs from the workspace**, running
   or not: a scheduled job between runs holds nothing open, so `lsof` misses it,
-  and its next run would fail. A job counts when its `Program`, an absolute path
-  in its `ProgramArguments`, or its `WorkingDirectory` is inside the workspace.
+  and its next run would fail. A job counts when any plist string value names
+  a path inside the workspace. This includes `Program`, paths in
+  `ProgramArguments` (including values after `=`), `WorkingDirectory`, standard
+  output/error paths, and watched or queued directories.
   The last element of that path is kept as named, so a program that is a
   symlink to an interpreter outside (a venv's python) and a workspace link to
   a project both still count
@@ -1221,7 +1223,8 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `TestGrillReapByACaseVariantNameKeepsTheLaunchdHold`).
   Only jobs `launchctl list` shows count, since a plist that is not loaded starts
   nothing. A loaded job's plist is read wherever it is: from the LaunchAgents
-  folders, or from the file `launchctl print` says it was loaded from
+  folders, or from the file `launchctl print` says it was loaded from (which
+  takes precedence over a stale LaunchAgents copy)
   (`TestUnderFindsAJobLoadedFromAPlistElsewhere`). Unload the job, or move it out, then reap
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
   that fails holds every workspace, since no job can be ruled out; only a

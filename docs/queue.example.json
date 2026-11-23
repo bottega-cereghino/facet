@@ -19,6 +19,7 @@
     }
   },
   "state": "facet-queue.state.json",
+  "decisions": "queue-gate.jsonl",
   "fix": {
     "command": ["agent", "--effort", "{effort}", "{prompt}"],
     "prompt": "Never take a shortcut. Take the long road, or stop, say so in the report, and label the issue blocked. Pull request #{pr} on {branch} in {repo} is {reason}. This is try {try}. The workspace is {workspace}. Make CI green on the same branch. If it conflicts, merge origin/{base} into it. Never weaken a test without the repository's own rule for that. Never clear a ratchet, baseline or lint finding by suppressing it (a non-null assertion, an as cast, any, @ts-ignore, # type: ignore, eslint-disable, nolint, or a higher baseline or limit). If that is the only way, stop and say so. Push, then exit.",
