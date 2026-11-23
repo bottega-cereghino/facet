@@ -36,6 +36,9 @@ func fakeTools(loaded ...string) Runner {
 	return func(name string, args ...string) ([]byte, error) {
 		switch name {
 		case "launchctl":
+			if args[0] == "print" {
+				return nil, nil
+			}
 			var b strings.Builder
 			b.WriteString("PID\tStatus\tLabel\n")
 			for i, l := range loaded {
@@ -49,6 +52,68 @@ func fakeTools(loaded ...string) Runner {
 			return os.ReadFile(args[len(args)-1])
 		}
 		return nil, errors.New("unexpected tool " + name)
+	}
+}
+
+func TestUnderFailsWhenLoadedPlistCannotBeRead(t *testing.T) {
+	agents, root := t.TempDir(), t.TempDir()
+	ws := filepath.Join(root, "svc")
+	label := "com.example.broken"
+	p := plist(t, agents, label, "<key>WorkingDirectory</key><string>"+ws+"</string>")
+	run := func(name string, args ...string) ([]byte, error) {
+		switch {
+		case name == "launchctl" && args[0] == "list":
+			return []byte("PID\tStatus\tLabel\n-\t0\t" + label + "\n"), nil
+		case name == "launchctl" && args[0] == "print":
+			return []byte("\tpath = " + p + "\n"), nil
+		case name == "plutil":
+			return nil, errors.New("invalid plist")
+		}
+		return nil, errors.New("unexpected tool call")
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: run}).Under(ws)
+	if err == nil || len(got) != 0 || !strings.Contains(err.Error(), label) || !strings.Contains(err.Error(), "unload it or fix the plist") {
+		t.Fatalf("Under = %v, %v; want a labeled error with a fix", got, err)
+	}
+}
+
+func TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob(t *testing.T) {
+	agents := t.TempDir()
+	label := "com.example.loaded"
+	plist(t, agents, label, "<key>WorkingDirectory</key><string>/workspace</string>")
+	run := func(name string, args ...string) ([]byte, error) {
+		if name == "launchctl" && args[0] == "list" {
+			return []byte("PID\tStatus\tLabel\n-\t0\t" + label + "\n"), nil
+		}
+		if name == "launchctl" && args[0] == "print" {
+			return nil, errors.New("exit status 5")
+		}
+		if name == "plutil" {
+			return os.ReadFile(args[len(args)-1])
+		}
+		return nil, errors.New("unexpected tool call")
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: run}).Under("/workspace")
+	if err == nil || len(got) != 0 || !strings.Contains(err.Error(), label) || !strings.Contains(err.Error(), "unload it or fix its plist") {
+		t.Fatalf("Under = %v, %v; want a labeled error with a fix", got, err)
+	}
+}
+
+func TestUnderSkipsAnUnreadableUnloadedPlist(t *testing.T) {
+	agents := t.TempDir()
+	plist(t, agents, "com.example.unloaded", "<key>WorkingDirectory</key><string>/workspace</string>")
+	run := func(name string, _ ...string) ([]byte, error) {
+		if name == "launchctl" {
+			return []byte("PID\tStatus\tLabel\n"), nil
+		}
+		if name == "plutil" {
+			return nil, errors.New("invalid plist")
+		}
+		return nil, errors.New("unexpected tool call")
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: run}).Under("/workspace")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Under = %v, %v; want no holders or error", got, err)
 	}
 }
 
