@@ -69,6 +69,7 @@ jobs:
       - run: make fmt
       - run: make vet
       - run: make lint
+      - run: make architecture
       - name: Install shellcheck
         run: |
           cd "$RUNNER_TEMP"

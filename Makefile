@@ -27,10 +27,10 @@ GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 # prints its version.
 SHELLCHECK ?= shellcheck
 
-.PHONY: check build fmt fmt-fix vet lint shellcheck test tidy vuln health clean
+.PHONY: check build fmt fmt-fix vet lint architecture shellcheck test tidy vuln health clean
 
 ## check: everything CI's first tier runs
-check: fmt vet lint shellcheck test tidy vuln
+check: architecture fmt vet lint shellcheck test tidy vuln
 
 ## build: compile the binary
 build:
@@ -55,6 +55,10 @@ vet:
 
 lint:
 	$(GOLANGCI) run ./...
+
+## architecture: import boundaries, cycles and source-file count ratchets
+architecture:
+	go run ./scripts/check-architecture.go
 
 ## shellcheck: the shell scripts, sourced files followed (-x)
 shellcheck:
