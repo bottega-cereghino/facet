@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -170,6 +171,10 @@ type queueRunner struct {
 	mergeMethods map[string]string
 	// dry is set by --dry-run: no label is added and no state is written.
 	dry bool
+	// lastHeld is the hold file path last recorded in the decision log, so
+	// held/released is emitted once per change rather than once per poll.
+	lastHeld   string
+	decisionMu sync.Mutex
 	// rooms is this tick's lanes answer. Nil means a lane label keeps its
 	// agent. The map is not mutated after refreshRooms returns.
 	rooms map[string]string
@@ -199,6 +204,9 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		waited:       map[string]string{},
 		mergeMethods: map[string]string{},
 		dry:          dry,
+	}
+	if !dry && cfg.Decisions != "" {
+		r.lastHeld = lastHoldPath(cfg.Decisions)
 	}
 	if cfg.Fix != nil {
 		st, err := loadQueueState(cfg.State)
@@ -274,6 +282,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	effort, err := r.cfg.effortFor(run[0].Issue.LabelNames())
 	if err != nil {
 		r.logf("queue: %s#%d: %v", run[0].Repo, run[0].Issue.Number, err)
+		r.recordDecision(run[0].Repo, strconv.Itoa(run[0].Issue.Number), r.laneFor(run[0]), "skip", firstErrorLine(err.Error()))
 		r.deferAll(run, r.deferRetry)
 		r.pause(ctx)
 		return false, nil
@@ -314,6 +323,7 @@ func (r *queueRunner) finishIfStopped(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, err
 	}
+	r.recordHold(held)
 	if held != "" {
 		r.logf("queue: hold file %s exists; starting nothing", held)
 		return true, nil
@@ -361,6 +371,7 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 		return nil, err
 	}
 	ranked := orderQueued(issues, projects)
+	r.recordBlockedSkips(ranked)
 	skip := map[string]bool{}
 	for {
 		r.mu.Lock()
@@ -384,7 +395,44 @@ func (r *queueRunner) candidate() ([]queuedIssue, error) {
 			skip[iss.key()] = true
 			pr, _ := r.openPRFor(iss)
 			r.logf("queue: %s#%d has an open pull request from %s; not starting it again", iss.Repo, iss.Issue.Number, pr.HeadRefName)
+			why := "open pull request from " + pr.HeadRefName
+			if pr.Number != 0 {
+				why = fmt.Sprintf("open pull request #%d from %s", pr.Number, pr.HeadRefName)
+			}
+			r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), r.laneFor(iss), "skip", why)
 		}
+	}
+}
+
+func (r *queueRunner) recordBlockedSkips(ranked []queuedIssue) {
+	if r.dry || r.cfg.Decisions == "" {
+		return
+	}
+	type skipEntry struct {
+		iss queuedIssue
+		why string
+	}
+	r.mu.Lock()
+	var skipped []skipEntry
+	for _, iss := range ranked {
+		k := iss.key()
+		if r.inflight[k] {
+			continue
+		}
+		if r.done[k] {
+			skipped = append(skipped, skipEntry{iss: iss, why: "already started in this process"})
+			continue
+		}
+		if r.cfg.PerRepo > 0 && r.repoRunning[iss.Repo] >= r.cfg.PerRepo {
+			skipped = append(skipped, skipEntry{
+				iss: iss,
+				why: fmt.Sprintf("per-repo cap (%d/%d running)", r.repoRunning[iss.Repo], r.cfg.PerRepo),
+			})
+		}
+	}
+	r.mu.Unlock()
+	for _, s := range skipped {
+		r.recordDecision(s.iss.Repo, strconv.Itoa(s.iss.Issue.Number), r.laneFor(s.iss), "skip", s.why)
 	}
 }
 
@@ -541,9 +589,12 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	}
 	held, err := holdFile(r.cfg.Hold)
 	if err != nil || held != "" {
+		if held != "" {
+			r.recordHold(held)
+		}
 		return
 	}
-	argv, who, from, err := r.argvFor(run, ws, effort, rooms)
+	argv, who, from, cmdSummary, err := r.argvFor(run, ws, effort, rooms)
 	if err != nil {
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)
 		r.deferAll(run, r.deferRetry)
@@ -554,6 +605,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 		r.noteFallback(iss, from)
 	}
 	r.logf("queue: %s#%d agent %s effort %s bundle %d in %s", iss.Repo, iss.Issue.Number, who, effort, len(run), ws)
+	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, "start", cmdSummary)
 	err = r.env.run(ctx, ws, argv)
 	if err == nil {
 		r.logf("queue: %s#%d agent exited, bundle %d", iss.Repo, iss.Issue.Number, len(run))
