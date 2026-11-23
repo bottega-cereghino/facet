@@ -705,3 +705,19 @@ func TestReapHoldsARepositoryInAWorktreeNamedThroughASymlink(t *testing.T) {
 		t.Errorf("Dir = %q, want the real path %q", st.Dir, want)
 	}
 }
+
+func TestNetworkRemote(t *testing.T) {
+	for url, want := range map[string]bool{
+		"git@github-work:acme/repo.git":  true,
+		"ssh://git@ghe.example/acme/r":   true,
+		"https://ghe.example/acme/r.git": true,
+		"/tmp/origin.git":                false,
+		"../origin":                      false,
+		"file:///tmp/origin.git":         false,
+		"":                               false,
+	} {
+		if got := networkRemote(url); got != want {
+			t.Errorf("networkRemote(%q) = %v, want %v", url, got, want)
+		}
+	}
+}

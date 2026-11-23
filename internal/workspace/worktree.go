@@ -234,10 +234,11 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 		} else {
 			st.PRUnknown = true
 		}
-	} else if pr != nil && origin != "" && repo == "" && c.Branch != "" && c.Branch != "HEAD" {
-		// An origin that is not plain github.com (an SSH host alias, an
-		// Enterprise host) cannot be asked about its pull requests: an open one
-		// cannot be ruled out, so the state is unknown, not "none" (#325).
+	} else if pr != nil && networkRemote(origin) && repo == "" && c.Branch != "" && c.Branch != "HEAD" {
+		// An origin on a host that is not plain github.com (an SSH host alias,
+		// an Enterprise host) cannot be asked about its pull requests: an open
+		// one cannot be ruled out, so the state is unknown, not "none" (#325).
+		// A local path or file:// origin has no pull requests to ask about.
 		st.PRUnknown = true
 	}
 	st.checkRunning(dir, mux)
@@ -337,4 +338,20 @@ func realPath(p string) string {
 		return r
 	}
 	return filepath.Clean(p)
+}
+
+// networkRemote reports whether a remote URL names another host: a URL with a
+// scheme other than file://, or scp-like user@host:path. A local path, a
+// file:// URL and "" are not.
+func networkRemote(url string) bool {
+	switch {
+	case url == "", strings.HasPrefix(url, "file://"):
+		return false
+	case strings.Contains(url, "://"):
+		return true
+	}
+	// scp-like syntax: a colon before any slash, as git reads it.
+	colon := strings.IndexByte(url, ':')
+	slash := strings.IndexByte(url, '/')
+	return colon > 0 && (slash < 0 || colon < slash)
 }
