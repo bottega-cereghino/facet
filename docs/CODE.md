@@ -219,12 +219,13 @@ already drifted, with the workflow several linter releases behind and
    semantics differ.
 
 A `renovate` job runs Renovate's validator on `renovate.json`, so a broken
-config fails here instead of silently stopping the updates.
+config shows red here instead of silently stopping the updates. It only
+warns: `ci` does not need it.
 
-A final `ci` job needs every other job and fails if any of them failed or was
+A final `ci` job needs every blocking job and fails if any of them failed or was
 cancelled, so one name says whether a run is green. It runs even when a job
 before it fails; a skipped job counts as passed there, which is why the ruleset
-still names `linux` and `macos` as well. A new job goes into its `needs`.
+still names `linux` and `macos` as well. A new blocking job goes into its `needs`.
 
 The tiering is about feedback, **not** cost: this is a public repository, so
 GitHub-hosted runners are free on every OS. A formatting slip should fail in

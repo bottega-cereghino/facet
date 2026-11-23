@@ -807,9 +807,16 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`sync` writes only inside the workspace.** A clone or link key must be one
   directory name and a link target a folder under the projects root; a manifest
   naming `../x`, `a/b` or `/abs` is refused when it is read, before anything is
-  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`). The one
-  write outside it is git's own, in a checkout a clone becomes a worktree of:
-  a fetch of `origin`, and the worktree's entry in that checkout's `.git`.
+  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`).
+  `--bootstrap` (and `restore`, and `facet add link` when it records an origin)
+  is the other write: it clones a missing link target under the projects root.
+  The destination's parent is resolved first, and a parent outside that root
+  is refused, so a symlink committed inside a checkout cannot send the clone
+  elsewhere
+  (`TestSyncBootstrapRefusesACloneThroughASymlinkOutOfTheProjectsRoot`).
+  The remaining write outside the workspace is git's own, in a checkout a clone
+  becomes a worktree of: a fetch of `origin`, and the worktree's entry in that
+  checkout's `.git`.
 - **A manifest URL is never read as a git option.** Every git call that takes a
   URL, path or remote name from the manifest puts `--` before it, so a URL such
   as `--upload-pack=<command>` is looked up as a repository and fails
