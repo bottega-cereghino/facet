@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -155,4 +156,82 @@ func (CLI) MergePR(repo string, number int, method, head string) error {
 	}
 	_, err := run(args...)
 	return err
+}
+
+// PRFiles lists the file paths changed by pull request number in repo.
+// It uses the paginated REST endpoint so a pull request with more than one
+// page of files is not silently truncated.
+func (CLI) PRFiles(repo string, number int) ([]string, error) {
+	if _, _, err := splitRepo("PRFiles", repo); err != nil {
+		return nil, err
+	}
+	out, err := run("api", "--paginate",
+		fmt.Sprintf("repos/%s/pulls/%d/files?per_page=%d", repo, number, restPerPage))
+	if err != nil {
+		return nil, err
+	}
+	files, err := parsePRFiles(out)
+	if err != nil {
+		return nil, fmt.Errorf("parse files of %s#%d: %w", repo, number, err)
+	}
+	return files, nil
+}
+
+func parsePRFiles(out []byte) ([]string, error) {
+	dec := json.NewDecoder(strings.NewReader(string(out)))
+	var all []string
+	for dec.More() {
+		var page []struct {
+			Filename         string `json:"filename"`
+			PreviousFilename string `json:"previous_filename"`
+		}
+		if err := dec.Decode(&page); err != nil {
+			return nil, err
+		}
+		for _, f := range page {
+			if f.Filename != "" {
+				all = append(all, f.Filename)
+			}
+			if f.PreviousFilename != "" && f.PreviousFilename != f.Filename {
+				all = append(all, f.PreviousFilename)
+			}
+		}
+	}
+	return all, nil
+}
+
+// HeadBehindBase reports whether base has commits that head does not
+// contain, via GitHub's compare endpoint. A pull request whose head is
+// behind its base must merge the base in and pass checks again before
+// landing, whatever the repository's branch protection requires.
+func (CLI) HeadBehindBase(repo, base, head string) (bool, error) {
+	if _, _, err := splitRepo("HeadBehindBase", repo); err != nil {
+		return false, err
+	}
+	if base == "" || head == "" {
+		return false, fmt.Errorf("compare %s: base and head are required", repo)
+	}
+	out, err := run("api",
+		fmt.Sprintf("repos/%s/compare/%s...%s", repo, url.PathEscape(base), url.PathEscape(head)))
+	if err != nil {
+		return false, err
+	}
+	var cmp struct {
+		Status   string `json:"status"`
+		BehindBy int    `json:"behind_by"`
+	}
+	if err := json.Unmarshal(out, &cmp); err != nil {
+		return false, fmt.Errorf("parse compare %s %s...%s: %w", repo, base, head, err)
+	}
+	if cmp.BehindBy > 0 {
+		return true, nil
+	}
+	switch strings.ToLower(cmp.Status) {
+	case "ahead", "identical":
+		return false, nil
+	case "behind", "diverged":
+		return true, nil
+	default:
+		return false, fmt.Errorf("compare %s %s...%s: unexpected status %q", repo, base, head, cmp.Status)
+	}
 }
