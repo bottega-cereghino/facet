@@ -93,6 +93,12 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 			t.Errorf("example forbid[%d] = %q, want %q", i, re.String(), defaultForbid[i])
 		}
 	}
+	if cfg.Cap == nil || cfg.Cap.Num != 1 || cfg.Cap.Den != 3 || len(cfg.Cap.Passes) != 2 || cfg.Cap.Passes[1] != "{repo}" {
+		t.Fatalf("example cap = %+v", cfg.Cap)
+	}
+	if !cfg.Cap.matches([]string{"Standards"}) || cfg.Cap.matches([]string{"standards-extra"}) || cfg.Cap.matches([]string{"science"}) {
+		t.Fatalf("example cap labels = %v", cfg.Cap.Labels)
+	}
 	low, err := cfg.effortFor([]string{"next", "Fix"})
 	if err != nil || low != "low" {
 		t.Fatalf("fix effort = %q, %v", low, err)

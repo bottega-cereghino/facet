@@ -53,6 +53,7 @@ The feature map of facet. States: shipped (on main), in progress (an open PR), p
 | F30 | Queue skips issues with an open PR branch |  | shipped | [#425](https://github.com/bottega-cereghino/facet/pull/425) |
 | F31 | Queue fixes its own red or conflicting PRs first |  | planned | [#446](https://github.com/bottega-cereghino/facet/issues/446) |
 | F44 | A `lane:` label is a preference | No room starts the default agent the same tick and logs `fallback_from`. A `model:` label keeps its agent | in progress | [#475](https://github.com/bottega-cereghino/facet/pull/475) |
+| F45 | Cap standards and CI starts | Once a repository's check passes, at most 1 of every 3 starts there is standards or CI work | in progress | [#482](https://github.com/bottega-cereghino/facet/issues/482) |
 
 ## Build, CI and docs
 

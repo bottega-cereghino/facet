@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bottega-cereghino/facet/internal/config"
@@ -239,5 +240,157 @@ func testRoots(root string) config.Roots {
 		Workspaces: filepath.Join(root, "Workspaces"),
 		Projects:   filepath.Join(root, "Projects"),
 		Mirrors:    filepath.Join(root, "Projects", ".mirrors"),
+	}
+}
+
+type hookSource struct {
+	before func()
+}
+
+func (h hookSource) Resolve(url string) (string, string, error) {
+	if h.before != nil {
+		h.before()
+	}
+	return url, "", nil
+}
+
+// A symlink swapped into the clone's path between syncClone's Lstat and git
+// clone must not be followed: git must not clone into the symlink's target,
+// and the temporary staging directory must be cleaned up.
+func TestSyncCloneDoesNotFollowASymlinkSwappedInBeforeTheClone(t *testing.T) {
+	roots, ws, origin := setup(t)
+	m := &manifest.Manifest{Name: "w", Clones: map[string]string{"repo": origin}}
+	if err := m.Write(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	outside := t.TempDir()
+	clonePath := filepath.Join(ws, "repo")
+	swapped := false
+	src := hookSource{before: func() {
+		if !swapped {
+			swapped = true
+			if err := os.Symlink(outside, clonePath); err != nil {
+				t.Errorf("symlink swap failed: %v", err)
+			}
+		}
+	}}
+
+	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Source: src}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("git cloned into the symlink target outside the workspace: %v", entries)
+	}
+	if ok, err := fslink.IsLink(clonePath); err != nil || !ok {
+		t.Fatalf("symlink at %s was replaced (ok=%v, err=%v)", clonePath, ok, err)
+	}
+	assertNoStagingDirs(t, ws)
+}
+
+type hookGit struct {
+	base   gitx.Runner
+	onCall func(args []string)
+}
+
+func (h hookGit) Run(dir string, env []string, args ...string) (string, error) {
+	if h.onCall != nil {
+		h.onCall(args)
+	}
+	return h.base.Run(dir, env, args...)
+}
+
+// A symlink swapped into the clone's path between syncClone's Lstat and git
+// worktree add must not be followed, and the checkout must not keep a dangling
+// worktree entry for the discarded staging directory.
+func TestSyncWorktreeDoesNotFollowASymlinkSwappedInBeforeAdd(t *testing.T) {
+	roots, ws, _, checkout := worktreeSetup(t)
+	outside := t.TempDir()
+	clonePath := filepath.Join(ws, "repo")
+	swapped := false
+	g := hookGit{
+		base: gitx.Git{},
+		onCall: func(args []string) {
+			if !swapped && len(args) > 0 && args[0] == "fetch" {
+				swapped = true
+				if err := os.Symlink(outside, clonePath); err != nil {
+					t.Errorf("symlink swap failed: %v", err)
+				}
+			}
+		},
+	}
+
+	if err := Sync(roots, ws, g, quiet(), SyncOptions{Worktrees: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("git worktree add wrote into the symlink target outside the workspace: %v", entries)
+	}
+	if ok, err := fslink.IsLink(clonePath); err != nil || !ok {
+		t.Fatalf("symlink at %s was replaced (ok=%v, err=%v)", clonePath, ok, err)
+	}
+	if list := gitOut(t, checkout, "worktree", "list", "--porcelain"); strings.Count(list, "worktree ") != 1 {
+		t.Errorf("checkout kept a dangling worktree entry:\n%s", list)
+	}
+	assertNoStagingDirs(t, ws)
+}
+
+// Even if a symlink appears right before os.Rename, renaming a directory onto a
+// symlink fails without following or replacing it, and placeStaged refuses it.
+func TestPlaceStagedRefusesSymlinkDestination(t *testing.T) {
+	ws := t.TempDir()
+	outside := t.TempDir()
+	stage := filepath.Join(ws, "stage")
+	if err := os.Mkdir(stage, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, "marker"), []byte("x\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(ws, "repo")
+	if err := os.Symlink(outside, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := placeStaged(stage, dst); err == nil {
+		t.Fatal("placeStaged succeeded over a symlink")
+	}
+	// Verify os.Rename itself refuses the symlink too (for the window between
+	// Lstat and Rename).
+	if err := os.Rename(stage, dst); err == nil {
+		t.Fatal("os.Rename succeeded over a symlink")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("symlink target was modified: %v", entries)
+	}
+	if ok, err := fslink.IsLink(dst); err != nil || !ok {
+		t.Fatalf("symlink at %s was replaced (ok=%v, err=%v)", dst, ok, err)
+	}
+}
+
+func assertNoStagingDirs(t *testing.T, ws string) {
+	t.Helper()
+	entries, err := os.ReadDir(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".facet-clone-") {
+			t.Errorf("leftover staging directory in workspace: %s", e.Name())
+		}
 	}
 }

@@ -19,6 +19,10 @@ type queueState struct {
 	Started map[string]startedIssue `json:"started"`
 	Fixes   map[string]*fixRecord   `json:"fixes"`
 	Merges  map[string]*mergeHold   `json:"merges,omitempty"`
+	// Starts is every issue the queue started, kept after Started drops a
+	// merged one, so the cap window still counts that run. Empty when the
+	// config has no cap.
+	Starts []startedIssue `json:"starts,omitempty"`
 }
 
 // mergeHold is one pull request's refused merges. Head and Checks are what
