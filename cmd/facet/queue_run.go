@@ -32,7 +32,16 @@ type queueEnv struct {
 	mergePR      func(repo string, number int, method, head string) error
 	behindBase   func(repo, base, head string) (bool, error)
 	prFiles      func(repo string, number int) ([]string, error)
-	spawn        func(repo string, number int) (string, error)
+	// compareFiles is the net diff from base to head, one entry per file.
+	// The suppression check reads it. Nil when the caller has no compare,
+	// which the check reports rather than treating as a clean diff.
+	compareFiles func(repo, base, head string) ([]ghx.DiffFile, error)
+	// requiredChecks lists the status checks the base branch requires.
+	// known is false when the rules cannot be read. Nil uses that same
+	// fallback: a non-success conclusion other than neutral or skipped
+	// is not green.
+	requiredChecks func(repo, branch string) (names []string, known bool, err error)
+	spawn          func(repo string, number int) (string, error)
 	// route runs spawn's routing checks for a repository, without the
 	// network. Only --dry-run calls it; nil skips it.
 	route func(repo string) error
@@ -49,14 +58,16 @@ func realQueueEnv() queueEnv {
 		list: func(repo, label string) ([]ghx.Issue, error) {
 			return gh.OpenIssues(repo, label)
 		},
-		prs:          ghx.CLI{}.OpenPRs,
-		addLabel:     ghx.CLI{}.AddIssueLabel,
-		updateBranch: ghx.CLI{}.UpdatePRBranch,
-		mergeMethod:  ghx.CLI{}.MergeMethod,
-		mergePR:      ghx.CLI{}.MergePR,
-		behindBase:   ghx.CLI{}.HeadBehindBase,
-		prFiles:      ghx.CLI{}.PRFiles,
-		spawn:        prepareWorkspace,
+		prs:            ghx.CLI{}.OpenPRs,
+		addLabel:       ghx.CLI{}.AddIssueLabel,
+		updateBranch:   ghx.CLI{}.UpdatePRBranch,
+		mergeMethod:    ghx.CLI{}.MergeMethod,
+		mergePR:        ghx.CLI{}.MergePR,
+		behindBase:     ghx.CLI{}.HeadBehindBase,
+		prFiles:        ghx.CLI{}.PRFiles,
+		compareFiles:   ghx.CLI{}.CompareFiles,
+		requiredChecks: ghx.CLI{}.RequiredChecks,
+		spawn:          prepareWorkspace,
 		route: func(repo string) error {
 			_, _, err := spawnRoute(repo)
 			return err
@@ -160,14 +171,21 @@ type queueRunner struct {
 	// listing each pull request was last updated or merged from, so one
 	// listing lands it at most once. labelRetry holds a block label that
 	// could not be added until wait has passed.
-	state        *queueState
-	fixing       map[string]bool
-	fixRetry     map[string]time.Time
-	labelRetry   map[string]time.Time
-	prCache      map[string]prListing
-	landed       map[string]time.Time
-	waited       map[string]string
+	state      *queueState
+	fixing     map[string]bool
+	fixRetry   map[string]time.Time
+	labelRetry map[string]time.Time
+	prCache    map[string]prListing
+	landed     map[string]time.Time
+	waited     map[string]string
+	// noted remembers a line already logged for a key, so a refusal is
+	// logged once per head rather than once per tick.
+	noted        map[string]string
 	mergeMethods map[string]string
+	// rules caches the required checks of a base branch for this process.
+	// A ruleset does not change between ticks, and reading it every tick
+	// would spend the shared GitHub limit.
+	rules map[string]checkRules
 	// dry is set by --dry-run: no label is added and no state is written.
 	dry bool
 	// rooms is this tick's lanes answer. Nil means a lane label keeps its
@@ -197,7 +215,9 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		prCache:      map[string]prListing{},
 		landed:       map[string]time.Time{},
 		waited:       map[string]string{},
+		noted:        map[string]string{},
 		mergeMethods: map[string]string{},
+		rules:        map[string]checkRules{},
 		dry:          dry,
 	}
 	if cfg.Fix != nil {

@@ -98,43 +98,287 @@ func TestQueueTriesARefusedMergeOncePerListing(t *testing.T) {
 	seedState(t, cfg.State, []int{1}, nil)
 	land := &landCalls{merge: func(int) error { return errors.New("the base branch policy prohibits the merge") }}
 	ticks := &countCalls{}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	s := startQueue(t, cfg, land.env(queueEnv{
 		list: func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
 		prs:  staticPRs(landPR(11, "feature/1-bell", "BLOCKED")),
+		now:  func() time.Time { return start },
 	}))
 	waitFor(t, "ten rounds", func() bool { return ticks.get("acme/widgets") >= 10 })
 	s.stop(t)
 	if got := land.list(); len(got) != 1 {
-		t.Fatalf("landed = %q, want one try on one listing", got)
+		t.Fatalf("landed = %q, want one try while the wait has not elapsed", got)
 	}
-	if !strings.Contains(s.buf.String(), "prohibits the merge; trying again on the next listing") {
+	if !strings.Contains(s.buf.String(), "prohibits the merge") || !strings.Contains(s.buf.String(), "trying again after") {
 		t.Fatalf("log =\n%s", s.buf.String())
+	}
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := st.Merges["acme/widgets#11"]
+	if h == nil || h.Count != 1 || !h.Next.Equal(start.Add(cfg.Wait)) {
+		t.Fatalf("hold = %+v, want one refusal waiting %s", h, cfg.Wait)
 	}
 }
 
-func TestQueueRetriesARefusedMergeOnTheNextListing(t *testing.T) {
+func TestQueueRetriesARefusedMergeAfterTheWait(t *testing.T) {
 	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
 	seedState(t, cfg.State, []int{1}, nil)
 	var tries atomic.Int32
 	land := &landCalls{merge: func(int) error {
-		if tries.Add(1) == 1 {
-			return errors.New("required status check is expected")
+		if tries.Add(1) < 3 {
+			return errors.New("the base branch policy prohibits the merge")
 		}
 		return nil
 	}}
-	// #7 is queued and has its own open pull request, so new work lists
-	// the repository afresh every round.
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var now atomic.Value
+	now.Store(start)
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list: noIssues,
+		prs:  staticPRs(landPR(11, "feature/1-bell", "CLEAN")),
+		now:  func() time.Time { return now.Load().(time.Time) },
+	}))
+	waitFor(t, "the first refusal", func() bool { return mergeHoldCount(t, cfg.State) >= 1 })
+	if tries.Load() != 1 {
+		t.Fatalf("tries = %d before the wait", tries.Load())
+	}
+	now.Store(mergeHoldNext(t, cfg.State))
+	waitFor(t, "the second refusal", func() bool { return mergeHoldCount(t, cfg.State) >= 2 })
+	if tries.Load() != 2 {
+		t.Fatalf("tries = %d after one wait, want 2 (twice the wait has not elapsed)", tries.Load())
+	}
+	now.Store(mergeHoldNext(t, cfg.State))
+	waitFor(t, "the merge", func() bool { return tries.Load() >= 3 })
+	s.stop(t)
+	if got := land.list(); len(got) != 3 || got[0] != "merge acme/widgets#11 squash head11" || got[1] != got[0] || got[2] != got[0] {
+		t.Fatalf("landed = %q", got)
+	}
+}
+
+func TestQueueStopsMergingAfterFiveRefusals(t *testing.T) {
+	dir := t.TempDir()
+	notified := filepath.Join(dir, "notify")
+	cfg := fixQueue(t, filepath.Join(dir, "log"))
+	cfg.Fix.Notify = []string{appendScript(t), notified, "{repo}#{number} PR {pr}: {reason}"}
+	seedState(t, cfg.State, []int{1}, nil)
+	var tries atomic.Int32
+	land := &landCalls{merge: func(int) error {
+		tries.Add(1)
+		return errors.New("the base branch policy prohibits the merge")
+	}}
+	labels := &labelCalls{}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var now atomic.Value
+	now.Store(start)
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list:     noIssues,
+		prs:      staticPRs(landPR(11, "feature/1-bell", "CLEAN")),
+		addLabel: labels.add,
+		now:      func() time.Time { return now.Load().(time.Time) },
+	}))
+	for n := 1; n <= maxMergeRefusals; n++ {
+		want := n
+		waitFor(t, fmt.Sprintf("refusal %d", want), func() bool { return mergeHoldCount(t, cfg.State) >= want })
+		if want < maxMergeRefusals {
+			now.Store(mergeHoldNext(t, cfg.State))
+		}
+	}
+	waitFor(t, "the label", func() bool { return len(labels.list()) >= 1 })
+	now.Store(start.Add(24 * time.Hour))
+	time.Sleep(150 * time.Millisecond)
+	s.stop(t)
+	if tries.Load() != maxMergeRefusals {
+		t.Fatalf("tries = %d, want %d", tries.Load(), maxMergeRefusals)
+	}
+	if labels.list()[0] != "acme/widgets#1 blocked" {
+		t.Fatalf("labels = %q", labels.list())
+	}
+	note := readLines(t, notified)
+	if len(note) != 1 || !strings.Contains(note[0], "prohibits the merge") {
+		t.Fatalf("notify = %q", note)
+	}
+	log := s.buf.String()
+	if strings.Count(log, "refusal 1 of 5") != 1 || !strings.Contains(log, "not trying again") {
+		t.Fatalf("log =\n%s", log)
+	}
+}
+
+func TestQueueResetsAMergeRefusalWhenTheHeadChanges(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	var head atomic.Value
+	head.Store("head11")
+	var tries atomic.Int32
+	land := &landCalls{merge: func(int) error {
+		tries.Add(1)
+		return errors.New("the base branch policy prohibits the merge")
+	}}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var now atomic.Value
+	now.Store(start)
 	s := startQueue(t, cfg, land.env(queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{openIssue(7, "2026-01-01T00:00:00Z")}, nil
 		},
-		prs: staticPRs(landPR(11, "feature/1-bell", "CLEAN"), redPR(17, "feature/7-other")),
+		prs: func(string) ([]ghx.OpenPR, error) {
+			pr := landPR(11, "feature/1-bell", "CLEAN")
+			pr.HeadRefOid = head.Load().(string)
+			return []ghx.OpenPR{pr, redPR(17, "feature/7-other")}, nil
+		},
+		now: func() time.Time { return now.Load().(time.Time) },
 	}))
-	waitFor(t, "the second merge", func() bool { return tries.Load() >= 2 })
+	waitFor(t, "the first refusal", func() bool { return mergeHoldCount(t, cfg.State) >= 1 })
+	now.Store(mergeHoldNext(t, cfg.State))
+	waitFor(t, "two refusals", func() bool { return mergeHoldCount(t, cfg.State) >= 2 })
+	// The doubled wait has not elapsed. A new head tries at once and the
+	// count starts again.
+	head.Store("head11b")
+	waitFor(t, "the reset try", func() bool { return tries.Load() >= 3 })
+	waitFor(t, "the reset count", func() bool {
+		st, err := loadQueueState(cfg.State)
+		return err == nil && st.Merges["acme/widgets#11"] != nil && st.Merges["acme/widgets#11"].Count == 1 && st.Merges["acme/widgets#11"].Head == "head11b"
+	})
 	s.stop(t)
-	if got := land.list(); len(got) < 2 || got[0] != "merge acme/widgets#11 squash head11" || got[1] != got[0] {
-		t.Fatalf("landed = %q", got)
+}
+
+func TestQueueKeepsAMergeWaitAcrossARestart(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	land := &landCalls{merge: func(int) error { return errors.New("the base branch policy prohibits the merge") }}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var now atomic.Value
+	now.Store(start)
+	env := land.env(queueEnv{
+		list: noIssues,
+		prs:  staticPRs(landPR(11, "feature/1-bell", "CLEAN")),
+		now:  func() time.Time { return now.Load().(time.Time) },
+	})
+	s := startQueue(t, cfg, env)
+	waitFor(t, "the first refusal", func() bool { return mergeHoldCount(t, cfg.State) >= 1 })
+	s.stop(t)
+	if len(land.list()) != 1 {
+		t.Fatalf("landed = %q", land.list())
 	}
+	ticks := &countCalls{}
+	env.list = func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil }
+	s = startQueue(t, cfg, env)
+	waitFor(t, "rounds after restart", func() bool { return ticks.get("acme/widgets") >= 5 })
+	if len(land.list()) != 1 {
+		t.Fatalf("restart tried the merge again: %q", land.list())
+	}
+	now.Store(mergeHoldNext(t, cfg.State))
+	waitFor(t, "the second refusal", func() bool { return mergeHoldCount(t, cfg.State) >= 2 })
+	s.stop(t)
+	if len(land.list()) != 2 {
+		t.Fatalf("landed = %q, want the try after the saved wait", land.list())
+	}
+}
+
+func TestQueueDoesNotLandACancelledRequiredCheck(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	pr := landPR(11, "feature/1-bell", "CLEAN")
+	pr.Checks[0].Conclusion = "CANCELLED"
+	land := &landCalls{}
+	ticks := &countCalls{}
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+		prs:  staticPRs(pr),
+		requiredChecks: func(string, string) ([]string, bool, error) {
+			return []string{"ci"}, true, nil
+		},
+	}))
+	waitFor(t, "the refusal", func() bool {
+		return ticks.get("acme/widgets") >= 3 && strings.Contains(s.buf.String(), "not landing: ci is CANCELLED")
+	})
+	s.stop(t)
+	if len(land.list()) != 0 {
+		t.Fatalf("landed = %q", land.list())
+	}
+}
+
+func TestQueueLandsWhenACancelledCheckIsNotRequired(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	pr := landPR(11, "feature/1-bell", "CLEAN")
+	pr.Checks = append(pr.Checks, ghx.CheckRun{Typename: "CheckRun", Name: "lint", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: "2026-01-01T00:00:00Z"})
+	var merged atomic.Bool
+	land := &landCalls{merge: func(int) error { merged.Store(true); return nil }}
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list: noIssues,
+		prs:  staticPRs(pr),
+		requiredChecks: func(string, string) ([]string, bool, error) {
+			return []string{"ci"}, true, nil
+		},
+	}))
+	waitFor(t, "the merge", func() bool { return merged.Load() })
+	s.stop(t)
+}
+
+func TestLandableChecks(t *testing.T) {
+	run := func(name, conclusion string) ghx.CheckRun {
+		return ghx.CheckRun{Typename: "CheckRun", Name: name, Status: "COMPLETED", Conclusion: conclusion, StartedAt: "2026-01-01T00:00:00Z"}
+	}
+	cancelled := ghx.OpenPR{Checks: []ghx.CheckRun{run("ci", "CANCELLED")}}
+	if ok, why := landableChecks(cancelled, []string{"ci"}, true); ok || why != "ci is CANCELLED" {
+		t.Fatalf("required cancelled = %v %q", ok, why)
+	}
+	if ok, why := landableChecks(cancelled, nil, false); ok || why != "ci is CANCELLED" {
+		t.Fatalf("unreadable cancelled = %v %q", ok, why)
+	}
+	skipped := ghx.OpenPR{Checks: []ghx.CheckRun{run("ci", "SKIPPED")}}
+	if ok, _ := landableChecks(skipped, nil, false); !ok {
+		t.Fatal("an unreadable skipped check should pass")
+	}
+	if ok, why := landableChecks(skipped, []string{"ci"}, true); ok || why != "ci is SKIPPED" {
+		t.Fatalf("required skipped = %v %q", ok, why)
+	}
+	missing := ghx.OpenPR{Checks: []ghx.CheckRun{run("ci", "SUCCESS")}}
+	if ok, why := landableChecks(missing, []string{"ci", "lint"}, true); ok || why != "lint is missing" {
+		t.Fatalf("missing = %v %q", ok, why)
+	}
+	neutral := ghx.OpenPR{Checks: []ghx.CheckRun{run("ci", "SUCCESS"), run("extra", "NEUTRAL")}}
+	if ok, why := landableChecks(neutral, nil, false); !ok {
+		t.Fatalf("neutral = %v %q", ok, why)
+	}
+}
+
+func TestMergeBackoffDoublesUntilAnHour(t *testing.T) {
+	base := 30 * time.Second
+	if mergeBackoff(base, 1) != base || mergeBackoff(base, 2) != 2*base || mergeBackoff(base, 3) != 4*base {
+		t.Fatalf("backoff = %s %s %s", mergeBackoff(base, 1), mergeBackoff(base, 2), mergeBackoff(base, 3))
+	}
+	if mergeBackoff(base, 20) != maxMergeBackoff {
+		t.Fatalf("cap = %s", mergeBackoff(base, 20))
+	}
+}
+
+func mergeHoldCount(t *testing.T, path string) int {
+	t.Helper()
+	st, err := loadQueueState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := st.Merges["acme/widgets#11"]
+	if h == nil {
+		return 0
+	}
+	return h.Count
+}
+
+func mergeHoldNext(t *testing.T, path string) time.Time {
+	t.Helper()
+	st, err := loadQueueState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := st.Merges["acme/widgets#11"]
+	if h == nil {
+		t.Fatal("no merge hold")
+	}
+	return h.Next
 }
 
 func TestQueueLandsNothingWithLandOff(t *testing.T) {
@@ -375,7 +619,8 @@ func TestQueueFixPromptNamesTheBase(t *testing.T) {
 	waitFor(t, "the fix", func() bool { return len(readLines(t, log)) >= 1 })
 	s.stop(t)
 	got := readLines(t, log)[0]
-	if !strings.HasPrefix(got, "release: ") || !strings.Contains(got, "merge origin/release into it") || strings.Contains(got, "<base>") {
+	if !strings.HasPrefix(got, "release: Never take a shortcut.") || !strings.Contains(got, "merge origin/release into it") ||
+		!strings.Contains(got, "Never clear a ratchet") || strings.Contains(got, "<base>") {
 		t.Fatalf("fix run = %q", got)
 	}
 }

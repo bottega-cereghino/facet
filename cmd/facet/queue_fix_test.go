@@ -519,8 +519,12 @@ func TestQueueFixConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || cfg.Fix.Prompt != defaultFixPrompt || !cfg.Fix.Land ||
+		cfg.Fix.forbidOff || len(cfg.Fix.Forbid) != len(defaultForbid) ||
 		!filepath.IsAbs(cfg.State) || filepath.Base(cfg.State) != "q-state.json" {
 		t.Fatalf("fix = %+v, state %q", cfg.Fix, cfg.State)
+	}
+	if !strings.HasPrefix(cfg.Fix.Prompt, "Never take a shortcut.") || !strings.Contains(cfg.Fix.Prompt, "Never clear a ratchet") {
+		t.Fatalf("prompt = %q", cfg.Fix.Prompt)
 	}
 	off, err := loadTempConfig(t, `{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "land": false}, `+base+`}`)
 	if err != nil || off.Fix.Land {
@@ -530,12 +534,18 @@ func TestQueueFixConfig(t *testing.T) {
 	if err != nil || none.Fix != nil || none.State != "" {
 		t.Fatalf("no fix: %+v, %v", none, err)
 	}
+	offForbid, err := loadTempConfig(t, `{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": []}, `+base+`}`)
+	if err != nil || !offForbid.Fix.forbidOff || offForbid.Fix.Forbid != nil {
+		t.Fatalf("forbid off: %+v, %v", offForbid.Fix, err)
+	}
 	for _, tc := range []struct{ body, want string }{
 		{`{"fix": {"command": ["fixer", "{prompt}"]}, ` + base + `}`, "state"},
 		{`{"state": "s", "fix": {"command": ["fixer"]}, ` + base + `}`, "{prompt}"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "tries": 6}, ` + base + `}`, "tries"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "tries": 0}, ` + base + `}`, "tries"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "blockLabel": "a,b"}, ` + base + `}`, "comma"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": ["("]}, ` + base + `}`, "forbid"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": [""]}, ` + base + `}`, "empty pattern"},
 	} {
 		if _, err := loadTempConfig(t, tc.body); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", tc.body, err, tc.want)

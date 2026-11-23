@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -224,16 +225,41 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 		return nil
 	}
 	if verdict == prGreen {
-		// No checks at all cannot tell a green PR from one whose checks
-		// have not been listed yet, so that keeps the record.
-		if rec != nil && len(pr.Checks) > 0 {
-			r.clearFix(k, pr.Number)
-			runs = 0
-		}
-		if !r.cfg.Fix.Land || !r.land(iss, pr, got, mergedRepo) {
+		if why := r.landBlockReason(iss.Repo, pr); why != "" {
+			// A cancelled, skipped or missing required check is not a pass,
+			// and it is not a red result for a fix run either: the pull
+			// request stays as it is until the check really passed.
+			r.noteOnce(k+" land "+pr.HeadRefOid, why, func() {
+				r.logf("queue: %s PR #%d: not landing: %s", k, pr.Number, why)
+			})
 			return nil
 		}
-		reason = "conflicts with " + baseName(pr)
+		pattern, file, bad, err := r.suppression(iss, pr)
+		switch {
+		case err != nil:
+			// A diff that cannot be read is not a pass: landing it could
+			// merge a suppression the check did not see.
+			r.noteOnce(k+" forbid "+pr.HeadRefOid, err.Error(), func() {
+				r.logf("queue: %s PR #%d: %v; not landing", k, pr.Number, err)
+			})
+			return nil
+		case bad:
+			reason = fmt.Sprintf("the fix suppresses instead of fixing: %s in %s", pattern, file)
+			r.noteOnce(k+" suppress "+pr.HeadRefOid, reason, func() {
+				r.logf("queue: %s PR #%d: %s; not landing", k, pr.Number, reason)
+			})
+		default:
+			// No checks at all cannot tell a green PR from one whose checks
+			// have not been listed yet, so that keeps the record.
+			if rec != nil && len(pr.Checks) > 0 {
+				r.clearFix(k, pr.Number)
+				runs = 0
+			}
+			if !r.cfg.Fix.Land || !r.land(ctx, iss, pr, got, mergedRepo) {
+				return nil
+			}
+			reason = "conflicts with " + baseName(pr)
+		}
 	}
 	if runs >= r.cfg.Fix.Tries {
 		r.block(ctx, iss, pr, reason, runs)
@@ -268,6 +294,9 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 		return
 	}
 	delete(r.state.Fixes, k)
+	if s.PR != 0 {
+		delete(r.state.Merges, landKey(iss.Repo, s.PR))
+	}
 	if !recent {
 		delete(r.state.Started, k)
 	}
@@ -417,6 +446,11 @@ func (r *queueRunner) startFix(ctx context.Context, job *fixJob) {
 	}
 	rec.Runs++
 	rec.Last = r.env.now()
+	// The first try's head stays. A later try is judged on the diff from
+	// that head, so a suppression the first try pushed is still visible.
+	if rec.Head == "" {
+		rec.Head = job.pr.HeadRefOid
+	}
 	r.mu.Unlock()
 	r.saveState()
 	r.wg.Add(1)

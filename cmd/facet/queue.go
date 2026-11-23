@@ -59,7 +59,9 @@ func newQueueCmd() *cobra.Command {
 			"fix.tries failed tries it labels the issue blocked, and leaves it. With\n" +
 			"fix.land (the default) a green one behind its base is updated by merging\n" +
 			"the base, and a green one up to date is merged, without an agent, at most\n" +
-			"one per repository per round. Optional serialize.paths serializes open\n" +
+			"one per repository per round. A merge GitHub refuses waits, doubling up\n" +
+			"to an hour, and stops after five. A fix that suppresses a finding is not\n" +
+			"landed. Optional serialize.paths serializes open\n" +
 			"queue pull requests touching a matching glob one at a time per repository.\n" +
 			"A person's own pull request, or a fork's, is never touched.\n\n" +
 			"It does not reap workspaces. A workspace already on disk for the issue is\n" +

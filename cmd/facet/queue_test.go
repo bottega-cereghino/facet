@@ -84,8 +84,14 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	}
 	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || len(cfg.Fix.Gate) == 0 || len(cfg.Fix.Notify) == 0 ||
 		!strings.Contains(cfg.Fix.Prompt, "{reason}") || !strings.Contains(cfg.Fix.Prompt, "origin/{base}") || !cfg.Fix.Land ||
+		cfg.Fix.forbidOff || len(cfg.Fix.Forbid) != len(defaultForbid) ||
 		filepath.Base(cfg.State) != "facet-queue.state.json" {
 		t.Fatalf("example fix = %+v, state %q", cfg.Fix, cfg.State)
+	}
+	for i, re := range cfg.Fix.Forbid {
+		if re.String() != defaultForbid[i] {
+			t.Errorf("example forbid[%d] = %q, want %q", i, re.String(), defaultForbid[i])
+		}
 	}
 	low, err := cfg.effortFor([]string{"next", "Fix"})
 	if err != nil || low != "low" {
