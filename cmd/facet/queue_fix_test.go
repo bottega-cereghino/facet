@@ -50,13 +50,15 @@ func recordPR(t *testing.T, path string, number, pr int) {
 	}
 }
 
-// landCalls records the update and merge seams. update and merge, when
-// set, answer them; otherwise they succeed.
+// landCalls records the update and merge seams. update, merge, behind and
+// files, when set, answer them; otherwise they succeed.
 type landCalls struct {
 	mu     sync.Mutex
 	calls  []string
 	update func(n int) error
 	merge  func(n int) error
+	behind func(repo, base, head string) (bool, error)
+	files  func(repo string, n int) ([]string, error)
 }
 
 func (l *landCalls) env(e queueEnv) queueEnv {
@@ -74,6 +76,15 @@ func (l *landCalls) env(e queueEnv) queueEnv {
 			return l.merge(n)
 		}
 		return nil
+	}
+	e.behindBase = func(repo, base, head string) (bool, error) {
+		if l.behind != nil {
+			return l.behind(repo, base, head)
+		}
+		return false, nil
+	}
+	if l.files != nil {
+		e.prFiles = l.files
 	}
 	return e
 }

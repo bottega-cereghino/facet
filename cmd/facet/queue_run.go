@@ -24,11 +24,14 @@ type queueEnv struct {
 	// addLabel adds a label to an issue. The fix stage uses it to block an
 	// issue that used up its tries.
 	addLabel func(repo string, number int, label string) error
-	// updateBranch, mergeMethod and mergePR land a green queue pull
-	// request (fix.land). Nil skips that step.
+	// updateBranch, mergeMethod, mergePR, behindBase and prFiles land a
+	// green queue pull request (fix.land) and serialize on shared files.
+	// Nil skips that step.
 	updateBranch func(repo string, number int) error
 	mergeMethod  func(repo string) (string, error)
 	mergePR      func(repo string, number int, method, head string) error
+	behindBase   func(repo, base, head string) (bool, error)
+	prFiles      func(repo string, number int) ([]string, error)
 	spawn        func(repo string, number int) (string, error)
 	// route runs spawn's routing checks for a repository, without the
 	// network. Only --dry-run calls it; nil skips it.
@@ -51,6 +54,8 @@ func realQueueEnv() queueEnv {
 		updateBranch: ghx.CLI{}.UpdatePRBranch,
 		mergeMethod:  ghx.CLI{}.MergeMethod,
 		mergePR:      ghx.CLI{}.MergePR,
+		behindBase:   ghx.CLI{}.HeadBehindBase,
+		prFiles:      ghx.CLI{}.PRFiles,
 		spawn:        prepareWorkspace,
 		route: func(repo string) error {
 			_, _, err := spawnRoute(repo)
@@ -161,6 +166,7 @@ type queueRunner struct {
 	labelRetry   map[string]time.Time
 	prCache      map[string]prListing
 	landed       map[string]time.Time
+	waited       map[string]string
 	mergeMethods map[string]string
 	// dry is set by --dry-run: no label is added and no state is written.
 	dry bool
@@ -190,6 +196,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		labelRetry:   map[string]time.Time{},
 		prCache:      map[string]prListing{},
 		landed:       map[string]time.Time{},
+		waited:       map[string]string{},
 		mergeMethods: map[string]string{},
 		dry:          dry,
 	}
