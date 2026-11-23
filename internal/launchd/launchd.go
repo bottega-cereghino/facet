@@ -112,13 +112,14 @@ func (j *Jobs) load() {
 	if len(loaded) == 0 {
 		return
 	}
-	found := map[string]bool{}
+	candidates := map[string][]job{}
 	for _, d := range j.Dirs {
 		files, _ := filepath.Glob(filepath.Join(d, "*.plist"))
 		sort.Strings(files)
 		for _, f := range files {
-			if jb, ok := j.read(f, loaded); ok {
-				found[jb.label] = true
+			jb, ok := j.readPlist(f)
+			if ok && loaded[jb.label] {
+				candidates[jb.label] = append(candidates[jb.label], jb)
 			}
 		}
 	}
@@ -128,27 +129,42 @@ func (j *Jobs) load() {
 	}
 	sort.Strings(labels)
 	for _, l := range labels {
-		if found[l] || !elsewhere(l) {
+		local := candidates[l]
+		if len(local) == 0 && !elsewhere(l) {
 			continue
 		}
+		// launchctl's path is authoritative: a stale LaunchAgents copy with
+		// the same label must not hide the plist the loaded job came from.
 		if f := j.plistOf(l); f != "" {
 			j.read(f, map[string]bool{l: true})
+			// A named plist that cannot be read is not evidence that a
+			// different plist defined the loaded job.
+			continue
 		}
+		j.jobs = append(j.jobs, local...)
 	}
 }
 
 // read parses the plist f and keeps its job when its label is loaded.
 func (j *Jobs) read(f string, loaded map[string]bool) (job, bool) {
+	jb, ok := j.readPlist(f)
+	if !ok || !loaded[jb.label] {
+		return job{}, false
+	}
+	j.jobs = append(j.jobs, jb)
+	return jb, true
+}
+
+func (j *Jobs) readPlist(f string) (job, bool) {
 	raw, err := j.Run("plutil", "-convert", "xml1", "-o", "-", f)
 	if err != nil {
 		return job{}, false
 	}
 	jb, err := parsePlist(raw)
-	if err != nil || !loaded[jb.label] {
+	if err != nil {
 		return job{}, false
 	}
 	jb.plist = f
-	j.jobs = append(j.jobs, jb)
 	return jb, true
 }
 
@@ -202,9 +218,8 @@ func (j *Jobs) loadedLabels() (map[string]bool, error) {
 	return labels, nil
 }
 
-// parsePlist reads the keys of an XML plist's top-level dict that say where a
-// job runs from: Label, Program, ProgramArguments and WorkingDirectory.
-// Arguments that are not absolute paths are dropped.
+// parsePlist reads every string value in an XML plist for paths a job may
+// depend on. Label is read only from the top-level dict.
 func parsePlist(raw []byte) (job, error) {
 	var jb job
 	dec := xml.NewDecoder(bytes.NewReader(raw))
@@ -238,17 +253,11 @@ func parsePlist(raw []byte) (job, error) {
 				if err := dec.DecodeElement(&s, &t); err != nil {
 					return job{}, err
 				}
-				if depth != 1 {
-					continue
-				}
-				switch {
-				case key == "Label" && !inArray:
+				if depth == 1 && key == "Label" && !inArray {
 					jb.label = s
-				case (key == "Program" || key == "WorkingDirectory") && !inArray,
-					key == "ProgramArguments" && inArray:
-					if filepath.IsAbs(s) {
-						jb.paths = append(jb.paths, keyPath{key, s})
-					}
+				}
+				for _, candidate := range pathCandidates(s) {
+					jb.paths = append(jb.paths, keyPath{key, candidate})
 				}
 			}
 		case xml.EndElement:
@@ -266,6 +275,27 @@ func parsePlist(raw []byte) (job, error) {
 		return job{}, errors.New("plist has no Label")
 	}
 	return jb, nil
+}
+
+// pathCandidates finds absolute paths in plist strings, including shell command
+// arguments and option values such as --config=/path/to/config.
+func pathCandidates(s string) []string {
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		switch r {
+		case '=', ' ', '\t', '\n', '\r', '\'', '"', '`', ';', '&', '|', '(', ')':
+			return true
+		default:
+			return false
+		}
+	})
+	var paths []string
+	for _, part := range parts {
+		part = strings.Trim(part, ",:")
+		if filepath.IsAbs(part) {
+			paths = append(paths, part)
+		}
+	}
+	return paths
 }
 
 // canonical resolves symlinks in every element but the last. The last element

@@ -1222,8 +1222,10 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `TestPruneHoldsWhenTheProcessProbeFails`).
 - **`reap` refuses while a loaded launchd job runs from the workspace**, running
   or not: a scheduled job between runs holds nothing open, so `lsof` misses it,
-  and its next run would fail. A job counts when its `Program`, an absolute path
-  in its `ProgramArguments`, or its `WorkingDirectory` is inside the workspace.
+  and its next run would fail. A job counts when any plist string value names
+  a path inside the workspace. This includes `Program`, paths in
+  `ProgramArguments` (including values after `=`), `WorkingDirectory`, standard
+  output/error paths, and watched or queued directories.
   The last element of that path is kept as named, so a program that is a
   symlink to an interpreter outside (a venv's python) and a workspace link to
   a project both still count
@@ -1236,7 +1238,8 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `TestGrillReapByACaseVariantNameKeepsTheLaunchdHold`).
   Only jobs `launchctl list` shows count, since a plist that is not loaded starts
   nothing. A loaded job's plist is read wherever it is: from the LaunchAgents
-  folders, or from the file `launchctl print` says it was loaded from
+  folders, or from the file `launchctl print` says it was loaded from (which
+  takes precedence over a stale LaunchAgents copy)
   (`TestUnderFindsAJobLoadedFromAPlistElsewhere`). Unload the job, or move it out, then reap
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
   that fails holds every workspace, since no job can be ruled out; only a
