@@ -211,11 +211,21 @@ func TestQueueFixesARedQueuePRBeforeANewIssue(t *testing.T) {
 		prs:      staticPRs(redPR(11, "feature/1-bell")),
 		addLabel: labels.add,
 	})
-	waitFor(t, "two runs", func() bool { return len(readLines(t, log)) >= 2 })
+	// The PR stays red, so a second fix try may come before the new issue:
+	// red first. What matters is that the first run is the fix and the new
+	// issue still starts after it.
+	waitFor(t, "the new issue", func() bool {
+		for _, l := range readLines(t, log) {
+			if l == "start 5" {
+				return true
+			}
+		}
+		return false
+	})
 	s.stop(t)
 	got := readLines(t, log)
-	if got[0] != "fix 1 PR 11 try 1: red: ci is FAILURE" || got[1] != "start 5" {
-		t.Fatalf("runs = %q, want the fix, then the new issue", got)
+	if got[0] != "fix 1 PR 11 try 1: red: ci is FAILURE" {
+		t.Fatalf("runs = %q, want the fix first", got)
 	}
 }
 
