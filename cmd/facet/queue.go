@@ -26,9 +26,9 @@ func newQueueCmd() *cobra.Command {
 		Short: "Run a configured agent on each queued issue",
 		Long: "Takes the next open issue carrying the config's label, spawns a workspace for\n" +
 			"it, and starts the agent command the config names for the issue's labels. When\n" +
-			"that agent exits, it takes the next issue. At most max agents run at once,\n" +
-			"across every repository in the config.\n\n" +
-			"The commands, the cap, the gate and the hold file come from the JSON config\n" +
+			"that agent exits, it takes the next issue. At most max agents run at once\n" +
+			"across all repositories, and at most per_repo agents run in one repository.\n\n" +
+			"The commands, the caps, the gate and the hold file come from the JSON config\n" +
 			"(--config, or FACET_QUEUE). docs/queue.example.json is an example.\n\n" +
 			"A label lane:NAME is a preference. When lanes.command says that lane's room\n" +
 			"is \"no\", the same tick starts the empty-label agent instead, and lanes.log\n" +
