@@ -121,6 +121,94 @@ func TestUnderReportsAListThatFails(t *testing.T) {
 	}
 }
 
+// A program inside the directory that is a symlink to an interpreter
+// elsewhere still runs from the directory. Resolving that last element
+// would place it outside, and reap would delete what the job runs.
+func TestGrillUnderHoldsAJobRunThroughASymlinkInsideTheDirectory(t *testing.T) {
+	agents, root := t.TempDir(), t.TempDir()
+	ws := filepath.Join(root, "svc")
+	bin := filepath.Join(ws, ".venv", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "python-real")
+	if err := os.WriteFile(outside, []byte("interpreter\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	python := filepath.Join(bin, "python")
+	if err := os.Symlink(outside, python); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(python)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved == python || strings.HasPrefix(resolved, ws+string(filepath.Separator)) {
+		t.Fatal("python did not point outside the directory, so this would pass without the fix")
+	}
+	via, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plist(t, agents, "com.example.venv", "\t<key>Program</key>\n\t<string>"+python+"</string>")
+	got, err := (&Jobs{Dirs: []string{agents}, Run: fakeTools("com.example.venv")}).Under(via)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "com.example.venv runs from it (Program "+python) {
+		t.Fatalf("Under = %v; want the job whose program is the symlink %s", got, python)
+	}
+}
+
+// foldsCase follows the volume: a case-insensitive disk folds, a
+// case-sensitive one does not. Getting the capability bits wrong would hold
+// one directory for a job that runs from another, or miss the job entirely.
+func TestFoldsCaseFollowsTheVolume(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "Aa"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := os.Stat(filepath.Join(dir, "aa"))
+	want := err == nil
+	if got := foldsCase(dir); got != want {
+		t.Fatalf("foldsCase = %v, volume is case-insensitive = %v", got, want)
+	}
+}
+
+// On a case-insensitive disk the directory and the path a plist names can
+// differ only in case, and a string compare misses the job.
+func TestGrillUnderMatchesACaseVariantOfTheDirectory(t *testing.T) {
+	agents, root := t.TempDir(), t.TempDir()
+	ws := filepath.Join(root, "svc")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	variant := filepath.Join(root, "SVC")
+	if _, err := os.Stat(variant); err != nil {
+		t.Skip("needs a case-insensitive disk (the macOS job runs it)")
+	}
+	plist(t, agents, "com.example.case", "\t<key>WorkingDirectory</key>\n\t<string>"+ws+"</string>")
+	plist(t, agents, "com.example.sibling", "\t<key>WorkingDirectory</key>\n\t<string>"+filepath.Join(root, "SVC-old")+"</string>")
+	j := &Jobs{Dirs: []string{agents}, Run: fakeTools("com.example.case", "com.example.sibling")}
+	got, err := j.Under(variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "com.example.case") {
+		t.Fatalf("Under(%s) = %v; want the job whose plist names %s", variant, got, ws)
+	}
+	// The other way round: the plist names the variant, the directory is asked as stored.
+	agents2 := t.TempDir()
+	plist(t, agents2, "com.example.case", "\t<key>WorkingDirectory</key>\n\t<string>"+variant+"</string>")
+	got, err = (&Jobs{Dirs: []string{agents2}, Run: fakeTools("com.example.case")}).Under(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "com.example.case") {
+		t.Fatalf("Under(%s) = %v; want the job whose plist names %s", ws, got, variant)
+	}
+}
+
 func TestParsePlistNeedsALabel(t *testing.T) {
 	if _, err := parsePlist([]byte(`<plist><dict><key>Program</key><string>/x</string></dict></plist>`)); err == nil {
 		t.Fatal("a plist without a Label parsed")

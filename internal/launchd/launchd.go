@@ -268,10 +268,27 @@ func parsePlist(raw []byte) (job, error) {
 	return jb, nil
 }
 
-// canonical resolves symlinks, so /var and /private/var, or a symlinked
-// ~/Workspaces, compare equal. A path that does not exist yet (a program not
-// built yet) is resolved through its deepest existing parent.
+// canonical resolves symlinks in every element but the last. The last element
+// is kept as named, so a path inside the directory that is itself a symlink
+// to elsewhere still compares as inside: a venv's python, linked to the base
+// interpreter, and a workspace link to a project. Links above that element
+// are resolved, so /var and /private/var compare equal. A path that does not
+// exist yet (a program not built yet) is resolved through its deepest
+// existing parent, and the missing tail is kept as named.
 func canonical(p string) string {
+	p = filepath.Clean(p)
+	dir, base := filepath.Split(p)
+	dir = filepath.Clean(dir)
+	if base == "" {
+		return resolveExisting(dir)
+	}
+	return filepath.Join(resolveExisting(dir), base)
+}
+
+// resolveExisting resolves a path whose own last element may be followed. The
+// deepest existing ancestor is resolved, and any missing tail is appended as
+// named.
+func resolveExisting(p string) string {
 	p = filepath.Clean(p)
 	rest := ""
 	for {
@@ -287,7 +304,12 @@ func canonical(p string) string {
 	}
 }
 
-// within reports whether p is root or inside it.
+// within reports whether p is root or inside it. Where the volume folds case,
+// the spellings compare equal, so a directory reached as SVC still matches
+// the job whose plist names svc.
 func within(root, p string) bool {
+	if foldsCase(root) {
+		root, p = strings.ToLower(root), strings.ToLower(p)
+	}
 	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
