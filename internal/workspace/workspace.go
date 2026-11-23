@@ -291,6 +291,9 @@ func prune(ws string, m *manifest.Manifest, rep Reporter) error {
 			continue
 		}
 		p := filepath.Join(ws, e.Name())
+		if declaredOnDisk(ws, p, m) {
+			continue
+		}
 		isLink, err := fslink.IsLink(p)
 		if err != nil || !isLink {
 			continue
@@ -301,6 +304,22 @@ func prune(ws string, m *manifest.Manifest, rep Reporter) error {
 		rep.Pruned("%s (pruned, not in manifest)", e.Name())
 	}
 	return nil
+}
+
+// declaredOnDisk reports whether p is a declared link under another spelling of
+// its name: on a case-insensitive filesystem `docs` on disk is the declared
+// `Docs`, and prune must not delete it.
+func declaredOnDisk(ws, p string, m *manifest.Manifest) bool {
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return false
+	}
+	for name := range m.Links {
+		if d, err := os.Lstat(filepath.Join(ws, name)); err == nil && os.SameFile(fi, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // Dirs lists the workspace directories under root. Issue workspaces are
