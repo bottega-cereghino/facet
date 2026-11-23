@@ -158,6 +158,22 @@ func TopLevel(git gitx.Runner, dir string) (top, linked bool) {
 	return true, err == nil && of != ""
 }
 
+// ownWorkTree reports whether dir is the top level of its own work tree.
+// Git walks up from a folder that is not, so a command run there writes the
+// enclosing repository. A directory with no repository of its own is false
+// with no error. A directory that has one, whose top level cannot be read,
+// is an error: "could not check" is not "not a repository".
+func ownWorkTree(git gitx.Runner, dir string) (bool, error) {
+	out, err := git.Run(dir, nil, "rev-parse", "--show-toplevel")
+	if err != nil {
+		if gitx.IsRepo(dir) {
+			return false, fmt.Errorf("cannot tell whether %s is its own repository: %w\nfix: run `git -C %s rev-parse --show-toplevel`", dir, err, dir)
+		}
+		return false, nil
+	}
+	return realPath(strings.TrimSpace(out)) == realPath(dir), nil
+}
+
 // removeWorktree removes the linked worktree at dir through its checkout, so the
 // checkout forgets it and its branch is free to be checked out again. reap has
 // decided by now, so --force is given twice: once for its changes, once for a

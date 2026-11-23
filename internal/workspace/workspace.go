@@ -218,14 +218,41 @@ func syncClone(roots config.Roots, ws string, m *manifest.Manifest, name string,
 			rep.Warn("%s is a symlink, but the manifest declares it a clone. Remove it, then re-run.", name)
 			return nil
 		}
+		own, err := ownWorkTree(git, dir)
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		if !own {
+			// Present on disk, but not a repository of its own. Cloning would
+			// replace whatever is there, and any git command would walk up
+			// into the enclosing repository. Leave it.
+			rep.Warn("%s exists but is not the top level of its own repository, so sync left it alone: a git command here would use the enclosing repository. Remove it, then re-run, to clone it.", name)
+			return nil
+		}
 		// Present. Never touch it: it may hold the only copy of unpushed work.
 		rep.Unchanged("%s (clone)", name)
 	} else if made, err := createClone(roots, dir, m, name, git, rep, opt); err != nil || !made {
 		return err
 	}
 
-	// Extra remotes (a fork's `upstream`, say). Added when missing; a URL that
-	// disagrees with the manifest is reported, never silently rewritten.
+	of, err := worktreeOf(git, dir)
+	if err != nil {
+		return fmt.Errorf("%s: cannot tell whether it is a worktree: %w\nfix: run `git -C %s rev-parse --git-dir --git-common-dir`", name, err, dir)
+	}
+	if of != "" {
+		// A linked worktree shares the checkout's config. `git remote add`
+		// here would write that checkout, outside the workspace.
+		for _, rn := range sortedKeys(m.Remotes[name]) {
+			rep.Warn("remote %s on %s skipped: a worktree shares its checkout's git config, so the remote would be added there", rn, name)
+		}
+		return nil
+	}
+	return addExtraRemotes(git, dir, m, name, rep)
+}
+
+// addExtraRemotes adds manifest remotes that the clone does not have yet. A
+// URL that disagrees with the manifest is reported, never silently rewritten.
+func addExtraRemotes(git gitx.Runner, dir string, m *manifest.Manifest, name string, rep Reporter) error {
 	for _, rn := range sortedKeys(m.Remotes[name]) {
 		want := m.Remotes[name][rn]
 		have, exists := gitx.RemoteURL(git, dir, rn)
