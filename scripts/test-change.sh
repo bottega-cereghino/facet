@@ -25,7 +25,7 @@ done < <(git diff --name-only --diff-filter=D "$base" "$head" -- '*_test.go')
 
 # count REV REGEX PATHSPEC: how many lines match REGEX in PATHSPEC at REV.
 count() {
-  git grep -hcE "$2" "$1" -- "$3" | awk -F: '{ n += $NF } END { print n + 0 }'
+  { git grep -hcE "$2" "$1" -- "$3" || [ "$?" -eq 1 ]; } | awk -F: '{ n += $NF } END { print n + 0 }'
 }
 
 # fewer WHAT REGEX PATHSPEC: note it when HEAD has fewer matches than BASE.
