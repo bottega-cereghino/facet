@@ -1649,6 +1649,15 @@ func TestQueueDoesNotStartAnIssueWithAnOpenPullRequest(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cannot tell whether a pull request is open") || strings.Contains(buf.String(), "would start") {
 		t.Fatalf("listing failed: err %v, dry-run =\n%s", err, buf.String())
 	}
+	buf.Reset()
+	err = dryQueue(context.Background(), cfg, queueEnv{
+		list:       func(string, string) ([]ghx.Issue, error) { return issues, nil },
+		prBranches: func(string) ([]string, error) { return nil, errors.New("results may be incomplete") },
+		out:        &buf,
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot tell whether a pull request is open") || strings.Contains(buf.String(), "would start") {
+		t.Fatalf("incomplete listing: err %v, dry-run =\n%s", err, buf.String())
+	}
 }
 
 func TestQueueConfigTakesOneHoldFileOrAList(t *testing.T) {

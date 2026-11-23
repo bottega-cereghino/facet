@@ -1,6 +1,7 @@
 package ghx
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -24,5 +25,15 @@ func TestOpenPRBranchesFailsWhenGhFails(t *testing.T) {
 	fakeGh(t, "", "HTTP 502", 1)
 	if _, err := (CLI{}).OpenPRBranches("acme/widgets"); err == nil {
 		t.Fatal("a failed listing returned no error")
+	}
+}
+
+func TestOpenPRBranchesFailsWhenResultMayBeTruncated(t *testing.T) {
+	stdout := "[" + strings.TrimSuffix(strings.Repeat(`{"headRefName":"feature/7-bell"},`, OpenPRLimit), ",") + "]"
+	fakeGh(t, stdout, "", 0)
+	if _, err := (CLI{}).OpenPRBranches("acme/widgets"); err == nil ||
+		!strings.Contains(err.Error(), fmt.Sprintf("reached limit %d", OpenPRLimit)) ||
+		!strings.Contains(err.Error(), "results may be incomplete") {
+		t.Fatalf("OpenPRBranches error = %v; want an incomplete-list error", err)
 	}
 }
