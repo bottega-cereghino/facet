@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -89,6 +91,56 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	same, err := cfg.effortFor([]string{"feat", "design"})
 	if err != nil || same != "medium" {
 		t.Fatalf("feat effort = %q, %v", same, err)
+	}
+}
+
+func TestQueueReopensLogOnSIGHUP(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "queue.log")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestQueueLogHelperProcess$")
+	cmd.Env = append(os.Environ(), "FACET_QUEUE_LOG_HELPER=1", "HOME="+dir, "FACET_QUEUE_LOG="+logPath)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
+	waitFor(t, "queue log startup", func() bool {
+		b, err := os.ReadFile(logPath)
+		return err == nil && strings.Contains(string(b), "queue: up to 1 agent")
+	})
+	rotated := logPath + ".0"
+	if err := os.Rename(logPath, rotated); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "queue to write to the reopened log", func() bool {
+		b, err := os.ReadFile(logPath)
+		return err == nil && strings.Contains(string(b), "no open issue")
+	})
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("queue helper exited: %v", err)
+	}
+}
+
+func TestQueueLogHelperProcess(t *testing.T) {
+	if os.Getenv("FACET_QUEUE_LOG_HELPER") != "1" {
+		return
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer stop()
+	env := queueEnv{list: func(string, string) ([]ghx.Issue, error) { return nil, nil }}
+	cfg := queueConfig{Max: 1, Label: "next", Wait: 10 * time.Millisecond, Repos: []string{"acme/widgets"}}
+	if err := runQueueWithLog(ctx, cfg, env, os.Getenv("FACET_QUEUE_LOG")); err != nil {
+		t.Fatal(err)
 	}
 }
 
