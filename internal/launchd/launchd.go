@@ -117,7 +117,7 @@ func (j *Jobs) load() {
 		files, _ := filepath.Glob(filepath.Join(d, "*.plist"))
 		sort.Strings(files)
 		for _, f := range files {
-			jb, ok := j.readPlist(f)
+			jb, ok, _ := j.readPlist(f)
 			if ok && loaded[jb.label] {
 				candidates[jb.label] = append(candidates[jb.label], jb)
 			}
@@ -135,8 +135,16 @@ func (j *Jobs) load() {
 		}
 		// launchctl's path is authoritative: a stale LaunchAgents copy with
 		// the same label must not hide the plist the loaded job came from.
-		if f := j.plistOf(l); f != "" {
-			j.read(f, map[string]bool{l: true})
+		f, err := j.plistOf(l)
+		if err != nil {
+			j.err = fmt.Errorf("launchd job %s: %w; unload it or fix its plist before reaping", l, err)
+			return
+		}
+		if f != "" {
+			if _, _, err := j.read(f, map[string]bool{l: true}); err != nil {
+				j.err = fmt.Errorf("launchd job %s: cannot read loaded plist %s: %w; unload it or fix the plist before reaping", l, f, err)
+				return
+			}
 			// A named plist that cannot be read is not evidence that a
 			// different plist defined the loaded job.
 			continue
@@ -146,26 +154,29 @@ func (j *Jobs) load() {
 }
 
 // read parses the plist f and keeps its job when its label is loaded.
-func (j *Jobs) read(f string, loaded map[string]bool) (job, bool) {
-	jb, ok := j.readPlist(f)
+func (j *Jobs) read(f string, loaded map[string]bool) (job, bool, error) {
+	jb, ok, err := j.readPlist(f)
+	if err != nil {
+		return job{}, false, err
+	}
 	if !ok || !loaded[jb.label] {
-		return job{}, false
+		return job{}, false, nil
 	}
 	j.jobs = append(j.jobs, jb)
-	return jb, true
+	return jb, true, nil
 }
 
-func (j *Jobs) readPlist(f string) (job, bool) {
+func (j *Jobs) readPlist(f string) (job, bool, error) {
 	raw, err := j.Run("plutil", "-convert", "xml1", "-o", "-", f)
 	if err != nil {
-		return job{}, false
+		return job{}, false, err
 	}
 	jb, err := parsePlist(raw)
 	if err != nil {
-		return job{}, false
+		return job{}, false, err
 	}
 	jb.plist = f
-	return jb, true
+	return jb, true, nil
 }
 
 // elsewhere reports whether a loaded label no folder matched is worth asking
@@ -178,18 +189,18 @@ func elsewhere(label string) bool {
 
 // plistOf asks launchctl which file the loaded job label came from: the
 // "path = ..." line of `launchctl print gui/<uid>/<label>`. "" when it names
-// none (a job submitted without a plist) or launchctl cannot say.
-func (j *Jobs) plistOf(label string) string {
+// none (a job submitted without a plist).
+func (j *Jobs) plistOf(label string) (string, error) {
 	raw, err := j.Run("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), label))
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("launchctl print failed: %w", err)
 	}
 	for _, line := range strings.Split(string(raw), "\n") {
 		if p, ok := strings.CutPrefix(line, "\tpath = "); ok && strings.HasSuffix(p, ".plist") {
-			return strings.TrimSpace(p)
+			return strings.TrimSpace(p), nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // loadedLabels reads `launchctl list`: a header line, then PID, status and

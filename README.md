@@ -1280,7 +1280,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
   that fails holds every workspace, since no job can be ruled out; only a
   launchctl that is not installed (off macOS) reads as no jobs
-  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`).
+  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`). A loaded job whose plist
+  facet cannot read, or whose `launchctl print` fails, holds every workspace
+  with the label and fix to show what to check
+  (`TestUnderFailsWhenLoadedPlistCannotBeRead`,
+  `TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob`). An unreadable plist
+  for an unloaded job is skipped (`TestUnderSkipsAnUnreadableUnloadedPlist`).
 - **An issue's body stays quoted in the `CLAUDE.md` spawn writes.** Every line
   of it starts with `>`, whatever it holds, so it cannot pose as the file's own
   headings or rules (`TestIssueClaudeMDKeepsTheBodyInsideTheQuote`).
