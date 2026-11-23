@@ -270,13 +270,37 @@ func createClone(roots config.Roots, dir string, m *manifest.Manifest, name stri
 	if err != nil {
 		return false, err
 	}
+	tmpRoot, err := os.MkdirTemp(filepath.Dir(dir), ".facet-clone-*")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = os.RemoveAll(tmpRoot) }()
+	stage := filepath.Join(tmpRoot, filepath.Base(dir))
+
 	rep.Working("%s : cloning %s%s", name, src, note)
-	if err := gitx.Clone(git, src, dir, gitx.CloneOptions{SkipLFS: skipLFS, SetOriginTo: setOrigin}); err != nil {
+	if err := gitx.Clone(git, src, stage, gitx.CloneOptions{SkipLFS: skipLFS, SetOriginTo: setOrigin}); err != nil {
+		rep.Warn("%s (clone failed: %v)", name, err)
+		return false, nil
+	}
+	if err := placeStaged(stage, dir); err != nil {
 		rep.Warn("%s (clone failed: %v)", name, err)
 		return false, nil
 	}
 	rep.Created("%s (cloned)", name)
 	return true, nil
+}
+
+// placeStaged moves a freshly built clone or worktree from stage to dir without
+// following a symlink at dir. Checking Lstat right before Rename closes the
+// window for a directory appearing at dir; Rename itself refuses a symlink at
+// dir (ENOTDIR) without following it.
+func placeStaged(stage, dir string) error {
+	if _, err := os.Lstat(dir); err == nil {
+		return fmt.Errorf("%s already exists", dir)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(stage, dir)
 }
 
 // prune deletes links on disk that the manifest no longer declares. It only ever
