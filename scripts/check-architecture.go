@@ -136,31 +136,61 @@ func checkLayout() error {
 	if len(baseline) == 0 {
 		return fmt.Errorf("%s must list at least one directory", layoutFile)
 	}
-	dirs := make([]string, 0, len(baseline))
-	for dir := range baseline {
-		dirs = append(dirs, dir)
+	counts, err := sourceCounts()
+	if err != nil {
+		return err
 	}
-	sort.Strings(dirs)
-	for _, dir := range dirs {
-		want := baseline[dir]
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return fmt.Errorf("read layout directory %q: %w", dir, err)
+	overLimit := make([]string, 0)
+	for dir, count := range counts {
+		if count > 20 {
+			overLimit = append(overLimit, dir)
 		}
-		count := 0
-		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") && !strings.HasSuffix(entry.Name(), "_test.go") {
-				count++
-			}
+	}
+	sort.Strings(overLimit)
+	for _, dir := range overLimit {
+		want, ok := baseline[dir]
+		if !ok {
+			return fmt.Errorf("%s: %s has %d production Go files and is missing from the baseline", layoutFile, dir, counts[dir])
 		}
-		if count != want {
-			return fmt.Errorf("%s: %s has %d production Go files, baseline is %d; update the baseline when the count decreases", layoutFile, filepath.Clean(dir), count, want)
+		if want < counts[dir] {
+			return fmt.Errorf("%s: %s has %d production Go files, above its ratchet of %d", layoutFile, dir, counts[dir], want)
 		}
-		if count <= 20 {
-			return fmt.Errorf("%s: %s has %d production Go files; only directories over 20 belong in the baseline", layoutFile, filepath.Clean(dir), count)
+	}
+	for dir, want := range baseline {
+		if want <= 20 {
+			return fmt.Errorf("%s: %s has invalid ratchet %d; only directories over 20 belong in the baseline", layoutFile, dir, want)
+		}
+		if counts[dir] <= 20 {
+			return fmt.Errorf("%s: remove %s after its production Go file count falls to %d", layoutFile, dir, counts[dir])
 		}
 	}
 	return nil
+}
+
+func sourceCounts() (map[string]int, error) {
+	counts := make(map[string]int)
+	err := filepath.WalkDir(".", func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			base := filepath.Base(path)
+			if path != "." && (base == ".git" || base == "vendor" || strings.HasPrefix(base, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := entry.Name()
+		if filepath.Ext(name) == ".go" && !strings.HasSuffix(name, "_test.go") {
+			dir := filepath.ToSlash(filepath.Dir(path))
+			counts[dir]++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk source directories: %w", err)
+	}
+	return counts, nil
 }
 
 func hasDuplicates(values []string) bool {
