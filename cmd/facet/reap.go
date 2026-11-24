@@ -41,10 +41,7 @@ func newIssuesCmd() *cobra.Command {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			_, _ = fmt.Fprintln(w, "WORKSPACE\tISSUE\tBRANCH\tSTATE\tPR\tSIZE")
 			for _, s := range states {
-				state := "reapable"
-				if b := s.Blockers(); len(b) > 0 {
-					state = fmt.Sprintf("held (%d)", len(b))
-				}
+				state := reapVerdict(s, offline)
 				pr := "-"
 				if s.PR != nil {
 					pr = fmt.Sprintf("#%d %s", s.PR.Number, strings.ToLower(s.PR.State))
@@ -81,6 +78,7 @@ func newReapCmd() *cobra.Command {
 		yes      bool
 		reapable bool
 		dryRun   bool
+		closed   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "reap",
@@ -107,11 +105,18 @@ func newReapCmd() *cobra.Command {
 			"before deleting it. It never forces; held workspaces are left alone, and so\n" +
 			"is one with a remote it could not fetch, since its pushed work cannot be\n" +
 			"confirmed. With\n" +
-			"--dry-run it prints the list and deletes nothing.",
+			"--dry-run it prints the list and deletes nothing.\n\n" +
+			"--closed narrows --reapable to issue workspaces whose branch has a merged or\n" +
+			"closed pull request and no open one. Every other workspace is left alone and\n" +
+			"listed with its reason: not an issue workspace, no pull request, pull request\n" +
+			"open, or pull request lookup failed.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if dryRun && !reapable {
 				return fmt.Errorf("--dry-run lists what --reapable would delete; add --reapable")
+			}
+			if closed && !reapable {
+				return fmt.Errorf("--closed narrows what --reapable would delete; add --reapable")
 			}
 			if reapable {
 				if force {
@@ -139,7 +144,11 @@ func newReapCmd() *cobra.Command {
 				for _, u := range unchecked {
 					fmt.Printf("could not list worktrees, left alone: %s\n", u)
 				}
-				return reapReapable(os.Stdout, append(dirs, wts...), yes, dryRun, confirm)
+				var narrow func(*workspace.IssueState) string
+				if closed {
+					narrow = closedReason
+				}
+				return reapBatch(os.Stdout, append(dirs, wts...), yes, dryRun, narrow, confirm)
 			}
 			ws, err := reapTarget(path, args)
 			if err != nil {
@@ -253,6 +262,7 @@ func newReapCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	cmd.Flags().BoolVar(&reapable, "reapable", false, "delete every workspace at the root that reap would delete now, after one confirmation")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --reapable: print the list, delete nothing")
+	cmd.Flags().BoolVar(&closed, "closed", false, "with --reapable: only issue workspaces whose pull request is merged or closed")
 	return cmd
 }
 

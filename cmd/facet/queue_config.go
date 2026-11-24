@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	defaultQueueMax    = 6
-	defaultQueueWait   = 30 * time.Second
-	defaultQueueLabel  = "next"
-	defaultQueueEffort = "medium"
+	defaultQueueMax     = 6
+	defaultQueuePerRepo = 2
+	defaultQueueWait    = 30 * time.Second
+	defaultQueueLabel   = "next"
+	defaultQueueEffort  = "medium"
 	// maxQueueBundle is the most issues one agent run takes. One is the
 	// default, and a larger batch hides which issue failed.
 	maxQueueBundle = 5
@@ -32,6 +33,7 @@ const defaultQueuePrompt = "Do each issue below, in order. The workspace is {wor
 // queueConfig is a validated queue file. Durations and defaults are resolved.
 type queueConfig struct {
 	Max          int
+	PerRepo      int
 	Hold         []string
 	Gate         []string
 	Wait         time.Duration
@@ -42,6 +44,26 @@ type queueConfig struct {
 	Agents       []queueAgent
 	Effort       string
 	effortLabels map[string]string
+	// State is the state file's path, set when Fix is.
+	State string
+	// Fix is nil when the config has no fix block.
+	Fix *queueFix
+	// Decisions is the JSONL file where dispatch decisions are appended.
+	Decisions string
+	// Lanes is nil when the config has no lanes block. A lane: label is
+	// then always its own agent, as before.
+	Lanes *queueLanes
+	// Serialize is nil when the config has no serialize block. Landing then
+	// does not serialize on shared files.
+	Serialize *queueSerialize
+	// Cap is nil when the config has no cap block. Standards and CI issues
+	// then start like any other issue.
+	Cap *queueCap
+	// Heartbeat is the heartbeat file's path; empty means none.
+	Heartbeat string
+	// Disk is nil when the config has no disk block. The queue then does
+	// not look at free space or at how many issue workspaces exist.
+	Disk *queueDisk
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -98,16 +120,25 @@ func (h queueHolds) paths() []string {
 
 // queueFile is the JSON shape, before defaults and checks.
 type queueFile struct {
-	Max        *int             `json:"max"`
-	Hold       queueHolds       `json:"hold"`
-	Gate       []string         `json:"gate"`
-	Wait       string           `json:"wait"`
-	Label      string           `json:"label"`
-	Priorities string           `json:"priorities"`
-	Repos      []string         `json:"repos"`
-	Prompt     string           `json:"prompt"`
-	Agents     []queueAgentFile `json:"agents"`
-	Effort     queueEffortFile  `json:"effort"`
+	Max        *int                `json:"max"`
+	PerRepo    *int                `json:"per_repo"`
+	Hold       queueHolds          `json:"hold"`
+	Gate       []string            `json:"gate"`
+	Wait       string              `json:"wait"`
+	Label      string              `json:"label"`
+	Priorities string              `json:"priorities"`
+	Repos      []string            `json:"repos"`
+	Prompt     string              `json:"prompt"`
+	Agents     []queueAgentFile    `json:"agents"`
+	Effort     queueEffortFile     `json:"effort"`
+	State      string              `json:"state"`
+	Fix        *queueFixFile       `json:"fix"`
+	Decisions  string              `json:"decisions"`
+	Lanes      *queueLanesFile     `json:"lanes"`
+	Serialize  *queueSerializeFile `json:"serialize"`
+	Cap        *queueCapFile       `json:"cap"`
+	Heartbeat  string              `json:"heartbeat"`
+	Disk       *queueDiskFile      `json:"disk"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -119,7 +150,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, hold, gate, wait, label, priorities, repos, prompt, agents, effort", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, decisions, lanes, serialize, cap, heartbeat, disk", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -129,15 +160,19 @@ func loadQueueConfig(path string) (queueConfig, error) {
 
 func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg := queueConfig{
-		Max:    defaultQueueMax,
-		Hold:   f.Hold.paths(),
-		Gate:   f.Gate,
-		Wait:   defaultQueueWait,
-		Label:  defaultQueueLabel,
-		Prompt: defaultQueuePrompt,
+		Max:     defaultQueueMax,
+		PerRepo: defaultQueuePerRepo,
+		Hold:    f.Hold.paths(),
+		Gate:    f.Gate,
+		Wait:    defaultQueueWait,
+		Label:   defaultQueueLabel,
+		Prompt:  defaultQueuePrompt,
 	}
 	if f.Max != nil {
 		cfg.Max = *f.Max
+	}
+	if f.PerRepo != nil {
+		cfg.PerRepo = *f.PerRepo
 	}
 	if strings.TrimSpace(f.Label) != "" {
 		cfg.Label = strings.TrimSpace(f.Label)
@@ -175,6 +210,44 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	}
 	cfg.Effort = effort
 	cfg.effortLabels = labels
+	cfg.Fix, cfg.State, err = normalizeFix(configPath, f.State, f.Fix)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	if p := strings.TrimSpace(f.Decisions); p != "" {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(filepath.Dir(configPath), p)
+		}
+		cfg.Decisions = p
+	}
+	cfg.Lanes, err = normalizeLanes(configPath, f.Lanes)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	cfg.Serialize, err = normalizeSerialize(f.Serialize)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	cfg.Cap, err = normalizeCap(f.Cap)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	if cfg.Cap != nil && cfg.State == "" {
+		cfg.State = resolveQueueState(configPath, f.State)
+		if cfg.State == "" {
+			return queueConfig{}, fmt.Errorf("queue config: cap is set and state is not\nfix: set state to a file path, where the queue records the issues it started")
+		}
+	}
+	if p := strings.TrimSpace(f.Heartbeat); p != "" {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(filepath.Dir(configPath), p)
+		}
+		cfg.Heartbeat = p
+	}
+	cfg.Disk, err = normalizeDisk(configPath, f.Disk)
+	if err != nil {
+		return queueConfig{}, err
+	}
 	if err := cfg.validate(); err != nil {
 		return queueConfig{}, err
 	}
@@ -184,6 +257,9 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 func (c queueConfig) validate() error {
 	if c.Max < 1 {
 		return fmt.Errorf("queue config: max must be at least 1\nfix: set max to how many agents may run at once (a hold file is how you pause)")
+	}
+	if c.PerRepo < 1 {
+		return fmt.Errorf("queue config: per_repo must be at least 1\nfix: set per_repo to how many agents one repository may run at once")
 	}
 	if c.Wait <= 0 {
 		return fmt.Errorf("queue config: wait must be greater than zero\nfix: use a Go duration such as 30s, or a hold file to stop the queue")

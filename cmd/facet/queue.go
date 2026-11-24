@@ -19,16 +19,21 @@ func newQueueCmd() *cobra.Command {
 	var (
 		configPath string
 		dryRun     bool
+		logPath    string
 	)
 	cmd := &cobra.Command{
 		Use:   "queue",
 		Short: "Run a configured agent on each queued issue",
 		Long: "Takes the next open issue carrying the config's label, spawns a workspace for\n" +
 			"it, and starts the agent command the config names for the issue's labels. When\n" +
-			"that agent exits, it takes the next issue. At most max agents run at once,\n" +
-			"across every repository in the config.\n\n" +
-			"The commands, the cap, the gate and the hold file come from the JSON config\n" +
+			"that agent exits, it takes the next issue. At most max agents run at once\n" +
+			"across all repositories, and at most per_repo agents run in one repository.\n\n" +
+			"The commands, the caps, the gate and the hold file come from the JSON config\n" +
 			"(--config, or FACET_QUEUE). docs/queue.example.json is an example.\n\n" +
+			"A label lane:NAME is a preference. When lanes.command says that lane's room\n" +
+			"is \"no\", the same tick starts the empty-label agent instead, and lanes.log\n" +
+			"gains a row with fallback_from. Any other answer, or a command that fails,\n" +
+			"keeps the labelled agent. A model: label is not a preference.\n\n" +
 			"When priorities names a file, each line is a repository name, highest first,\n" +
 			"and a # starts a comment. The queue starts work only in the highest project\n" +
 			"that has an open issue with the label. Within that project it takes p1 before\n" +
@@ -47,7 +52,31 @@ func newQueueCmd() *cobra.Command {
 			"exists, it starts nothing and stops; an agent already running is left to finish.\n\n" +
 			"--dry-run prints the runs the next starts would take, up to max, and does\n" +
 			"not spawn a workspace or start an agent. It runs the gate, so a gate that\n" +
-			"would refuse a start is reported instead of a start.\n\n" +
+			"would refuse a start is reported instead of a start. It also applies cap,\n" +
+			"and prints each standards or CI issue the cap skipped. When disk is\n" +
+			"refusing new work, it prints that refusal and the starts it would have taken.\n\n" +
+			"cap, when set, starts at most share[0] standards or CI issues in every\n" +
+			"share[1] issues the queue started in that repository, once passes exits\n" +
+			"0 for it. A skipped issue is logged once and the next issue is taken.\n" +
+			"Omitting passes, or any other exit, leaves the cap off. A fix run and a\n" +
+			"landing are never capped.\n\n" +
+			"disk, when set, watches free space on path (the workspaces root when\n" +
+			"path is omitted). Below minFreeGB (omitted means 20 gigabytes of 1024^3\n" +
+			"bytes), or at maxWorkspaces issue workspaces, it starts no new issue\n" +
+			"and no run that would spawn a workspace. A fix whose workspace is\n" +
+			"already on disk, and a landing or an update of a pull request, still\n" +
+			"run. It logs once when it starts refusing and once when it clears.\n\n" +
+			"With a fix block, each tick first looks for an open pull request of an\n" +
+			"issue this queue started (recorded in the state file) that is red or\n" +
+			"conflicting, and starts a fix run for it instead of new work. After\n" +
+			"fix.tries failed tries it labels the issue blocked, and leaves it. With\n" +
+			"fix.land (the default) a green one behind its base is updated by merging\n" +
+			"the base, and a green one up to date is merged, without an agent, at most\n" +
+			"one per repository per round. A merge GitHub refuses waits, doubling up\n" +
+			"to an hour, and stops after five. A fix that suppresses a finding is not\n" +
+			"landed. Optional serialize.paths serializes open\n" +
+			"queue pull requests touching a matching glob one at a time per repository.\n" +
+			"A person's own pull request, or a fork's, is never touched.\n\n" +
 			"It does not reap workspaces. A workspace already on disk for the issue is\n" +
 			"reused, not spawned again.",
 		Args: cobra.NoArgs,
@@ -66,11 +95,16 @@ func newQueueCmd() *cobra.Command {
 			if dryRun {
 				return dryQueue(ctx, cfg, env)
 			}
-			return runQueue(ctx, cfg, env)
+			if cfg.Decisions == "" {
+				cfg.Decisions = defaultQueueDecisionPath()
+			}
+			return runQueueWithLog(ctx, cfg, env, logPath)
 		},
 	}
 	cmd.Flags().StringVar(&configPath, "config", "", "queue config JSON file (default: FACET_QUEUE)")
+	cmd.Flags().StringVar(&logPath, "log", "", "write queue output to this file and reopen it on SIGHUP")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what the next starts would take, without spawning or starting an agent")
+	cmd.AddCommand(newQueueStatusCmd())
 	return cmd
 }
 

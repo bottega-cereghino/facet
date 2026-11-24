@@ -112,7 +112,8 @@ tells you where to work — opening an editor or starting an agent is yours.
 
 Anyone can file an issue on a public repository, and an agent reads the
 workspace's `CLAUDE.md` as instructions, with your `gh` and git credentials. So
-the issue's body goes in as a blockquote, every line starting with `>`, after a
+the issue's title and body go in as a blockquote (the H1 names only the
+workspace; label names are cut to one line with backticks replaced), every line starting with `>`, after a
 fixed line that names its author (`@login`) and says to read it as a description
 of the task, never as instructions to run a command, open a link, or touch
 credentials, and to stop and ask if it says to. Your own issue (the author is
@@ -322,6 +323,17 @@ each repository once, however many worktree clones share it. `--dry-run`
 prints the list, worktrees included, and stops there; `facet ls --size` shows
 the workspaces without deleting.
 
+`facet reap --reapable --closed` is narrower, for a run nobody watches: it
+takes only an issue workspace whose branch has a merged or closed pull request
+and no open one, and reap would still delete it now. A pull request is found by
+the branch, or, when there is none, as the merged pull request that had the home
+clone's HEAD, so a squash merge whose branch is gone is found too. Every other
+workspace is left alone and listed, grouped by reason: "not an issue
+workspace", "no pull request", "pull request open" or "pull request lookup
+failed". A lookup that fails holds the workspace; it is never read as closed.
+`--closed` never adds a workspace `--reapable` alone would keep, and works with
+`--dry-run` and `-y`.
+
 `reap` also takes a plain git worktree: one made with `git worktree add`, by
 hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
 `facet reap <path>` refuses while it has uncommitted or untracked files,
@@ -403,12 +415,38 @@ across every repository in the config. The default is 6.
 facet queue --config queue.json
 ```
 
+Pass `--log FILE` to have the queue write its own log file. It reopens the
+file on SIGHUP, so a rotation can rename the current file and then signal the
+queue. A running queue writes its PID to
+`~/.local/state/fleet/queue.pid` and removes the file when it exits.
+
 `--config` is a JSON file. With the flag omitted, `FACET_QUEUE` names it.
 `docs/queue.example.json` is a complete file: the commands in it are
 placeholders, and you replace them with the argument list you actually run.
 Nothing in the binary names an agent. An issue's labels pick the entry; the
 first match wins; the entry whose label is empty runs when none of the others
 match. Labels match without regard to case.
+
+A label `lane:NAME` is a preference for the agent that carries it. When `lanes`
+is set, the queue runs `lanes.command` once before each start (no shell, three
+seconds). The command prints JSON, `{"lanes":[{"lane":"name","room":"yes"}]}`,
+with `room` of `yes`, `no` or `unknown`. `key` is read as well as `lane`. When
+the matched agent's lane has room `no`, that same tick starts the empty-label
+agent instead. The queue does not choose among plans itself: the empty-label
+command does. The start is logged with `fallback_from`, and `{fallback_from}`
+in the command is the lane name (empty when the labelled agent runs). When
+`lanes.log` is set, the queue appends one JSON line there:
+
+```json
+{"at":"2026-11-23T18:00:00Z","repo":"acme/widgets","issue":7,"fallback_from":"grok","agent":"default"}
+```
+
+A relative `lanes.log` is beside the config file. A dry run prints the
+fallback and writes no line. Any room other than `no`, a lane the answer does
+not name, or a command that fails or prints nothing usable, keeps the labelled
+agent: a missing answer is not "no room". A `model:` label is not a preference.
+It keeps its agent, so an issue that needs that agent waits on it. With `lanes`
+omitted, a `lane:` label is an ordinary agent label.
 
 The command is an argument list, not a shell command. One argument contains
 `{prompt}`, and that is where the task text goes. The issue title is
@@ -417,16 +455,33 @@ never passed through a shell.
 
 | field | |
 | --- | --- |
-| `max` | how many agents run at once. Omitted means 6. |
+| `max` | how many agents run at once across all repositories. Omitted means 6. |
+| `per_repo` | how many agents from one repository may run at once. Omitted means 2. |
 | `hold` | a file path, or a list of them. When one exists, the queue starts nothing and stops. An agent already running is left to finish. |
-| `gate` | a command run before each start. Its arguments are expanded with the issue about to start (`{repo}` `{number}` `{title}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`). `{workspace}` is empty, because the gate runs before a workspace is spawned, and `{prompt}` is not substituted. Exit 3 skips that run: its issues are tried again after `wait`, and the queue goes straight on to the next run, so a refusal about one repository (a red pull request there, a `blocked` label) does not hold the others. Any other non-zero exit waits `wait`, starts nothing, and tries later: a refusal about the whole queue, such as a spend cap. Omitted means there is no gate. |
+| `gate` | a command run before each start. Its arguments are expanded with the issue about to start (`{repo}` `{number}` `{title}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`). `{workspace}` is empty, because the gate runs before a workspace is spawned, and `{prompt}` is not substituted. Exit 3 skips that run: its issues are tried again after `wait`, and the queue goes straight on to the next run, so a refusal about one repository (a red pull request there, a `blocked` label) does not hold the others. Exit 4 skips the run's whole repository the same way: every queued issue there waits `wait`, so the gate runs once per repository. Any other non-zero exit waits `wait`, starts nothing, and tries later: a refusal about the whole queue, such as a spend cap. Omitted means there is no gate. |
 | `wait` | how long to wait before looking again. Omitted means 30s. |
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
-| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`. `{labels}` is the issue's labels, comma-separated. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}`. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
+| `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. |
+| `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
+| `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`, `disk`, `disk_clear`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
+| `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
+| `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
+| `cap` | how often the queue starts standards or CI work, once that repository's own check passes (below). Omitted means no cap. |
+| `disk` | free space and how many issue workspaces may exist before the queue starts no new work (below). Omitted means the queue does not look at either. |
+
+For example, a local newsyslog rule can use the PID file as its signal target:
+
+```text
+~/Library/Logs/facet-queue.log cerre:staff 644 5 1024 * JB ~/.local/state/fleet/queue.pid SIGHUP
+```
+
+The queue does not install this system rule; configure it where your system's
+newsyslog rules live.
 
 The order is fixed. When `priorities` is set, the queue reads that file
 again before each start. A line is a repository name (`widgets` for
@@ -486,7 +541,8 @@ for whatever still carries it.
 An issue whose branch (`feature/<number>-…`, as spawn names it) has an
 open pull request is not started, by this process or the next: its agent
 opened the pull request, and the label stays until the merge. When the
-open pull requests cannot be listed, the queue starts nothing and waits.
+open pull requests cannot be listed completely, including when the listing
+reaches its 1000-result limit, the queue starts nothing and waits.
 
 At most 1000 open issues per repository are considered. When a repository
 returns exactly that many, the queue says so: any beyond the cap are unseen.
@@ -514,6 +570,9 @@ start, and the issues are not listed.
 `TestQueueDryRunStopsOnTheHoldFileWithoutListing`,
 `TestQueueDryRunGivesAFreeSlotToTheNextProjectDown`,
 `TestQueueRunsAtMostMaxAgents`, `TestQueuePicksTheCommandForTheIssueLabel`,
+`TestQueueStartsAFullLaneOnTheDefaultAgentWithinTheTick`,
+`TestQueueKeepsALaneLabelWhenTheLanesCommandFails`,
+`TestQueueDryRunNamesTheFallbackAndWritesNoLedger`,
 `TestQueueTakesTheOldestIssueFirst`,
 `TestQueueTakesP1BeforeAnOlderIssue`,
 `TestQueuePassesTheEffortForTheIssueLabel`,
@@ -527,6 +586,289 @@ start, and the issues are not listed.
 `TestQueueRetriesASpawnThatFailed`,
 `TestQueueRetriesWhenTheAgentCannotStart` and
 `TestQueueUsesAWorkspaceThatAlreadyExists` hold this.
+
+### Heartbeat and `facet queue status`
+
+When `heartbeat` is set in the config, the queue writes one JSON object
+atomically (temp file, flushed to disk, renamed) on every tick, while a gate
+is running, and whenever a run starts or ends:
+
+```json
+{
+  "at": "2026-11-23T22:00:00Z",
+  "pid": 12345,
+  "version": "v0.8.0",
+  "running": [
+    {
+      "issue": "acme/widgets#42",
+      "agent": "default",
+      "since": "2026-11-23T21:58:00Z"
+    }
+  ],
+  "held": [],
+  "last_error": ""
+}
+```
+
+`facet queue status [--config FILE] [--json]` reads the heartbeat file and
+checks the configured hold files. It runs no gate and makes zero GitHub or
+network calls, so a watcher can run it every minute.
+
+| exit code | state | meaning |
+| --- | --- | --- |
+| `0` | `ok` | heartbeat is younger than `3 * wait` (and no hold file exists) |
+| `1` | `stale` / `missing` / `error` | heartbeat is older than `3 * wait`, missing, or unreadable (queue is down or stuck) |
+| `2` | `held` | a configured hold file exists (even when the heartbeat is fresh) |
+
+Without `--json`, it prints one line per fact (`state`, `at`, `age`, `pid`,
+`version`, `running`, `held`, `last_error`). With `--json`, it prints the
+heartbeat object with `age_seconds` and `state` added.
+
+For example, a `launchd` user agent can run a watcher script every 60 seconds:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.facet-queue-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>/usr/local/bin/facet queue status --config /path/to/queue.json || [ $? -eq 2 ] || /path/to/notify "facet queue is down"</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+```
+
+### Cap standards and CI work
+
+Optional `cap` limits how often the queue starts standards or CI work in one
+repository, once that repository's own check already passes. Omitted, there
+is no cap, and those issues start like any other.
+
+| `cap` field | |
+| --- | --- |
+| `labels` | the issue labels that count as standards or CI work. The match ignores case and is the whole label, so `Standards` counts and `standards-extra` does not. Omitted means `standards` and `ci`. |
+| `share` | `[1, 3]` means at most 1 of every 3 issues the queue started in that repository. The first number is at least 1 and no greater than the second. Omitted means `[1, 3]`. |
+| `passes` | an argument list, run once per round per repository, with `{repo}`. Exit 0 means the check passes and the cap applies. Any other exit, a command that cannot be started, or omitting `passes`, means the cap does not apply: the repository is still catching up. |
+
+The window is that repository's last `share[1]` starts recorded in the state
+file, newest first. The file keeps a start after the fix stage drops an
+issue whose pull request has merged, so the window still counts that run. A
+candidate that carries a cap label is not started while the window already
+holds `share[0]` such starts. It is skipped for the round and logged once
+(`capped: owner/repo#n, 1 of the last 3 runs in owner/repo was standards work`),
+and the next candidate is taken. A fix run and a landing are never capped.
+While `cap` is set, an issue with a cap label is a run of one, so a batch
+cannot carry two of them.
+
+`--dry-run` applies the cap and prints each issue it skipped. It writes no
+state. A restart reads the state file, so the window is the same one.
+
+`cap` needs `state`, the same file `fix` uses.
+
+`TestQueueCapSecondStandardsIssueWaitsBehindProduct`,
+`TestQueueCapStartsStandardsWhenTheWindowHasNone`,
+`TestQueueCapPassesFailingDisablesTheCap`,
+`TestQueueCapLabelsMatchWholeAndIgnoreCase`,
+`TestQueueCapOmittedChangesNothing`,
+`TestQueueCapRestartKeepsTheWindow`,
+`TestQueueCapDryRunSkipsTheSecondStandardsIssue`,
+`TestQueueCapPassesRunsOncePerRepository`,
+`TestQueueCapFixAndLandAreNotCapped` and
+`TestQueueCapKeepsAStartAfterThePullRequestIsGone` hold this.
+
+### Disk
+
+Optional `disk` stops new work while the disk is low or too many issue
+workspaces are on it. Omitted, the queue does not look at either, and a
+run is unchanged.
+
+| `disk` field | |
+| --- | --- |
+| `path` | the folder whose volume is watched. Free space is that volume's. A relative path is beside the config file. Omitted means the workspaces root (`FACET_WORKSPACES`, otherwise `~/Workspaces`). |
+| `minFreeGB` | below this many gigabytes free, the queue starts no new issue. A gigabyte here is 1024^3 bytes, the unit `df -g` uses. Omitted means 20. |
+| `maxWorkspaces` | at or above this many issue workspaces, the queue starts no new issue. An issue workspace is an `iss-*` directory in the workspaces root whose `.workspace.json` has an issue. A directory with another name, a manifest with no issue, and a symlink are not counted. Omitted means no count limit. |
+
+The check runs once per tick, before the gate. While it refuses, a new
+issue does not start, and neither does a run that would spawn a workspace.
+A fix run whose workspace is already on disk still starts. A green pull
+request is still updated when it is behind its base, and still merged when
+it is up to date. `facet reap` is a separate command and is not held, which
+is what frees the space. The next tick after the free space and the count
+are back inside the limit starts work again.
+
+It logs one line when it begins refusing (`disk: 18 GB free, below 20: starting no new work`,
+or the same shape for the workspace count) and one line when it clears
+(`disk: clear`). The same words go to the decision log as `disk` and
+`disk_clear` when `decisions` is set. Repeating the same state logs nothing.
+
+`--dry-run` prints the refusal and the starts it would have taken, including
+a fix it would still run and a landing it would still do. It writes no
+decision line.
+
+`TestQueueDiskLowFreeSpaceStartsNoNewRunButFixes`,
+`TestQueueDiskAtTheWorkspaceLimitStartsNoNewRunButFixes`,
+`TestQueueDiskDoesNotSpawnAMissingFixWorkspace`,
+`TestQueueDiskClearingResumesStarts`,
+`TestQueueDiskOmittedChangesNothing`,
+`TestQueueDiskDryRunPrintsTheRefusalAndTheStarts` and
+`TestQueueDiskCountsIssueWorkspacesOnly` hold this.
+
+### The queue fixes its own red pull requests first
+
+With a `fix` block, each tick looks at the queue's own pull requests before
+it picks a new issue. The queue records each issue it starts in the `state`
+file (JSON, written to a temp file, flushed to disk and renamed), so a
+restarted queue still knows them. A **queue pull request** is, for an issue
+this queue started, the first open pull request seen after the start whose
+head branch is the issue's spawn branch (`feature/<number>-…`), that comes
+from the repository itself (not a fork), and that was opened after the
+start. The queue records its number the first time it sees it, and from then
+on only that pull request is the issue's. **A person's own pull request is
+never touched**: one for an issue the queue never started, one from a fork,
+one opened before the start, or a later one beside the queue's, even when
+its branch has the same shape. Only repositories still in `repos` are
+looked at. A state file that cannot be read is a refusal, with the fix
+printed.
+
+A queue pull request needs fixing when it is red (the latest run of a check
+by name, as `gh pr checks` reads them, concluded `FAILURE`, `TIMED_OUT`,
+`ACTION_REQUIRED`, `STARTUP_FAILURE` or `ERROR`) or conflicting (`mergeable`
+is `CONFLICTING`). A pull request with any check still pending, or whose
+mergeable state is `UNKNOWN`, is not judged that round. Nor is one whose fix
+run ended less than `wait` ago, or one listed before that, since its new
+checks may not be listed yet.
+
+When one needs fixing and a slot is free, the queue starts a **fix run**
+for it instead of new work, in the order new issues are taken. Still one
+start per tick, and a fix run counts as one agent toward `max`. It runs in
+the issue's workspace, spawned again when it is gone. A fix run cut short
+because the queue is stopping is not a try.
+
+Every session on a machine shares one GitHub API limit, so the fix stage
+reuses a repository's listing of pull requests, with their checks, for 5
+minutes, and does not list a repository at all while none of its started
+issues can act (each is running, waiting, settling or blocked). New work
+still lists the repository of the issue it is about to start each round, to
+see whether a pull request is already open for it, and that listing is
+shared with the fix stage. A listing that fails starts no fix in that
+repository, and is logged.
+
+A pull request still red or conflicting once CI has finished after a fix run
+is a failed try. So is a fix whose own commits suppress a finding instead of
+fixing it: after the run, and before anything of that pull request is
+landed, the queue reads the diff from the head the first fix run started
+at. An added line that matches `fix.forbid`, or a higher number in a file
+named like a baseline, ratchet or limit, is refused. The refusal is a failed
+try. Nothing of that pull request is landed, and the next try is told the
+same way a red one is. After `fix.tries` failed tries the queue adds the
+`fix.blockLabel` label to the issue, logs it, runs `fix.notify` once, and
+starts no other fix for it. **Blocked stays blocked**: the queue neither
+fixes nor lands that pull request again, even if it turns green; it is a
+person's now. A label that cannot be added (it does not exist in the
+repository, say) is logged with the fix and tried again after `wait`, not
+every tick. A pull request that turns green (with at least one check)
+clears its record, and one that is merged or closed drops the issue from the
+state.
+
+**Green but behind: update and land, no model run.** With `fix.land` (on
+unless set to `false`), every queue merge goes through the update-and-wait
+path, whatever the repository's branch protection requires. A queue pull
+request that is green (at least one check, every latest one passed) and not
+a draft is merged only when its head contains the base's current tip and its
+checks ran on that head. If the base moved, the queue merges the base into
+it (`gh pr update-branch`, a merge, never a rebase) and waits for green
+again. A conflict on that update counts as red and goes through the fix
+path above. One that is green and up to date is merged with the
+repository's own method, read from its settings (squash, merge or rebase,
+in that order of preference; squash where it is the only one allowed), and
+only at the head commit that was judged. A pull request is green for landing
+only when every required check passed. The queue reads those names from the
+base branch's rules and from classic branch protection. When that cannot be
+read, a conclusion other than success, neutral or skipped is not a pass, so
+a cancelled check is not landed. A skipped or missing required check is not
+a pass either. Required checks and branch rules are GitHub's to enforce: a
+merge GitHub refuses is never forced (no `--admin`). It is retried after
+`wait`, then after twice that, doubling up to an hour, and the refusal is
+logged once per step rather than once per tick. The count and the wait are
+kept in the state file, so a restart does not start them over. A new head,
+or a check result that changed, resets the count. After five refusals of
+the same head the queue stops trying that pull request, adds
+`fix.blockLabel`, runs `fix.notify` with the refusal text, and logs it. At
+most one pull request per repository is merged per round. Neither step runs
+an agent or the gate, and neither takes a slot. An update of a pull request
+that is behind is once per listing. A merge GitHub refuses waits as above.
+
+**Serialize pull requests that touch a shared file.** Optional top-level
+`serialize` takes `paths`, a list of globs (for example `**/*baseline*`,
+`**/config.json`, `**/*.lock`, `package-lock.json`, `go.sum`). Omitted means
+no serialization. When set, the queue reads each open queue pull request's
+changed files (one call per pull request, cached with the pull request
+listing). While an open queue pull request in a repository touches a
+matching file, no other queue pull request touching a matching file in that
+repository is landed: the oldest lands first, and the others wait and are
+logged once (`waits for #<pr>, shared file <path>`). `--dry-run` lists the
+waits.
+
+| `fix` field | |
+| --- | --- |
+| `command` | the fix run's argument list, with `{prompt}`. Placeholders: those of a start, plus `{pr}` (the number), `{branch}`, `{base}` (the pull request's base branch), `{reason}` (`red: <check> is FAILURE` or `conflicts with <base>`) and `{try}`, from 1. |
+| `prompt` | the fix run's task text, expanded the same way. Omitted means a prompt that opens with "never take a shortcut; take the long road, or stop, say so in the report, and label the issue blocked", then says: make CI green on the same branch, merge `origin/{base}` into it if it conflicts, never weaken a test without the repository's own rule for that, never clear a ratchet, baseline or lint finding by suppressing it, and if that is the only way, stop and say so, push, exit. |
+| `gate` | run before a fix start, with the same placeholders; exit 3 and 4 and any other non-zero exit act as for new work. Omitted means the main `gate` runs. A gate that refuses a repository with a red pull request needs a different gate here. |
+| `tries` | failed tries before the issue is blocked, 1 to 5. Omitted means 2. |
+| `blockLabel` | the label a blocked issue gets. It must exist in the repository. Omitted means `blocked`. |
+| `notify` | an argument list run once when an issue is blocked: `{repo}` `{number}` `{pr}` `{reason}`. Omitted means none. |
+| `land` | update a green queue pull request that is behind its base, and merge one that is up to date, as above. Omitted means `true`. |
+| `forbid` | regular expressions matched against lines a fix run added. A match, or a higher number in a file whose name is a baseline, ratchet or limit, refuses the fix (see above). Omitted means patterns for a postfix `!` after an identifier, `]` or `)`, ` as `, `as any`, `@ts-ignore`, `@ts-expect-error`, `# type: ignore`, `eslint-disable`, `nolint` and `noqa`. An empty list turns the check off. |
+
+`--dry-run` lists the fix runs first (`would fix <repo>#<n> PR #<pr>:
+<reason>, try <k> of <tries>`), then new starts, together up to `max`. It
+also lists what it would land (`would update …`, `would merge …`), an issue
+it would block (`would label …`) and a record it would clear (`would clear
+the fix record …`). It adds no label, updates and merges nothing, and
+writes no state. It runs the gate as for a start.
+
+`TestQueueFixesARedQueuePRBeforeANewIssue`,
+`TestQueueFixesAConflictingQueuePR`, `TestQueueDoesNotJudgeAPendingQueuePR`,
+`TestQueueNeverTouchesAPROfAnIssueItDidNotStart`,
+`TestQueueActsOnlyInTheConfiguredRepositories`,
+`TestQueueBlocksAfterTheLastFailedTry`,
+`TestQueueKeepsABlockedIssueBlocked`,
+`TestQueueTriesAMissingBlockLabelOncePerWait`,
+`TestQueueClearsTheRecordOfAPRThatTurnedGreen`,
+`TestQueueDoesNotCountAFixStoppedWithTheQueue`,
+`TestQueueStateSurvivesARestart`, `TestQueueStateIsSyncedBeforeTheRenameAndAfter`,
+`TestQueueStartsNoFixWhenThePRListingFails`,
+`TestQueueListsARepositoryOnlyWhenItsIssuesCanAct`,
+`TestQueueUpdatesAGreenPRBehindItsBaseWithoutAnAgent`,
+`TestQueueFixesAPRWhoseUpdateConflicts`, `TestQueueMergesAGreenUpToDatePR`,
+`TestQueueTriesARefusedMergeOncePerListing`,
+`TestQueueRetriesARefusedMergeAfterTheWait`,
+`TestQueueStopsMergingAfterFiveRefusals`,
+`TestQueueResetsAMergeRefusalWhenTheHeadChanges`,
+`TestQueueKeepsAMergeWaitAcrossARestart`,
+`TestQueueDoesNotLandACancelledRequiredCheck`,
+`TestQueueLandsWhenACancelledCheckIsNotRequired`,
+`TestQueueRefusesAFixThatSuppresses`,
+`TestQueueLandsNothingWithLandOff`, `TestQueueFixPromptNamesTheBase`,
+`TestQueueDryRunListsFixRunsFirstAndWritesNothing`,
+`TestQueueDryRunSaysWhatItWouldLand`, `TestQueueDryRunSaysItWouldClearARecord`,
+`TestQueueSerializesTwoGreenPRsTouchingASharedFile`,
+`TestQueueLandsTwoPRsWithDisjointFiles`,
+`TestQueueBlocksMergeWhenBaseMovedAfterChecks`,
+`TestQueueOmittedSerializeChangesNothing`,
+`TestQueueDryRunListsSerializeWaitsAndAtMostOneMergePerRepo`,
+`TestQueueCachesPRFilesAndLogsWaitOncePerListing`
+and `TestQueueWithoutFixChangesNothing` hold this.
 
 ## The credential preflight
 
@@ -599,7 +941,8 @@ nothing more: no second `.git`, and no mirror to keep in step.
   makes `spawn` refuse rather than reset it.
 - A worktree shares the checkout's branches, stash, remotes and hooks. A
   branch made in the workspace is a branch of the checkout, and stays there
-  after `reap`.
+  after `reap`. An extra remote the manifest names is not added: it would
+  land in that shared config, outside the workspace. Sync skips it and warns.
 - `--no-worktree` clones every repository, as before.
 
 ## Mirrors make the clones cheap
@@ -650,9 +993,27 @@ it can be adopted by an existing, versioned set of workspaces without churn.
 - **`sync` writes only inside the workspace.** A clone or link key must be one
   directory name and a link target a folder under the projects root; a manifest
   naming `../x`, `a/b` or `/abs` is refused when it is read, before anything is
-  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`). The one
-  write outside it is git's own, in a checkout a clone becomes a worktree of:
-  a fetch of `origin`, and the worktree's entry in that checkout's `.git`.
+  cloned or linked (`TestValidate`, `TestReadRefusesAnEscapingKey`).
+  `--bootstrap` (and `restore`, and `facet add link` when it records an origin)
+  is the other write: it clones a missing link target under the projects root.
+  The destination's parent is resolved first, and a parent outside that root
+  is refused, so a symlink committed inside a checkout cannot send the clone
+  elsewhere
+  (`TestSyncBootstrapRefusesACloneThroughASymlinkOutOfTheProjectsRoot`).
+  A clone folder that exists but is not the top level of its own repository
+  is left alone. Sync checks with `git rev-parse --show-toplevel` and, when
+  that is not the folder, runs no further git there, so a remote cannot be
+  added to the enclosing repository
+  (`TestGrillSyncRemoteOnAPlainDirWritesTheEnclosingRepository`,
+  `TestSyncSkipsACloneFolderThatIsNotItsOwnRepository`).
+  An extra remote is not added to a worktree clone. That clone shares the
+  checkout's git config, so the remote would be written outside the workspace.
+  Sync skips it and warns
+  (`TestGrillSyncRemoteOnAWorktreeCloneWritesTheCheckoutConfig`,
+  `TestSyncSkipsAnExtraRemoteOnAWorktreeClone`).
+  The remaining write outside the workspace is git's own, in a checkout a clone
+  becomes a worktree of: a fetch of `origin`, and the worktree's entry in that
+  checkout's `.git`.
 - **A manifest URL is never read as a git option.** Every git call that takes a
   URL, path or remote name from the manifest puts `--` before it, so a URL such
   as `--upload-pack=<command>` is looked up as a repository and fails
@@ -697,9 +1058,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsACommitOnlyAPerWorktreeRefReaches`,
   `TestReapHoldsACommitOnlyARebaseLabelReaches`). It fetches every remote with
   `--prune` first, not only `origin`, so a branch deleted from a fork since it
-  was pushed there no longer reads as pushed; a remote it cannot fetch is named
+  was pushed there no longer reads as pushed; a remote it cannot fetch holds
+  the workspace and is named, since a branch deleted or force-pushed upstream
+  since the last fetch would still read as pushed against stale refs
   (`TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed`,
-  `TestReapNamesTheRemoteItCouldNotFetch`). It fetches into
+  `TestReapNamesTheRemoteItCouldNotFetch`,
+  `TestReapHoldsWorkWhenTheFetchFailsAndOnlyAStaleRemoteRefHasIt`). It fetches into
   `refs/remotes/<name>/` only, whatever the remote's own refspec says, so a
   remote added with `--mirror=fetch` cannot prune local branches away, not even
   in a dry run (`TestReapsFetchNeverWritesOutsideRefsRemotes`).
@@ -760,7 +1124,11 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   the workspace by name with `--force`
   (`TestReapHoldsContentInAGitDirObjectStore`). The landing proof names the
   default branch by its full ref, so a local branch called `origin/main` is not
-  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`).
+  taken for it (`TestReapHoldsALocalBranchNamedOriginMain`). A ref that is
+  itself symbolic is not taken for it either, so a chain from
+  `refs/remotes/origin/HEAD` through another symref to a local branch cannot
+  pass by comparing that branch with itself
+  (`TestReapHoldsABranchASymbolicDefaultRefNames`).
 - **`reap` refuses when it cannot tell whether a pull request is open.** Only
   gh's "no pull requests found" counts as none; a repository gh cannot resolve
   (renamed, transferred, unreadable) holds the workspace
@@ -935,6 +1303,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`, and with `--dry-run` it deletes nothing
   (`TestReapReapableDryRunDeletesNothing`).
+- **`reap --reapable --closed` takes only issue workspaces whose pull request
+  is merged or closed**, and keeps the rest with their reason, a failed lookup
+  among them (`TestReapClosedReapsOnlyMergedOrClosedPullRequests`,
+  `TestReapClosedFindsAMergeByTheHomeCommit`). It only narrows: a merged pull
+  request does not take a workspace with unpushed commits
+  (`TestReapClosedStillHoldsUnpushedCommits`).
 - **`reap --reapable` sweeps only worktrees inside their checkout**, never
   one elsewhere and never a bare repository's, so an everyday checkout that is
   a worktree, or a service run from one, keeps its ignored files
@@ -987,16 +1361,34 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   `TestPruneHoldsWhenTheProcessProbeFails`).
 - **`reap` refuses while a loaded launchd job runs from the workspace**, running
   or not: a scheduled job between runs holds nothing open, so `lsof` misses it,
-  and its next run would fail. A job counts when its `Program`, an absolute path
-  in its `ProgramArguments`, or its `WorkingDirectory` is inside the workspace;
-  only jobs `launchctl list` shows count, since a plist that is not loaded starts
+  and its next run would fail. A job counts when any plist string value names
+  a path inside the workspace. This includes `Program`, paths in
+  `ProgramArguments` (including values after `=`), `WorkingDirectory`, standard
+  output/error paths, and watched or queued directories.
+  The last element of that path is kept as named, so a program that is a
+  symlink to an interpreter outside (a venv's python) and a workspace link to
+  a project both still count
+  (`TestGrillUnderHoldsAJobRunThroughASymlinkInsideTheDirectory`,
+  `TestGrillReapHoldsAJobRunningThroughAWorkspaceLink`,
+  `TestGrillPruneHoldsAVenvALoadedJobRuns`). On a volume that folds case the
+  spellings compare equal, so `facet reap SVC` still sees the job whose plist
+  names `svc`
+  (`TestGrillUnderMatchesACaseVariantOfTheDirectory`,
+  `TestGrillReapByACaseVariantNameKeepsTheLaunchdHold`).
+  Only jobs `launchctl list` shows count, since a plist that is not loaded starts
   nothing. A loaded job's plist is read wherever it is: from the LaunchAgents
-  folders, or from the file `launchctl print` says it was loaded from
+  folders, or from the file `launchctl print` says it was loaded from (which
+  takes precedence over a stale LaunchAgents copy)
   (`TestUnderFindsAJobLoadedFromAPlistElsewhere`). Unload the job, or move it out, then reap
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
   that fails holds every workspace, since no job can be ruled out; only a
   launchctl that is not installed (off macOS) reads as no jobs
-  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`).
+  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`). A loaded job whose plist
+  facet cannot read, or whose `launchctl print` fails, holds every workspace
+  with the label and fix to show what to check
+  (`TestUnderFailsWhenLoadedPlistCannotBeRead`,
+  `TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob`). An unreadable plist
+  for an unloaded job is skipped (`TestUnderSkipsAnUnreadableUnloadedPlist`).
 - **An issue's body stays quoted in the `CLAUDE.md` spawn writes.** Every line
   of it starts with `>`, whatever it holds, so it cannot pose as the file's own
   headings or rules (`TestIssueClaudeMDKeepsTheBodyInsideTheQuote`).

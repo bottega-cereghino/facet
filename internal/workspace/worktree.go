@@ -99,11 +99,25 @@ func addWorktree(git gitx.Runner, checkout, dir string, skipLFS bool, rep Report
 		rep.Note("%s: origin's default branch is unknown, so a clone is made instead of a worktree", checkout)
 		return false, nil
 	}
+	tmpRoot, err := os.MkdirTemp(filepath.Dir(dir), ".facet-clone-*")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = os.RemoveAll(tmpRoot) }()
+	stage := filepath.Join(tmpRoot, filepath.Base(dir))
+
 	var env []string
 	if skipLFS {
 		env = append(env, "GIT_LFS_SKIP_SMUDGE=1")
 	}
-	if _, err := git.Run(checkout, env, "worktree", "add", "--detach", "--quiet", "--", dir, base); err != nil {
+	if _, err := git.Run(checkout, env, "worktree", "add", "--detach", "--quiet", "--", stage, base); err != nil {
+		return false, err
+	}
+	if err := placeStaged(stage, dir); err != nil {
+		_ = removeWorktree(git, checkout, stage)
+		return false, err
+	}
+	if _, err := git.Run(checkout, nil, "worktree", "repair", "--", dir); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -142,6 +156,22 @@ func TopLevel(git gitx.Runner, dir string) (top, linked bool) {
 	}
 	of, err := worktreeOf(git, dir)
 	return true, err == nil && of != ""
+}
+
+// ownWorkTree reports whether dir is the top level of its own work tree.
+// Git walks up from a folder that is not, so a command run there writes the
+// enclosing repository. A directory with no repository of its own is false
+// with no error. A directory that has one, whose top level cannot be read,
+// is an error: "could not check" is not "not a repository".
+func ownWorkTree(git gitx.Runner, dir string) (bool, error) {
+	out, err := git.Run(dir, nil, "rev-parse", "--show-toplevel")
+	if err != nil {
+		if gitx.IsRepo(dir) {
+			return false, fmt.Errorf("cannot tell whether %s is its own repository: %w\nfix: run `git -C %s rev-parse --show-toplevel`", dir, err, dir)
+		}
+		return false, nil
+	}
+	return realPath(strings.TrimSpace(out)) == realPath(dir), nil
 }
 
 // removeWorktree removes the linked worktree at dir through its checkout, so the
@@ -217,7 +247,8 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 	if top = strings.TrimSpace(top); realPath(top) != realPath(dir) {
 		return nil, fmt.Errorf("%s is a folder inside the worktree %s, not a worktree\nfix: facet reap %s", dir, top, top)
 	}
-	repo, clonePR := githubRepo(gitx.Origin(git, dir)), pr
+	origin := gitx.Origin(git, dir)
+	repo, clonePR := githubRepo(origin), pr
 	if repo == "" {
 		clonePR = nil
 	}
@@ -233,6 +264,12 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 		} else {
 			st.PRUnknown = true
 		}
+	} else if pr != nil && networkRemote(origin) && repo == "" && c.Branch != "" && c.Branch != "HEAD" {
+		// An origin on a host that is not plain github.com (an SSH host alias,
+		// an Enterprise host) cannot be asked about its pull requests: an open
+		// one cannot be ruled out, so the state is unknown, not "none" (#325).
+		// A local path or file:// origin has no pull requests to ask about.
+		st.PRUnknown = true
 	}
 	st.checkRunning(dir, mux)
 	st.SizeBytes = freedBytes(dir)
@@ -331,4 +368,20 @@ func realPath(p string) string {
 		return r
 	}
 	return filepath.Clean(p)
+}
+
+// networkRemote reports whether a remote URL names another host: a URL with a
+// scheme other than file://, or scp-like user@host:path. A local path, a
+// file:// URL and "" are not.
+func networkRemote(url string) bool {
+	switch {
+	case url == "", strings.HasPrefix(url, "file://"):
+		return false
+	case strings.Contains(url, "://"):
+		return true
+	}
+	// scp-like syntax: a colon before any slash, as git reads it.
+	colon := strings.IndexByte(url, ':')
+	slash := strings.IndexByte(url, '/')
+	return colon > 0 && (slash < 0 || colon < slash)
 }
