@@ -97,6 +97,7 @@ func newQueueCmd() *cobra.Command {
 	cmd.Flags().StringVar(&configPath, "config", "", "queue config JSON file (default: FACET_QUEUE)")
 	cmd.Flags().StringVar(&logPath, "log", "", "write queue output to this file and reopen it on SIGHUP")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what the next starts would take, without spawning or starting an agent")
+	cmd.AddCommand(newQueueStatusCmd())
 	return cmd
 }
 

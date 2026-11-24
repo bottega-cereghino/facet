@@ -403,6 +403,8 @@ func (r *queueRunner) fixGate(ctx context.Context, job *fixJob) error {
 	}
 	vars := r.fixVars(job, "")
 	delete(vars, "prompt")
+	stop := r.pulseHeartbeat(ctx)
+	defer stop()
 	return r.env.run(ctx, "", expandArgv(gate, vars))
 }
 
@@ -443,19 +445,22 @@ func (r *queueRunner) startFix(ctx context.Context, job *fixJob) {
 	r.mu.Lock()
 	r.running++
 	r.fixing[k] = true
+	now := r.env.now()
+	r.active[k] = heartbeatRun{Issue: k, Agent: "fix", Since: now.UTC()}
 	rec := r.state.Fixes[k]
 	if rec == nil || rec.PR != job.pr.Number {
 		rec = &fixRecord{PR: job.pr.Number}
 		r.state.Fixes[k] = rec
 	}
 	rec.Runs++
-	rec.Last = r.env.now()
+	rec.Last = now
 	// The first try's head stays. A later try is judged on the diff from
 	// that head, so a suppression the first try pushed is still visible.
 	if rec.Head == "" {
 		rec.Head = job.pr.HeadRefOid
 	}
 	r.mu.Unlock()
+	r.writeHeartbeat()
 	r.saveState()
 	r.wg.Add(1)
 	go func() {
@@ -465,7 +470,9 @@ func (r *queueRunner) startFix(ctx context.Context, job *fixJob) {
 			r.mu.Lock()
 			r.running--
 			delete(r.fixing, k)
+			delete(r.active, k)
 			r.mu.Unlock()
+			r.writeHeartbeat()
 		}()
 		started := r.runFix(ctx, job)
 		r.mu.Lock()
@@ -548,6 +555,7 @@ func (r *queueRunner) saveState() {
 	err := r.state.save(r.cfg.State)
 	r.mu.Unlock()
 	if err != nil {
+		r.setLastError(err.Error())
 		r.logf("queue: %v", err)
 	}
 }
