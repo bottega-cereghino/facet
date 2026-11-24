@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -515,6 +517,150 @@ func TestQueueLandsNothingWithLandOff(t *testing.T) {
 	}
 }
 
+func TestQueueExpiresMergeMethodAndRequiredChecksCache(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1, 2}, nil)
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var now atomic.Value
+	now.Store(start)
+
+	var (
+		ruleCalls   atomic.Int32
+		methodCalls atomic.Int32
+		merged1     atomic.Bool
+		merged2     atomic.Bool
+	)
+	land := &landCalls{
+		merge: func(n int) error {
+			if n == 11 {
+				merged1.Store(true)
+			}
+			if n == 12 {
+				merged2.Store(true)
+			}
+			return nil
+		},
+	}
+	env := land.env(queueEnv{
+		list: noIssues,
+		prs: func(string) ([]ghx.OpenPR, error) {
+			var out []ghx.OpenPR
+			if !merged1.Load() {
+				out = append(out, landPR(11, "feature/1-bell", "CLEAN"))
+			}
+			if merged1.Load() && !merged2.Load() {
+				out = append(out, landPR(12, "feature/2-horn", "CLEAN"))
+			}
+			return out, nil
+		},
+		requiredChecks: func(string, string) ([]string, bool, error) {
+			if ruleCalls.Add(1) == 1 {
+				return []string{"ci", "extra"}, true, nil
+			}
+			return []string{"ci"}, true, nil
+		},
+		now: func() time.Time { return now.Load().(time.Time) },
+	})
+	env.mergeMethod = func(string, string) (string, error) {
+		if methodCalls.Add(1) == 1 {
+			return "merge", nil
+		}
+		return "rebase", nil
+	}
+	s := startQueue(t, cfg, env)
+	waitFor(t, "first requiredChecks refusal", func() bool {
+		return ruleCalls.Load() >= 1 && strings.Contains(s.buf.String(), "extra is missing")
+	})
+	// Still cached before ruleCacheTTL.
+	now.Store(start.Add(30 * time.Minute))
+	time.Sleep(100 * time.Millisecond)
+	if ruleCalls.Load() != 1 || merged1.Load() {
+		t.Fatalf("ruleCalls = %d, merged1 = %v; want cached before TTL", ruleCalls.Load(), merged1.Load())
+	}
+	// Past ruleCacheTTL: requiredChecks refreshes, PR #11 lands with "merge".
+	now.Store(start.Add(ruleCacheTTL + time.Second))
+	waitFor(t, "PR #11 merged", func() bool { return merged1.Load() })
+	// Past another ruleCacheTTL: mergeMethod refreshes, PR #12 lands with "rebase".
+	now.Store(start.Add(2*ruleCacheTTL + 2*time.Second))
+	waitFor(t, "PR #12 merged", func() bool { return merged2.Load() })
+	s.stop(t)
+	want := "merge acme/widgets#11 merge head11|merge acme/widgets#12 rebase head12"
+	if got := strings.Join(land.list(), "|"); got != want {
+		t.Fatalf("landed = %q\nwant   = %q", got, want)
+	}
+}
+
+func TestQueueDoesNotRestartFinishedIssueAfterRestart(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "log")
+	cfg := fixQueue(t, log)
+	issues := func(string, string) ([]ghx.Issue, error) {
+		return []ghx.Issue{openIssue(5, "2026-01-01T00:00:00Z")}, nil
+	}
+	first := startQueue(t, cfg, queueEnv{list: issues, prs: staticPRs()})
+	waitFor(t, "first run done persisted", func() bool {
+		st, err := loadQueueState(cfg.State)
+		return err == nil && !st.Done["acme/widgets#5"].IsZero()
+	})
+	first.stop(t)
+
+	ticks := &countCalls{}
+	second := startQueue(t, cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			ticks.add(repo)
+			return []ghx.Issue{openIssue(5, "2026-01-01T00:00:00Z")}, nil
+		},
+		prs: staticPRs(),
+	})
+	waitFor(t, "five rounds after restart", func() bool { return ticks.get("acme/widgets") >= 5 })
+	second.stop(t)
+	if got := readLines(t, log); len(got) != 1 || got[0] != "start 5" {
+		t.Fatalf("runs = %q, want issue #5 started only once across restart", got)
+	}
+}
+
+func TestQueueDoesNotStartSecondAgentWhileCrashedProcessGroupIsAlive(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "log")
+	cfg := fixQueue(t, log)
+	// Simulate an agent still alive in its own process group after a queue crash.
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pgid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+
+	st := newQueueState()
+	st.Active["acme/widgets#5"] = pgid
+	if err := st.save(cfg.State); err != nil {
+		t.Fatal(err)
+	}
+
+	ticks := &countCalls{}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			ticks.add(repo)
+			return []ghx.Issue{openIssue(5, "2026-01-01T00:00:00Z")}, nil
+		},
+		prs: staticPRs(),
+	})
+	waitFor(t, "five rounds while crashed agent is alive", func() bool { return ticks.get("acme/widgets") >= 5 })
+	if got := readLines(t, log); len(got) != 0 {
+		t.Fatalf("started a second agent while pgid %d was alive: %q", pgid, got)
+	}
+	// Once the orphaned process group exits, the issue is free to start.
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	_ = cmd.Wait()
+	waitFor(t, "issue #5 starts after orphaned agent exits", func() bool { return len(readLines(t, log)) >= 1 })
+	s.stop(t)
+	if got := readLines(t, log); len(got) != 1 || got[0] != "start 5" {
+		t.Fatalf("runs = %q, want one start after orphaned agent exited", got)
+	}
+}
+
 func TestQueueDryRunSaysWhatItWouldLand(t *testing.T) {
 	cfg := fixQueue(t, "unused")
 	seedState(t, cfg.State, []int{1, 2}, nil)
@@ -689,15 +835,14 @@ func TestQueueKeepsABlockedIssueBlocked(t *testing.T) {
 	}
 }
 
-func TestQueueDryRunSaysItWouldClearARecord(t *testing.T) {
+func TestQueueDryRunKeepsFixRecordWhenGreen(t *testing.T) {
 	cfg := fixQueue(t, "unused")
 	seedState(t, cfg.State, []int{1}, map[int]int{1: 1})
 	before := readFile(t, cfg.State)
 	var buf bytes.Buffer
 	err := testDryQueue(context.Background(), cfg, queueEnv{list: noIssues, prs: staticPRs(greenPR(11, "feature/1-bell")), out: &buf})
 	got := buf.String()
-	if err != nil || !strings.Contains(got, "dry-run: would clear the fix record of acme/widgets#1: PR #11 is green") ||
-		strings.Contains(got, "clearing") {
+	if err != nil || strings.Contains(got, "clear") {
 		t.Fatalf("err %v, dry-run =\n%s", err, got)
 	}
 	if readFile(t, cfg.State) != before {

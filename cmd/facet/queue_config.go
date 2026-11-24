@@ -238,6 +238,9 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 			return queueConfig{}, fmt.Errorf("queue config: cap is set and state is not\nfix: set state to a file path, where the queue records the issues it started")
 		}
 	}
+	if cfg.State == "" && strings.TrimSpace(f.State) != "" {
+		cfg.State = resolveQueueState(configPath, f.State)
+	}
 	if p := strings.TrimSpace(f.Heartbeat); p != "" {
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(filepath.Dir(configPath), p)
