@@ -232,6 +232,7 @@ func (r *queueRunner) mergePR(ctx context.Context, iss queuedIssue, pr ghx.OpenP
 	delete(r.state.Merges, key)
 	r.mu.Unlock()
 	r.saveState()
+	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), "land", decisionLanded, fmt.Sprintf("PR #%d (%s)", pr.Number, method))
 	r.logf("queue: merged %s PR #%d (%s)", k, pr.Number, method)
 	if r.env.reap != nil {
 		if err := r.env.reap(iss.Repo, iss.Issue.Number); err != nil {

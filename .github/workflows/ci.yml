@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review is not a default type: without it a draft marked
+    # ready keeps its skipped macos job, and a skipped required check passes.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -74,6 +77,7 @@ jobs:
       - run: make fmt
       - run: make vet
       - run: make lint
+      - run: make architecture
       - name: Install shellcheck
         run: |
           cd "$RUNNER_TEMP"
@@ -115,7 +119,7 @@ jobs:
   #
   #   * skipped on draft pull requests, and on pull requests not targeting
   #     `main` -- work in progress still gets the full Linux leg, and marking a
-  #     PR ready for review triggers these.
+  #     PR ready for review triggers these (the ready_for_review type above).
   #
   #   * build and test only -- gofmt, lint and govulncheck are
   #     platform-independent by construction, so running them twice buys

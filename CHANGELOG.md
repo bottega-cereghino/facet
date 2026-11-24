@@ -6,6 +6,18 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.17.0](https://github.com/bottega-cereghino/facet/compare/v0.16.0...v0.17.0) (2026-11-24)
+
+
+### Added
+
+* **queue:** a report of the last day's runs as JSON, for dashboards ([#523](https://github.com/bottega-cereghino/facet/issues/523)) ([811851d](https://github.com/bottega-cereghino/facet/commit/811851d1e37d0cd290b82894955c8617ee43ab69))
+
+
+### Fixed
+
+* **reap:** read a loaded job from launchctl print when its plist is gone ([#516](https://github.com/bottega-cereghino/facet/issues/516)) ([784b153](https://github.com/bottega-cereghino/facet/commit/784b153fd63f9b9361ea284460ad9e6264fc79ec))
+
 ## [0.16.0](https://github.com/bottega-cereghino/facet/compare/v0.15.0...v0.16.0) (2026-11-24)
 
 

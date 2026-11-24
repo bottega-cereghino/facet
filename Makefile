@@ -31,10 +31,10 @@ SHELLCHECK ?= shellcheck
 # path here; locally the shfmt on PATH runs (`brew install shfmt`).
 SHFMT ?= shfmt
 
-.PHONY: check build fmt fmt-fix vet lint shellcheck shfmt test tidy vuln health clean
+.PHONY: check build fmt fmt-fix vet lint architecture shellcheck shfmt test tidy vuln health clean
 
 ## check: everything CI's first tier runs
-check: fmt vet lint shellcheck shfmt test tidy vuln
+check: architecture fmt vet lint shellcheck shfmt test tidy vuln
 
 ## build: compile the binary
 build:
@@ -59,6 +59,10 @@ vet:
 
 lint:
 	$(GOLANGCI) run ./...
+
+## architecture: import boundaries, cycles and source-file count ratchets
+architecture:
+	go run ./scripts/check-architecture.go
 
 ## shellcheck: the shell scripts, sourced files followed (-x)
 shellcheck:

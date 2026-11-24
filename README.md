@@ -642,6 +642,19 @@ Without `--json`, it prints one line per fact (`state`, `at`, `age`, `pid`,
 `version`, `running`, `held`, `last_error`). With `--json`, it prints the
 heartbeat object with `age_seconds` and `state` added.
 
+### `facet queue report`
+
+`facet queue report [--config FILE] [--since 24h] [--json]` says what the
+queue did in the window. It reads the decision log and the state file and
+makes no GitHub call. Per agent label it counts runs started, exits with
+status 0 and not 0, fix runs, pull requests landed, issues blocked and the
+skips by reason (the fix lane is `fix`, merges are `land`). It then prints
+the holds, the last error, and the issues the state file holds as blocked.
+Without `--json` it prints a short table. A line of the log that cannot be
+read is skipped and counted in `torn_lines`. A missing log is refused, so a
+broken path never reads as a quiet day. Exit, landed, blocked and error rows
+exist only from the version that added this command.
+
 For example, a `launchd` user agent can run a watcher script every 60 seconds:
 
 ```xml
@@ -1464,11 +1477,18 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
   that fails holds every workspace, since no job can be ruled out; only a
   launchctl that is not installed (off macOS) reads as no jobs
-  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`). A loaded job whose plist
-  facet cannot read, or whose `launchctl print` fails, holds every workspace
-  with the label and fix to show what to check
-  (`TestUnderFailsWhenLoadedPlistCannotBeRead`,
-  `TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob`). An unreadable plist
+  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`). A loaded job is read
+  from its plist, or, when that file is gone or cannot be read, from
+  `launchctl print` (the `gui/<uid>` domain, then `user/<uid>`, with the label
+  as `launchctl list` prints it): its program, arguments, working directory,
+  standard paths, environment and watched paths are checked as a plist's are
+  (`TestUnderReadsALoadedJobFromLaunchctlPrintWhenItsPlistIsGone`,
+  `TestUnderDoesNotHoldWhenTheGoneJobRunsElsewhere`). It holds every workspace,
+  with the label and fix to show what to check, only when neither can be read
+  (`TestUnderHoldsWhenBothThePlistAndLaunchctlPrintFail`,
+  `TestUnderFailsWhenLoadedPlistCannotBeRead`,
+  `TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob`). No job is skipped or
+  excluded from the check. An unreadable plist
   for an unloaded job is skipped (`TestUnderSkipsAnUnreadableUnloadedPlist`).
 - **An issue's body stays quoted in the `CLAUDE.md` spawn writes.** Every line
   of it starts with `>`, whatever it holds, so it cannot pose as the file's own
