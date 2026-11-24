@@ -77,6 +77,9 @@ func (r *queueRunner) setLastError(msg string) {
 	r.mu.Lock()
 	r.lastError = msg
 	r.mu.Unlock()
+	if msg != "" {
+		r.recordDecision("", "", "", decisionError, firstErrorLine(msg))
+	}
 }
 
 func (r *queueRunner) heartbeatSnapshot() queueHeartbeat {

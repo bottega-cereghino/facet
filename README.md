@@ -642,6 +642,19 @@ Without `--json`, it prints one line per fact (`state`, `at`, `age`, `pid`,
 `version`, `running`, `held`, `last_error`). With `--json`, it prints the
 heartbeat object with `age_seconds` and `state` added.
 
+### `facet queue report`
+
+`facet queue report [--config FILE] [--since 24h] [--json]` says what the
+queue did in the window. It reads the decision log and the state file and
+makes no GitHub call. Per agent label it counts runs started, exits with
+status 0 and not 0, fix runs, pull requests landed, issues blocked and the
+skips by reason (the fix lane is `fix`, merges are `land`). It then prints
+the holds, the last error, and the issues the state file holds as blocked.
+Without `--json` it prints a short table. A line of the log that cannot be
+read is skipped and counted in `torn_lines`. A missing log is refused, so a
+broken path never reads as a quiet day. Exit, landed, blocked and error rows
+exist only from the version that added this command.
+
 For example, a `launchd` user agent can run a watcher script every 60 seconds:
 
 ```xml
