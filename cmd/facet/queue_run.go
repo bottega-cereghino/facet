@@ -46,7 +46,10 @@ type queueEnv struct {
 	// route runs spawn's routing checks for a repository, without the
 	// network. Only --dry-run calls it; nil skips it.
 	route func(repo string) error
-	run   func(ctx context.Context, dir string, argv []string) error
+	// diskFree reports free bytes on the volume that holds path. Nil uses
+	// diskFreeBytes. A test sets it so the floor does not depend on the machine.
+	diskFree func(path string) (int64, error)
+	run      func(ctx context.Context, dir string, argv []string) error
 	// lanes runs the lanes command and returns its standard output. Nil
 	// uses runLanes. A test sets it so the suite does not start a program.
 	lanes func(ctx context.Context, argv []string) ([]byte, error)
@@ -197,7 +200,12 @@ type queueRunner struct {
 	cappedLog map[string]string
 	// lastHeld is the hold file path last recorded in the decision log, so
 	// held/released is emitted once per change rather than once per poll.
-	lastHeld   string
+	lastHeld string
+	// diskSeen is set after the first disk check. diskHeld is whether that
+	// check was refusing, so the log and the decision line happen once per
+	// change rather than once per tick.
+	diskSeen   bool
+	diskHeld   bool
 	decisionMu sync.Mutex
 	// rooms is this tick's lanes answer. Nil means a lane label keeps its
 	// agent. The map is not mutated after refreshRooms returns.
@@ -279,6 +287,9 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		return true, err
 	}
 	r.writeHeartbeat()
+	// Once per tick, before the new-work gate. Landing and a fix whose
+	// workspace is already on disk still run: they add no workspace.
+	disk := r.noteDisk()
 	r.mu.Lock()
 	r.round = map[string]prListing{}
 	r.mu.Unlock()
@@ -291,8 +302,13 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		r.pause(ctx)
 		return false, nil
 	}
-	if len(jobs) > 0 {
-		return r.tryFix(ctx, jobs[0])
+	if job := r.nextFix(jobs, disk); job != nil {
+		return r.tryFix(ctx, job)
+	}
+	if disk.block {
+		r.writeHeartbeat()
+		r.pause(ctx)
+		return false, nil
 	}
 	r.refreshRooms(ctx)
 	if ctx.Err() != nil {

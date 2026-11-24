@@ -468,10 +468,11 @@ never passed through a shell.
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. |
 | `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
-| `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
+| `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`, `disk`, `disk_clear`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
 | `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
 | `cap` | how often the queue starts standards or CI work, once that repository's own check passes (below). Omitted means no cap. |
+| `disk` | free space and how many issue workspaces may exist before the queue starts no new work (below). Omitted means the queue does not look at either. |
 
 For example, a local newsyslog rule can use the PID file as its signal target:
 
@@ -684,6 +685,43 @@ state. A restart reads the state file, so the window is the same one.
 `TestQueueCapPassesRunsOncePerRepository`,
 `TestQueueCapFixAndLandAreNotCapped` and
 `TestQueueCapKeepsAStartAfterThePullRequestIsGone` hold this.
+
+### Disk
+
+Optional `disk` stops new work while the disk is low or too many issue
+workspaces are on it. Omitted, the queue does not look at either, and a
+run is unchanged.
+
+| `disk` field | |
+| --- | --- |
+| `path` | the folder whose volume is watched. Free space is that volume's. A relative path is beside the config file. Omitted means the workspaces root (`FACET_WORKSPACES`, otherwise `~/Workspaces`). |
+| `minFreeGB` | below this many gigabytes free, the queue starts no new issue. A gigabyte here is 1024^3 bytes, the unit `df -g` uses. Omitted means 20. |
+| `maxWorkspaces` | at or above this many issue workspaces, the queue starts no new issue. An issue workspace is an `iss-*` directory in the workspaces root whose `.workspace.json` has an issue. A directory with another name, a manifest with no issue, and a symlink are not counted. Omitted means no count limit. |
+
+The check runs once per tick, before the gate. While it refuses, a new
+issue does not start, and neither does a run that would spawn a workspace.
+A fix run whose workspace is already on disk still starts. A green pull
+request is still updated when it is behind its base, and still merged when
+it is up to date. `facet reap` is a separate command and is not held, which
+is what frees the space. The next tick after the free space and the count
+are back inside the limit starts work again.
+
+It logs one line when it begins refusing (`disk: 18 GB free, below 20: starting no new work`,
+or the same shape for the workspace count) and one line when it clears
+(`disk: clear`). The same words go to the decision log as `disk` and
+`disk_clear` when `decisions` is set. Repeating the same state logs nothing.
+
+`--dry-run` prints the refusal and the starts it would have taken, including
+a fix it would still run and a landing it would still do. It writes no
+decision line.
+
+`TestQueueDiskLowFreeSpaceStartsNoNewRunButFixes`,
+`TestQueueDiskAtTheWorkspaceLimitStartsNoNewRunButFixes`,
+`TestQueueDiskDoesNotSpawnAMissingFixWorkspace`,
+`TestQueueDiskClearingResumesStarts`,
+`TestQueueDiskOmittedChangesNothing`,
+`TestQueueDiskDryRunPrintsTheRefusalAndTheStarts` and
+`TestQueueDiskCountsIssueWorkspacesOnly` hold this.
 
 ### The queue fixes its own red pull requests first
 
