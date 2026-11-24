@@ -259,3 +259,31 @@ func TestForbidCustomFlag(t *testing.T) {
 		}
 	}
 }
+
+// A line a merge brought in from the base branch is in the run's compare but
+// not in the pull request's diff, so it is not judged. A line the run wrote,
+// in a merge commit's conflict resolution too, is in both and is judged.
+func TestOnlyInBothJudgesTheRunsOwnLines(t *testing.T) {
+	patterns, err := compileForbid(defaultForbid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := "@@ -1 +1,2 @@\n x\n+// nolint\n"
+	for _, tc := range []struct {
+		name string
+		pr   []ghx.DiffFile
+		bad  bool
+	}{
+		{"a line merged in from the base", []ghx.DiffFile{{Name: "a.go", Patch: "@@ -1 +1 @@\n-x\n+y\n"}}, false},
+		{"a merged file the pull request does not touch", nil, false},
+		{"a line the run wrote", []ghx.DiffFile{{Name: "a.go", Patch: own}}, true},
+		{"the same line in another file", []ghx.DiffFile{{Name: "b.go", Patch: own}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := onlyInBoth([]ghx.DiffFile{{Name: "a.go", Patch: own}}, tc.pr)
+			if _, _, bad := defaultForbidHit(files, patterns); bad != tc.bad {
+				t.Fatalf("bad = %v, want %v", bad, tc.bad)
+			}
+		})
+	}
+}
