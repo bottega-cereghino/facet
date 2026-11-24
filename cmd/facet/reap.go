@@ -110,12 +110,16 @@ func newReapCmd() *cobra.Command {
 			"--closed narrows --reapable to issue workspaces whose branch has a merged or\n" +
 			"closed pull request and no open one. Every other workspace is left alone and\n" +
 			"listed with its reason: not an issue workspace, no pull request, pull request\n" +
-			"open, or pull request lookup failed.",
+			"open, or pull request lookup failed.\n\n" +
+			"--safe is --reapable --yes for a run nobody watches: it asks nothing, deletes\n" +
+			"only what --reapable would, and prints each path it removed with its size.\n" +
+			"It refuses --force and a named workspace or --path, so nothing widens it;\n" +
+			"--closed and --dry-run still apply.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if safe {
 				if force || path != "" || len(args) > 0 {
-					return fmt.Errorf("--safe sweeps only reapable workspaces and worktrees; it cannot be combined with --force or a named target")
+					return fmt.Errorf("--safe sweeps only what --reapable would delete; it takes no --force, workspace name or --path\nfix: drop them, or name the workspace without --safe: facet reap <name>")
 				}
 				reapable = true
 				yes = true
@@ -269,9 +273,9 @@ func newReapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "delete even when work would be lost")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	cmd.Flags().BoolVar(&reapable, "reapable", false, "delete every workspace at the root that reap would delete now, after one confirmation")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --reapable: print the list, delete nothing")
-	cmd.Flags().BoolVar(&closed, "closed", false, "with --reapable: only issue workspaces whose pull request is merged or closed")
-	cmd.Flags().BoolVar(&safe, "safe", false, "delete only reapable workspaces and worktrees, without prompting; never forces")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --reapable or --safe: print the list, delete nothing")
+	cmd.Flags().BoolVar(&closed, "closed", false, "with --reapable or --safe: only issue workspaces whose pull request is merged or closed")
+	cmd.Flags().BoolVar(&safe, "safe", false, "--reapable without a prompt, for unattended runs; refuses --force and a named workspace")
 	return cmd
 }
 
