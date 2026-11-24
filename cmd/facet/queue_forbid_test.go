@@ -207,3 +207,106 @@ func TestQueueBacksOffAnUnreadableFixDiff(t *testing.T) {
 		t.Fatalf("log =\n%s", out)
 	}
 }
+
+// A compare diff spanning more than one page with a suppression on the second
+// page is refused rather than landed.
+func TestQueueRefusesSuppressionOnSecondComparePage(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "log")
+	notified := filepath.Join(t.TempDir(), "notify")
+	cfg := fixQueue(t, log)
+	cfg.Fix.Notify = []string{appendScript(t), notified, "{repo}#{number} PR {pr}: {reason}"}
+	seedState(t, cfg.State, []int{1}, nil)
+	labels := &labelCalls{}
+	land := &landCalls{}
+	prs := func(string) ([]ghx.OpenPR, error) {
+		n := countLines(log)
+		pr := redPR(11, "feature/1-bell")
+		pr.HeadRefOid = fmt.Sprintf("h%d", n)
+		if n > 0 {
+			pr = landPR(11, "feature/1-bell", "CLEAN")
+			pr.HeadRefOid = fmt.Sprintf("h%d", n)
+		}
+		return []ghx.OpenPR{pr}, nil
+	}
+	var page1 strings.Builder
+	page1.WriteString(`{"files":[`)
+	for i := 0; i < 100; i++ {
+		if i > 0 {
+			page1.WriteByte(',')
+		}
+		fmt.Fprintf(&page1, `{"filename":"f%03d.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-old\n+new\n"}`, i)
+	}
+	page1.WriteString(`]}`)
+	page2 := `{"files":[{"filename":"page2.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-foo\n+foo!\n"}]}`
+	installFakeGh(t, page1.String()+page2)
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list:         noIssues,
+		prs:          prs,
+		addLabel:     labels.add,
+		compareFiles: ghx.CLI{}.CompareFiles,
+	}))
+	waitFor(t, "the notify", func() bool { return len(readLines(t, notified)) >= 1 })
+	s.stop(t)
+	if len(land.list()) != 0 {
+		t.Fatalf("landed = %q, want no merge", land.list())
+	}
+	if !strings.Contains(s.buf.String(), "page2.ts") || !strings.Contains(s.buf.String(), "not landing") {
+		t.Fatalf("log =\n%s", s.buf.String())
+	}
+}
+
+// A truncated compare diff is refused with a clear log line and never landed.
+func TestQueueRefusesTruncatedCompareDiff(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	st.Fixes["acme/widgets#1"] = &fixRecord{PR: 11, Runs: 1, Last: start.Add(-time.Hour), Head: "h0"}
+	if err := st.save(cfg.State); err != nil {
+		t.Fatal(err)
+	}
+	var body strings.Builder
+	body.WriteString(`{"files":[`)
+	for i := 0; i < ghx.CompareFileLimit; i++ {
+		if i > 0 {
+			body.WriteByte(',')
+		}
+		fmt.Fprintf(&body, `{"filename":"f%03d.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-old\n+new\n"}`, i)
+	}
+	body.WriteString(`]}`)
+	installFakeGh(t, body.String())
+	ticks := &countCalls{}
+	land := &landCalls{}
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list:         func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+		prs:          staticPRs(landPR(11, "feature/1-bell", "CLEAN")),
+		compareFiles: ghx.CLI{}.CompareFiles,
+		now:          func() time.Time { return start },
+	}))
+	waitFor(t, "three rounds", func() bool { return ticks.get("acme/widgets") >= 3 })
+	s.stop(t)
+	if len(land.list()) != 0 {
+		t.Fatalf("landed = %q, want no merge", land.list())
+	}
+	out := s.buf.String()
+	if !strings.Contains(out, "truncated") || !strings.Contains(out, "not landing") {
+		t.Fatalf("log =\n%s", out)
+	}
+}
+
+func installFakeGh(t *testing.T, stdout string) {
+	t.Helper()
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "stdout")
+	if err := os.WriteFile(outPath, []byte(stdout), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n/bin/cat '" + outPath + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
