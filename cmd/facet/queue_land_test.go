@@ -135,6 +135,34 @@ func TestQueueMergesAGreenUpToDatePR(t *testing.T) {
 	}
 }
 
+// An issue whose pull request waits to land is seen by new work's pick
+// every round. The pick reuses the cached listing, as the fix stage does.
+func TestQueueReusesTheListingForAnIssueThatWaitsToLand(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	ticks := &countCalls{}
+	listings := &countCalls{}
+	pr := landPR(11, "feature/1-bell", "CLEAN")
+	pr.Checks[0].Status = "IN_PROGRESS"
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	s := startQueue(t, cfg, (&landCalls{}).env(queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			ticks.add(repo)
+			return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
+		},
+		prs: func(repo string) ([]ghx.OpenPR, error) {
+			listings.add(repo)
+			return []ghx.OpenPR{pr}, nil
+		},
+		now: func() time.Time { return start },
+	}))
+	waitFor(t, "ten rounds", func() bool { return ticks.get("acme/widgets") >= 10 })
+	s.stop(t)
+	if got := listings.get("acme/widgets"); got != 1 {
+		t.Fatalf("listings = %d in ten rounds, want 1", got)
+	}
+}
+
 func TestQueueTriesARefusedMergeOncePerListing(t *testing.T) {
 	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
 	seedState(t, cfg.State, []int{1}, nil)
@@ -274,9 +302,10 @@ func TestQueueResetsAMergeRefusalWhenTheHeadChanges(t *testing.T) {
 	waitFor(t, "the first refusal", func() bool { return mergeHoldCount(t, cfg.State) >= 1 })
 	now.Store(mergeHoldNext(t, cfg.State))
 	waitFor(t, "two refusals", func() bool { return mergeHoldCount(t, cfg.State) >= 2 })
-	// The doubled wait has not elapsed. A new head tries at once and the
-	// count starts again.
+	// A new head is seen on the next listing, once the cached one is
+	// older than prListTTL. It is tried and the count starts again.
 	head.Store("head11b")
+	now.Store(now.Load().(time.Time).Add(prListTTL))
 	waitFor(t, "the reset try", func() bool { return tries.Load() >= 3 })
 	waitFor(t, "the reset count", func() bool {
 		st, err := loadQueueState(cfg.State)

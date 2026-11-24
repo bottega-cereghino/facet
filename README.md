@@ -759,9 +759,11 @@ Every session on a machine shares one GitHub API limit, so the fix stage
 reuses a repository's listing of pull requests, with their checks, for 5
 minutes, and does not list a repository at all while none of its started
 issues can act (each is running, waiting, settling or blocked). New work
-still lists the repository of the issue it is about to start each round, to
-see whether a pull request is already open for it, and that listing is
-shared with the fix stage. A listing that fails starts no fix in that
+reads the same listing, cached the same way, to see whether a pull request
+is already open for the issue it is about to start, so an issue whose pull
+request waits to land does not cost a listing every round. A restarted
+queue lists afresh, and an issue this process already started is not
+started again whatever the listing says. A listing that fails starts no fix in that
 repository, and is logged.
 
 A pull request still red or conflicting once CI has finished after a fix run
@@ -855,6 +857,7 @@ writes no state. It runs the gate as for a start.
 `TestQueueStateSurvivesARestart`, `TestQueueStateIsSyncedBeforeTheRenameAndAfter`,
 `TestQueueStartsNoFixWhenThePRListingFails`,
 `TestQueueListsARepositoryOnlyWhenItsIssuesCanAct`,
+`TestQueueReusesTheListingForAnIssueThatWaitsToLand`,
 `TestQueueUpdatesAGreenPRBehindItsBaseWithoutAnAgent`,
 `TestQueueFixesAPRWhoseUpdateConflicts`, `TestQueueBacksOffAFailedUpdate`, `TestQueueMergesAGreenUpToDatePR`,
 `TestQueueTriesARefusedMergeOncePerListing`,
