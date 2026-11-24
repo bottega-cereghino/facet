@@ -114,6 +114,7 @@ func TestQueueMergesAGreenUpToDatePR(t *testing.T) {
 	seedState(t, cfg.State, []int{1}, map[int]int{1: 1})
 	land := &landCalls{}
 	var merged atomic.Bool
+	var reaped atomic.Bool
 	land.merge = func(int) error { merged.Store(true); return nil }
 	prs := func(string) ([]ghx.OpenPR, error) {
 		if merged.Load() {
@@ -121,8 +122,17 @@ func TestQueueMergesAGreenUpToDatePR(t *testing.T) {
 		}
 		return []ghx.OpenPR{landPR(11, "feature/1-bell", "CLEAN")}, nil
 	}
-	s := startQueue(t, cfg, land.env(queueEnv{list: noIssues, prs: prs}))
+	env := land.env(queueEnv{list: noIssues, prs: prs})
+	env.reap = func(repo string, number int) error {
+		if repo != "acme/widgets" || number != 1 {
+			t.Errorf("reap(%q, %d)", repo, number)
+		}
+		reaped.Store(true)
+		return nil
+	}
+	s := startQueue(t, cfg, env)
 	waitFor(t, "the merge", func() bool { return merged.Load() })
+	waitFor(t, "the reap", func() bool { return reaped.Load() })
 	waitFor(t, "the forget", func() bool {
 		st, err := loadQueueState(cfg.State)
 		return err == nil && len(st.Started) == 0

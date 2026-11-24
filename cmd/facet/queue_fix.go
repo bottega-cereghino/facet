@@ -377,6 +377,7 @@ func (r *queueRunner) block(ctx context.Context, iss queuedIssue, pr ghx.OpenPR,
 	rec.Blocked = true
 	r.mu.Unlock()
 	r.saveState()
+	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), "fix", decisionBlocked, fmt.Sprintf("PR #%d still %s after %d fix run(s)", pr.Number, reason, runs))
 	r.logf("queue: %s#%d PR #%d is still %s after %d fix run(s); labelled %s, no more fixes", iss.Repo, iss.Issue.Number, pr.Number, reason, runs, fix.BlockLabel)
 	if len(fix.Notify) == 0 {
 		return
@@ -538,8 +539,10 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 		return false
 	case err == nil:
 		r.logf("queue: fix %s PR #%d exited", k, job.pr.Number)
+		r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", decisionExitOK, "exit 0")
 	case errors.As(err, &exitErr):
 		r.logf("queue: fix %s PR #%d exited: %v", k, job.pr.Number, err)
+		r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", decisionExitFail, firstErrorLine(err.Error()))
 	default:
 		r.logf("queue: fix %s PR #%d did not start: %v", k, job.pr.Number, err)
 		return false

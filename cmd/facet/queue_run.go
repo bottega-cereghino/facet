@@ -31,8 +31,11 @@ type queueEnv struct {
 	updateBranch func(repo string, number int) error
 	mergeMethod  func(repo, branch string) (string, error)
 	mergePR      func(repo string, number int, method, head string) error
-	behindBase   func(repo, base, head string) (bool, error)
-	prFiles      func(repo string, number int) ([]string, error)
+	// reap removes the issue workspace after a queue pull request merges.
+	// Nil leaves reaping to the operator.
+	reap       func(repo string, number int) error
+	behindBase func(repo, base, head string) (bool, error)
+	prFiles    func(repo string, number int) ([]string, error)
 	// compareFiles is the net diff from base to head, one entry per file.
 	// The suppression check reads it. Nil when the caller has no compare,
 	// which the check reports rather than treating as a clean diff.
@@ -78,6 +81,7 @@ func realQueueEnv() queueEnv {
 		updateBranch:   ghx.CLI{}.UpdatePRBranch,
 		mergeMethod:    ghx.CLI{}.MergeMethod,
 		mergePR:        ghx.CLI{}.MergePR,
+		reap:           reapQueueWorkspace,
 		behindBase:     ghx.CLI{}.HeadBehindBase,
 		prFiles:        ghx.CLI{}.PRFiles,
 		compareFiles:   ghx.CLI{}.CompareFiles,
@@ -845,6 +849,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	})
 	if err == nil {
 		r.logf("queue: %s#%d agent exited, bundle %d", iss.Repo, iss.Issue.Number, len(run))
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitOK, "exit 0")
 		r.markRunDone(run)
 		return
 	}
@@ -855,6 +860,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		r.logf("queue: %s#%d agent exited: %v, bundle %d", iss.Repo, iss.Issue.Number, err, len(run))
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitFail, firstErrorLine(err.Error()))
 		r.markRunDone(run)
 		return
 	}
