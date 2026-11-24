@@ -2,6 +2,8 @@ package ghx
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -94,7 +96,7 @@ func TestMergeMethodReadsTheRepositorySettings(t *testing.T) {
 		{`{"squashMergeAllowed": false, "mergeCommitAllowed": false, "rebaseMergeAllowed": true}`, "rebase"},
 	} {
 		args := fakeGh(t, tc.out, "", 0)
-		got, err := (CLI{}).MergeMethod("acme/widgets")
+		got, err := (CLI{}).MergeMethod("acme/widgets", "")
 		if err != nil || got != tc.want {
 			t.Errorf("%s: MergeMethod = %q, %v, want %q", tc.out, got, err, tc.want)
 		}
@@ -104,9 +106,67 @@ func TestMergeMethodReadsTheRepositorySettings(t *testing.T) {
 		}
 	}
 	fakeGh(t, `{}`, "", 0)
-	if _, err := (CLI{}).MergeMethod("acme/widgets"); err == nil || !strings.Contains(err.Error(), "fix:") {
+	if _, err := (CLI{}).MergeMethod("acme/widgets", ""); err == nil || !strings.Contains(err.Error(), "fix:") {
 		t.Fatalf("no method allowed: err = %v", err)
 	}
+}
+
+func TestMergeMethodRespectsBranchRuleset(t *testing.T) {
+	install := func(t *testing.T, repoJSON, rulesJSON string, rulesExit int) {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "repo"), []byte(repoJSON), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "rules"), []byte(rulesJSON), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		q := "'" + dir + "'"
+		script := "#!/bin/sh\n" +
+			"case \"$1\" in\n" +
+			"repo) /bin/cat " + q + "/repo; exit 0 ;;\n" +
+			"api)\n" +
+			"  if [ " + strings.TrimSpace(string(rune('0'+rulesExit))) + " -ne 0 ]; then\n" +
+			"    /bin/cat " + q + "/rules >&2; exit 1\n" +
+			"  fi\n" +
+			"  /bin/cat " + q + "/rules; exit 0 ;;\n" +
+			"esac\n"
+		if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir)
+	}
+
+	allRepo := `{"squashMergeAllowed": true, "mergeCommitAllowed": true, "rebaseMergeAllowed": true}`
+	t.Run("ruleset restricts to merge and rebase", func(t *testing.T) {
+		install(t, allRepo, `[{"type":"pull_request","parameters":{"allowed_merge_methods":["merge","rebase"]}}]`, 0)
+		got, err := (CLI{}).MergeMethod("acme/widgets", "main")
+		if err != nil || got != "merge" {
+			t.Fatalf("MergeMethod = %q, %v; want merge", got, err)
+		}
+	})
+	t.Run("ruleset linear history excludes merge", func(t *testing.T) {
+		repo := `{"squashMergeAllowed": false, "mergeCommitAllowed": true, "rebaseMergeAllowed": true}`
+		install(t, repo, `[{"type":"required_linear_history"}]`, 0)
+		got, err := (CLI{}).MergeMethod("acme/widgets", "main")
+		if err != nil || got != "rebase" {
+			t.Fatalf("MergeMethod = %q, %v; want rebase", got, err)
+		}
+	})
+	t.Run("disjoint repo and ruleset fails with fix", func(t *testing.T) {
+		repo := `{"squashMergeAllowed": true, "mergeCommitAllowed": false, "rebaseMergeAllowed": false}`
+		install(t, repo, `[{"type":"pull_request","parameters":{"allowed_merge_methods":["rebase"]}}]`, 0)
+		if _, err := (CLI{}).MergeMethod("acme/widgets", "main"); err == nil || !strings.Contains(err.Error(), "fix:") {
+			t.Fatalf("err = %v, want error with fix:", err)
+		}
+	})
+	t.Run("absent ruleset (404) uses repo settings", func(t *testing.T) {
+		install(t, allRepo, "HTTP 404: Not Found", 1)
+		got, err := (CLI{}).MergeMethod("acme/widgets", "main")
+		if err != nil || got != "squash" {
+			t.Fatalf("MergeMethod = %q, %v; want squash", got, err)
+		}
+	})
 }
 
 func TestMergePRNeverForces(t *testing.T) {
@@ -195,5 +255,36 @@ func TestViewerFailsWithoutALogin(t *testing.T) {
 	fakeGh(t, `{}`, "", 0)
 	if _, err := (CLI{}).Viewer(); err == nil {
 		t.Fatal("an empty login returned no error")
+	}
+}
+
+// gh --paginate prints one array per page; a restriction on a later page
+// still counts, and the request asks for every page.
+func TestMergeMethodReadsEveryRulesPage(t *testing.T) {
+	dir := t.TempDir()
+	q := "'" + dir + "'"
+	repo := `{"squashMergeAllowed": true, "mergeCommitAllowed": true, "rebaseMergeAllowed": true}`
+	rules := `[{"type":"creation"}][{"type":"pull_request","parameters":{"allowed_merge_methods":["rebase"]}}]`
+	for name, body := range map[string]string{"repo": repo, "rules": rules} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"repo) /bin/cat " + q + "/repo ;;\n" +
+		"api) for a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + q + "/args; /bin/cat " + q + "/rules ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	got, err := (CLI{}).MergeMethod("acme/widgets", "main")
+	if err != nil || got != "rebase" {
+		t.Fatalf("MergeMethod = %q, %v; want rebase from the second page", got, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil || !strings.Contains(string(raw), "--paginate") {
+		t.Fatalf("gh api args = %q, %v; want --paginate", raw, err)
 	}
 }

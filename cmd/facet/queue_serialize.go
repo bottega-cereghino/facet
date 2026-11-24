@@ -42,10 +42,21 @@ func normalizeSerialize(raw *queueSerializeFile) (*queueSerialize, error) {
 	return &queueSerialize{Paths: paths}, nil
 }
 
-// validateGlobPattern checks that every non-doublestar segment of pattern is
-// valid syntax for path.Match.
+// validateGlobPattern checks that pattern can match a repository-relative
+// file path and that every non-doublestar segment is valid syntax for
+// path.Match.
 func validateGlobPattern(pattern string) error {
-	for _, seg := range splitGlobPath(pattern) {
+	if strings.HasSuffix(pattern, "/") {
+		return fmt.Errorf("trailing slash never matches a file path (use %s** to match files under a directory)", pattern)
+	}
+	segs := splitGlobPath(pattern)
+	if len(segs) == 0 {
+		return fmt.Errorf("empty pattern")
+	}
+	for _, seg := range segs {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("segment %q never matches a file path", seg)
+		}
 		if seg == "**" {
 			continue
 		}
@@ -65,13 +76,18 @@ func splitGlobPath(p string) []string {
 	return strings.Split(p, "/")
 }
 
-// matchGlob reports whether filePath matches pattern. A ** segment matches
-// zero or more path segments; every other segment uses path.Match.
+// matchGlob reports whether filePath matches pattern. A pattern without /
+// matches at any depth, as gitignore does; a pattern with / is anchored to
+// the repository root. A ** segment matches zero or more path segments;
+// every other segment uses path.Match.
 func matchGlob(pattern, filePath string) bool {
 	pat := splitGlobPath(pattern)
 	segs := splitGlobPath(filePath)
 	if len(pat) == 0 || len(segs) == 0 {
 		return false
+	}
+	if !strings.Contains(pattern, "/") && pat[0] != "**" {
+		pat = append([]string{"**"}, pat...)
 	}
 	dp := make([]bool, len(segs)+1)
 	dp[0] = true
@@ -174,8 +190,10 @@ func (r *queueRunner) waitSerialized(iss queuedIssue, pr ghx.OpenPR, got prListi
 	return false, nil
 }
 
-// olderQueuePRs returns the open queue pull requests in repo older than pr,
-// ordered oldest first.
+// olderQueuePRs returns the open queue pull requests in repo older than pr
+// that can still land, ordered oldest first. A pull request that is a draft,
+// blocked, or stopped after refused merges is skipped so it does not hold
+// younger pull requests forever.
 func (r *queueRunner) olderQueuePRs(repo string, pr ghx.OpenPR, prs []ghx.OpenPR) []ghx.OpenPR {
 	var older []ghx.OpenPR
 	seen := map[int]bool{pr.Number: true}
@@ -188,6 +206,9 @@ func (r *queueRunner) olderQueuePRs(repo string, pr ghx.OpenPR, prs []ghx.OpenPR
 			continue
 		}
 		seen[other.Number] = true
+		if !r.canLeadSerialize(iss, other) {
+			continue
+		}
 		if prBefore(other, pr) {
 			older = append(older, other)
 		}
@@ -196,6 +217,32 @@ func (r *queueRunner) olderQueuePRs(repo string, pr ghx.OpenPR, prs []ghx.OpenPR
 		return prBefore(older[i], older[j])
 	})
 	return older
+}
+
+// canLeadSerialize reports whether pr is still eligible to land and thus to
+// hold younger pull requests that touch a shared file.
+func (r *queueRunner) canLeadSerialize(iss queuedIssue, pr ghx.OpenPR) bool {
+	if pr.IsDraft || strings.EqualFold(pr.MergeStateStatus, "DRAFT") {
+		return false
+	}
+	if r.cfg.Fix != nil && r.cfg.Fix.BlockLabel != "" && hasLabelFold(iss.Issue.LabelNames(), r.cfg.Fix.BlockLabel) {
+		return false
+	}
+	if r.state == nil {
+		return true
+	}
+	k := iss.key()
+	mkey := landKey(iss.Repo, pr.Number)
+	fp := checksFingerprint(pr.Checks)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if rec := r.state.Fixes[k]; rec != nil && rec.Blocked {
+		return false
+	}
+	if h := r.state.Merges[mkey]; h != nil && h.Stopped && h.Head == pr.HeadRefOid && h.Checks == fp {
+		return false
+	}
+	return true
 }
 
 func (r *queueRunner) logWaitOnce(iss queuedIssue, prNum, leaderNum int, sharedPath string) {

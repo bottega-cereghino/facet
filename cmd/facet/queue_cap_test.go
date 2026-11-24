@@ -529,3 +529,41 @@ func TestCapWindowReadsStartedAndKeepsTheNewest(t *testing.T) {
 		t.Fatal("other repository leaked into the window")
 	}
 }
+
+// The cap runs its passes command through the queue's own runner, so a real
+// config, with no run seam set, must not panic. The command is the real
+// true or false.
+func TestQueueCapRunsPassesWithoutARunSeam(t *testing.T) {
+	for _, tc := range []struct {
+		passes string
+		capped bool
+	}{{"true", true}, {"false", false}} {
+		t.Run(tc.passes, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "log")
+			cfg := capQueue(t, nil)
+			cfg.Max = 1
+			cfg.Cap.Passes = []string{tc.passes}
+			cfg.Agents = []queueAgent{{Command: []string{appendScript(t), log, "start {number}"}}}
+			rows := productStarts("acme/widgets", time.Now().Add(-3*time.Hour))
+			rows[2].Labels = []string{"standards"}
+			seedWindow(t, cfg.State, rows)
+			s := startQueue(t, cfg, queueEnv{
+				list: func(string, string) ([]ghx.Issue, error) {
+					return []ghx.Issue{
+						labelled(10, "2026-01-01T00:00:00Z", "Standards", "next", "standards"),
+						labelled(11, "2026-01-02T00:00:00Z", "Product", "next", "feat"),
+					}, nil
+				},
+			})
+			waitFor(t, "an agent start", func() bool { return len(readLines(t, log)) >= 1 })
+			s.stop(t)
+			first := readLines(t, log)[0]
+			if tc.capped && first != "start 11" {
+				t.Fatalf("first start = %q, want the product issue while the cap applies\n%s", first, s.buf.String())
+			}
+			if !tc.capped && first != "start 10" {
+				t.Fatalf("first start = %q, want the older standards issue when the cap does not apply\n%s", first, s.buf.String())
+			}
+		})
+	}
+}

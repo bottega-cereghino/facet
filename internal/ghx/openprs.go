@@ -1,9 +1,11 @@
 package ghx
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
@@ -118,9 +120,12 @@ func (CLI) UpdatePRBranch(repo string, number int) error {
 	return err
 }
 
-// MergeMethod reads which merge method the repository allows: squash,
-// merge or rebase, in that order of preference when more than one is.
-func (CLI) MergeMethod(repo string) (string, error) {
+// MergeMethod reads which merge method repo allows on branch: squash,
+// merge or rebase, in that order of preference when more than one is. It
+// intersects the repository settings with any branch ruleset restrictions
+// (allowed_merge_methods and required_linear_history). When branch is empty,
+// only the repository settings are read.
+func (CLI) MergeMethod(repo, branch string) (string, error) {
 	if _, _, err := splitRepo("MergeMethod", repo); err != nil {
 		return "", err
 	}
@@ -136,15 +141,91 @@ func (CLI) MergeMethod(repo string) (string, error) {
 	if err := json.Unmarshal(out, &allowed); err != nil {
 		return "", fmt.Errorf("parse the merge settings of %s: %w", repo, err)
 	}
-	switch {
-	case allowed.Squash:
-		return "squash", nil
-	case allowed.Merge:
-		return "merge", nil
-	case allowed.Rebase:
-		return "rebase", nil
+	var (
+		ruleAllowed   map[string]bool
+		restricted    bool
+		linearHistory bool
+	)
+	if branch = strings.TrimSpace(branch); branch != "" {
+		rulesBody, absent, err := apiGet(fmt.Sprintf("repos/%s/rules/branches/%s?per_page=%d", repo, url.PathEscape(branch), restPerPage), "--paginate")
+		if err != nil {
+			return "", err
+		}
+		if !absent {
+			ruleAllowed, restricted, linearHistory, err = parseRuleMergeMethods(rulesBody)
+			if err != nil {
+				return "", fmt.Errorf("parse merge rules for %s %s: %w", repo, branch, err)
+			}
+		}
 	}
-	return "", fmt.Errorf("%s allows no merge method\nfix: allow squash, merge or rebase in the repository's settings", repo)
+	repoAllowed := map[string]bool{
+		"squash": allowed.Squash,
+		"merge":  allowed.Merge,
+		"rebase": allowed.Rebase,
+	}
+	for _, m := range []string{"squash", "merge", "rebase"} {
+		if !repoAllowed[m] {
+			continue
+		}
+		if linearHistory && m == "merge" {
+			continue
+		}
+		if restricted && !ruleAllowed[m] {
+			continue
+		}
+		return m, nil
+	}
+	return "", fmt.Errorf("%s allows no merge method\nfix: allow squash, merge or rebase in the repository's settings and branch ruleset", repo)
+}
+
+func parseRuleMergeMethods(body []byte) (allowed map[string]bool, restricted, linearHistory bool, err error) {
+	var rules []struct {
+		Type       string `json:"type"`
+		Parameters struct {
+			AllowedMergeMethods []string `json:"allowed_merge_methods"`
+		} `json:"parameters"`
+	}
+	// --paginate prints one JSON array per page, back to back.
+	dec := json.NewDecoder(bytes.NewReader(body))
+	for {
+		var page []struct {
+			Type       string `json:"type"`
+			Parameters struct {
+				AllowedMergeMethods []string `json:"allowed_merge_methods"`
+			} `json:"parameters"`
+		}
+		if err := dec.Decode(&page); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, false, false, err
+		}
+		rules = append(rules, page...)
+	}
+	for _, rule := range rules {
+		switch rule.Type {
+		case "required_linear_history":
+			linearHistory = true
+		case "pull_request":
+			if len(rule.Parameters.AllowedMergeMethods) == 0 {
+				continue
+			}
+			set := map[string]bool{}
+			for _, m := range rule.Parameters.AllowedMergeMethods {
+				set[strings.ToLower(strings.TrimSpace(m))] = true
+			}
+			if !restricted {
+				allowed = set
+				restricted = true
+				continue
+			}
+			for m := range allowed {
+				if !set[m] {
+					delete(allowed, m)
+				}
+			}
+		}
+	}
+	return allowed, restricted, linearHistory, nil
 }
 
 // MergePR merges the pull request with method (squash, merge or rebase),
