@@ -30,7 +30,7 @@ Code moves to `internal/` when a second caller needs it, not before.
 
 | Command | What |
 | --- | --- |
-| `make check` | fmt, vet, lint, shellcheck, shfmt, test, tidy, vuln: every gate CI's Linux job runs except `make build`. Run it before every push |
+| `make check` | architecture, fmt, vet, lint, shellcheck, shfmt, test, tidy, vuln: every gate CI's Linux job runs except `make build`. Run it before every push |
 | `make test` | `go test ./... -race -shuffle=on -cover`; coverage is printed, never a target |
 | `make health` | functions over cognitive complexity 15 and Go files over 400 lines. A budget the review reads, never a gate |
 | `make fmt-fix` | `gofmt -s -w .` |
