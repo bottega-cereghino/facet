@@ -1020,9 +1020,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapHoldsACommitOnlyAPerWorktreeRefReaches`,
   `TestReapHoldsACommitOnlyARebaseLabelReaches`). It fetches every remote with
   `--prune` first, not only `origin`, so a branch deleted from a fork since it
-  was pushed there no longer reads as pushed; a remote it cannot fetch is named
+  was pushed there no longer reads as pushed; a remote it cannot fetch holds
+  the workspace and is named, since a branch deleted or force-pushed upstream
+  since the last fetch would still read as pushed against stale refs
   (`TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed`,
-  `TestReapNamesTheRemoteItCouldNotFetch`). It fetches into
+  `TestReapNamesTheRemoteItCouldNotFetch`,
+  `TestReapHoldsWorkWhenTheFetchFailsAndOnlyAStaleRemoteRefHasIt`). It fetches into
   `refs/remotes/<name>/` only, whatever the remote's own refspec says, so a
   remote added with `--mirror=fetch` cannot prune local branches away, not even
   in a dry run (`TestReapsFetchNeverWritesOutsideRefsRemotes`).

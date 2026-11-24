@@ -18,6 +18,11 @@ func (s *IssueState) Blockers() []string {
 		for _, u := range c.Unverifiable {
 			out = append(out, fmt.Sprintf("%s: %s -- cannot confirm it is safe to delete", c.Dir, u))
 		}
+		if len(c.StaleRemotes) > 0 {
+			out = append(out, fmt.Sprintf(
+				"%s: could not fetch %s: fetch failed, so the remote's state is unknown -- check your network or remote URL, then reap again",
+				c.Dir, strings.Join(c.StaleRemotes, ", ")))
+		}
 	}
 	for _, c := range s.Clone {
 		if c.Unpushed > 0 {
@@ -98,9 +103,7 @@ func (s *IssueState) Blockers() []string {
 }
 
 // StaleFetch reports whether any clone was judged against refs that could not
-// be fetched first. A single reap goes ahead with a note, since refusing every
-// offline reap would make it useless without a network; reap --reapable, which
-// never guesses, leaves such a workspace alone.
+// be fetched first.
 func (s *IssueState) StaleFetch() bool {
 	for _, c := range s.Clone {
 		if len(c.StaleRemotes) > 0 {
@@ -116,16 +119,6 @@ func (s *IssueState) StaleFetch() bool {
 // that does *not* hold the workspace.
 func (s *IssueState) Notes() []string {
 	var out []string
-	for _, c := range s.Clone {
-		// With unpushed commits the disclaimer rides on that blocker; with none,
-		// "nothing unpushed" was still judged against the last fetch, and a
-		// branch deleted upstream since then would read as pushed.
-		if len(c.StaleRemotes) > 0 && c.Unpushed == 0 {
-			out = append(out, fmt.Sprintf(
-				"%s: could not fetch %s, so it was judged against the last fetch -- a branch deleted upstream since then reads as pushed; reap again online to be sure",
-				c.Dir, strings.Join(c.StaleRemotes, ", ")))
-		}
-	}
 	for _, c := range s.Clone {
 		if c.SquashLanded > 0 {
 			out = append(out, fmt.Sprintf(

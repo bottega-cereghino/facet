@@ -48,11 +48,9 @@ type CloneState struct {
 	// operators to reach for --force (facet#66).
 	SquashLanded int
 	// StaleRemotes names the remotes `git fetch --prune` failed for, or did not
-	// finish within fetchTimeout, before Unpushed was computed. The count above
-	// is still computed and used against whatever refs are on disk -- refusing
-	// reap on every offline run would make it useless without a network -- but
-	// Blockers appends a disclaimer to the unpushed-commit line whenever this is
-	// set and there are unpushed commits to disclaim.
+	// finish within fetchTimeout, before Unpushed was computed. When non-empty,
+	// Blockers holds the workspace because a branch deleted or force-pushed on
+	// that remote since the last fetch would still read as pushed.
 	StaleRemotes []string
 	// DefaultBranchUnresolved is set when origin's default branch could not be
 	// determined -- no refs/remotes/origin/HEAD and no direct origin/main, which
@@ -62,7 +60,7 @@ type CloneState struct {
 	// have landed on a branch that cannot be named, so proofLanded fails safe
 	// and every candidate is counted unpushed. Without this the operator is
 	// told about unpushed commits and never about the real cause (facet#80).
-	// Like StaleRemotes it is a disclaimer on that line and never a blocker of
+	// It is a disclaimer on that line and never a blocker of
 	// its own: it is set only when the fail-safe actually decided something, so
 	// a clean workspace on such a remote still reaps.
 	DefaultBranchUnresolved bool

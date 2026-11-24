@@ -1136,19 +1136,20 @@ func TestUnpushedMergeCommitStillBlocksReap(t *testing.T) {
 	}
 }
 
-// A fetch failure alone -- no network, unreachable origin -- must not turn
-// into a hard block on a clean clone; that would make reap useless offline.
-func TestFetchFailureIsStalenessDisclaimerNotBlocker(t *testing.T) {
+// A fetch failure -- no network, unreachable origin -- holds the workspace:
+// a branch deleted or force-pushed upstream since the last fetch would still
+// read as pushed against the stale remote-tracking refs (#491).
+func TestFetchFailureHoldsCleanClone(t *testing.T) {
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, fetchFailGit(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := st.Blockers(); len(b) != 0 {
-		t.Errorf("a failed fetch on an otherwise clean clone must not block, got %v", b)
+	if !hasBlocker(st, "fetch failed, so the remote's state is unknown") {
+		t.Errorf("a failed fetch must hold the workspace, got Blockers() = %v", st.Blockers())
 	}
-	if n := st.Notes(); len(n) != 1 || !strings.Contains(n[0], "last fetch") {
-		t.Errorf("Notes() = %v; want one saying it was judged against the last fetch", n)
+	if n := st.Notes(); len(n) != 0 {
+		t.Errorf("Notes() = %v; want empty when the failed fetch is already a blocker", n)
 	}
 }
 

@@ -12,7 +12,7 @@ func (s *IssueState) HoldKinds() []string {
 		has[holdUnchecked] = true
 	}
 	for _, c := range s.Clone {
-		has[holdUnchecked] = has[holdUnchecked] || len(c.Unverifiable) > 0
+		has[holdUnchecked] = has[holdUnchecked] || len(c.Unverifiable) > 0 || len(c.StaleRemotes) > 0
 		has[holdUnpushed] = has[holdUnpushed] || c.Unpushed > 0
 		has[holdWorktree] = has[holdWorktree] || len(c.Worktrees) > 0
 		has[holdInnerRepo] = has[holdInnerRepo] || len(c.InnerRepos) > 0 || len(c.StrayGitlinks) > 0
