@@ -841,7 +841,8 @@ nothing more: no second `.git`, and no mirror to keep in step.
   makes `spawn` refuse rather than reset it.
 - A worktree shares the checkout's branches, stash, remotes and hooks. A
   branch made in the workspace is a branch of the checkout, and stays there
-  after `reap`.
+  after `reap`. An extra remote the manifest names is not added: it would
+  land in that shared config, outside the workspace. Sync skips it and warns.
 - `--no-worktree` clones every repository, as before.
 
 ## Mirrors make the clones cheap
@@ -899,6 +900,17 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   is refused, so a symlink committed inside a checkout cannot send the clone
   elsewhere
   (`TestSyncBootstrapRefusesACloneThroughASymlinkOutOfTheProjectsRoot`).
+  A clone folder that exists but is not the top level of its own repository
+  is left alone. Sync checks with `git rev-parse --show-toplevel` and, when
+  that is not the folder, runs no further git there, so a remote cannot be
+  added to the enclosing repository
+  (`TestGrillSyncRemoteOnAPlainDirWritesTheEnclosingRepository`,
+  `TestSyncSkipsACloneFolderThatIsNotItsOwnRepository`).
+  An extra remote is not added to a worktree clone. That clone shares the
+  checkout's git config, so the remote would be written outside the workspace.
+  Sync skips it and warns
+  (`TestGrillSyncRemoteOnAWorktreeCloneWritesTheCheckoutConfig`,
+  `TestSyncSkipsAnExtraRemoteOnAWorktreeClone`).
   The remaining write outside the workspace is git's own, in a checkout a clone
   becomes a worktree of: a fetch of `origin`, and the worktree's entry in that
   checkout's `.git`.
@@ -1271,7 +1283,12 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
   that fails holds every workspace, since no job can be ruled out; only a
   launchctl that is not installed (off macOS) reads as no jobs
-  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`).
+  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`). A loaded job whose plist
+  facet cannot read, or whose `launchctl print` fails, holds every workspace
+  with the label and fix to show what to check
+  (`TestUnderFailsWhenLoadedPlistCannotBeRead`,
+  `TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob`). An unreadable plist
+  for an unloaded job is skipped (`TestUnderSkipsAnUnreadableUnloadedPlist`).
 - **An issue's body stays quoted in the `CLAUDE.md` spawn writes.** Every line
   of it starts with `>`, whatever it holds, so it cannot pose as the file's own
   headings or rules (`TestIssueClaudeMDKeepsTheBodyInsideTheQuote`).
