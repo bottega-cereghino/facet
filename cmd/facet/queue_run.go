@@ -31,8 +31,11 @@ type queueEnv struct {
 	updateBranch func(repo string, number int) error
 	mergeMethod  func(repo string) (string, error)
 	mergePR      func(repo string, number int, method, head string) error
-	behindBase   func(repo, base, head string) (bool, error)
-	prFiles      func(repo string, number int) ([]string, error)
+	// reap removes the issue workspace after a queue pull request merges.
+	// Nil leaves reaping to the operator.
+	reap       func(repo string, number int) error
+	behindBase func(repo, base, head string) (bool, error)
+	prFiles    func(repo string, number int) ([]string, error)
 	// compareFiles is the net diff from base to head, one entry per file.
 	// The suppression check reads it. Nil when the caller has no compare,
 	// which the check reports rather than treating as a clean diff.
@@ -75,6 +78,7 @@ func realQueueEnv() queueEnv {
 		updateBranch:   ghx.CLI{}.UpdatePRBranch,
 		mergeMethod:    ghx.CLI{}.MergeMethod,
 		mergePR:        ghx.CLI{}.MergePR,
+		reap:           reapQueueWorkspace,
 		behindBase:     ghx.CLI{}.HeadBehindBase,
 		prFiles:        ghx.CLI{}.PRFiles,
 		compareFiles:   ghx.CLI{}.CompareFiles,

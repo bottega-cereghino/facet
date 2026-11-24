@@ -124,6 +124,10 @@ and a title is someone else's text. The gate's arguments get the same
 substitution, except `{prompt}`, and `{workspace}` is empty because the gate
 runs before a workspace is spawned.
 
+After a queue PR merges, `reapQueueWorkspace` starts the current facet binary
+with `reap --path <workspace> --yes`. Reap remains the owner of its deletion
+checks; the queue does not duplicate or bypass them.
+
 **Fake the narrowest thing that works.** `gitx.Runner` has one method, so faking
 all of it is trivial and callers take `gitx.Runner` directly. `ghx.Client` covers
 the whole `gh` surface, so a caller needing one or two calls declares its own
