@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bottega-cereghino/facet/internal/ghx"
 )
@@ -153,4 +156,54 @@ func countLines(path string) int {
 		return 0
 	}
 	return strings.Count(s, "\n") + 1
+}
+
+// A fix diff that cannot be read is not landed, and is read again only
+// after a wait that doubles, not on every tick.
+func TestQueueBacksOffAnUnreadableFixDiff(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	st.Fixes["acme/widgets#1"] = &fixRecord{PR: 11, Runs: 1, Last: start.Add(-time.Hour), Head: "h0"}
+	if err := st.save(cfg.State); err != nil {
+		t.Fatal(err)
+	}
+	reads := &countCalls{}
+	ticks := &countCalls{}
+	land := &landCalls{}
+	var now atomic.Value
+	now.Store(start)
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+		prs:  staticPRs(landPR(11, "feature/1-bell", "CLEAN")),
+		compareFiles: func(repo, _, _ string) ([]ghx.DiffFile, error) {
+			reads.add(repo)
+			return nil, errors.New("no patch for a.ts")
+		},
+		now: func() time.Time { return now.Load().(time.Time) },
+	}))
+	waitFor(t, "ten rounds", func() bool { return ticks.get("acme/widgets") >= 10 })
+	if got := reads.get("acme/widgets"); got != 1 {
+		t.Fatalf("diff read %d times in ten rounds, want 1", got)
+	}
+	now.Store(start.Add(cfg.Wait))
+	waitFor(t, "the second read", func() bool { return reads.get("acme/widgets") >= 2 })
+	before := ticks.get("acme/widgets")
+	waitFor(t, "ten more rounds", func() bool { return ticks.get("acme/widgets") >= before+10 })
+	s.stop(t)
+	if got := reads.get("acme/widgets"); got != 2 {
+		t.Fatalf("diff read %d times, want 2", got)
+	}
+	if len(land.list()) != 0 {
+		t.Fatalf("landed = %q", land.list())
+	}
+	out := s.buf.String()
+	if strings.Count(out, "no patch for a.ts; not landing, reading it again after") != 2 ||
+		!strings.Contains(out, "reading it again after "+(2*cfg.Wait).String()) {
+		t.Fatalf("log =\n%s", out)
+	}
 }

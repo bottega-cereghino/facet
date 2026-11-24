@@ -751,23 +751,23 @@ func TestUpdateBackoffDoublesAndResetsOnANewHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !r.mayUpdate("k", "h1") {
+	if !r.mayRetry(r.updateHolds, "k", "h1") {
 		t.Fatal("a pull request with no failure may not be updated")
 	}
-	if wait := r.noteUpdateFailure("k", "h1"); wait != time.Minute {
+	if wait := r.noteFailure(r.updateHolds, "k", "h1"); wait != time.Minute {
 		t.Fatalf("first wait = %s", wait)
 	}
-	if r.mayUpdate("k", "h1") {
+	if r.mayRetry(r.updateHolds, "k", "h1") {
 		t.Fatal("updated again before the wait")
 	}
-	if !r.mayUpdate("k", "h2") {
+	if !r.mayRetry(r.updateHolds, "k", "h2") {
 		t.Fatal("a new head is held by the old head's failure")
 	}
 	now = start.Add(time.Minute)
-	if !r.mayUpdate("k", "h1") {
+	if !r.mayRetry(r.updateHolds, "k", "h1") {
 		t.Fatal("held after the wait")
 	}
-	if wait := r.noteUpdateFailure("k", "h1"); wait != 2*time.Minute {
+	if wait := r.noteFailure(r.updateHolds, "k", "h1"); wait != 2*time.Minute {
 		t.Fatalf("second wait = %s", wait)
 	}
 }

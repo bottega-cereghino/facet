@@ -234,14 +234,21 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 			})
 			return nil
 		}
+		if !r.mayRetry(r.forbidHolds, k, pr.HeadRefOid) {
+			// The diff of this head could not be read; it is read again
+			// after its wait, not every tick.
+			return nil
+		}
 		pattern, file, bad, err := r.suppression(iss, pr)
+		if err == nil {
+			r.clearFailure(r.forbidHolds, k)
+		}
 		switch {
 		case err != nil:
 			// A diff that cannot be read is not a pass: landing it could
 			// merge a suppression the check did not see.
-			r.noteOnce(k+" forbid "+pr.HeadRefOid, err.Error(), func() {
-				r.logf("queue: %s PR #%d: %v; not landing", k, pr.Number, err)
-			})
+			wait := r.noteFailure(r.forbidHolds, k, pr.HeadRefOid)
+			r.logf("queue: %s PR #%d: %v; not landing, reading it again after %s", k, pr.Number, err, wait)
 			return nil
 		case bad:
 			reason = fmt.Sprintf("the fix suppresses instead of fixing: %s in %s", pattern, file)

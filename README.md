@@ -771,7 +771,9 @@ is a failed try. So is a fix whose own commits suppress a finding instead of
 fixing it: after the run, and before anything of that pull request is
 landed, the queue reads the diff from the head the first fix run started
 at. An added line that matches `fix.forbid`, or a higher number in a file
-named like a baseline, ratchet or limit, is refused. The refusal is a failed
+named like a baseline, ratchet or limit, is refused. A diff that cannot be read (a changed file with no patch, say) is not a
+pass and is not landed: the queue reads it again after `wait`, then twice
+that, doubling up to an hour, and logs each read that fails. The refusal is a failed
 try. Nothing of that pull request is landed, and the next try is told the
 same way a red one is. After `fix.tries` failed tries the queue adds the
 `fix.blockLabel` label to the issue, logs it, runs `fix.notify` once, and
@@ -868,7 +870,7 @@ writes no state. It runs the gate as for a start.
 `TestQueueDoesNotLandACancelledRequiredCheck`,
 `TestQueueDoesNotLandACancelledCheckThatIsNotRequired`,
 `TestQueueDoesNotLandACancelledCheckWhenNothingIsRequired`,
-`TestQueueRefusesAFixThatSuppresses`,
+`TestQueueRefusesAFixThatSuppresses`, `TestQueueBacksOffAnUnreadableFixDiff`,
 `TestQueueLandsNothingWithLandOff`, `TestQueueFixPromptNamesTheBase`,
 `TestQueueDryRunListsFixRunsFirstAndWritesNothing`,
 `TestQueueDryRunSaysWhatItWouldLand`, `TestQueueDryRunSaysItWouldClearARecord`,
