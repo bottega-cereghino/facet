@@ -201,6 +201,11 @@ func TestJudgePR(t *testing.T) {
 		{"conflicting", ghx.OpenPR{Mergeable: "CONFLICTING", BaseRefName: "main"}, prNeedsFix, "conflicts with main"},
 		{"a commit status in error", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{{Typename: "StatusContext", Context: "deploy", State: "ERROR"}}}, prNeedsFix, "red: deploy is ERROR"},
 		{"a pending commit status", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{{Typename: "StatusContext", Context: "deploy", State: "PENDING"}}}, prPending, ""},
+		{"a same-named check in another workflow does not hide a failure", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{
+			{Typename: "CheckRun", WorkflowName: "ci", Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: "2026-01-01T00:00:00Z"},
+			{Typename: "CheckRun", WorkflowName: "nightly", Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-01-02T00:00:00Z"}}}, prNeedsFix, "red: test is FAILURE"},
+		{"a queued rerun with a zero start is newer than a finished run", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{
+			run("ci", "COMPLETED", "FAILURE", "2026-01-01T00:00:00Z"), run("ci", "QUEUED", "", "0001-01-01T00:00:00Z")}}, prPending, ""},
 		{"cancelled is not red", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{run("ci", "COMPLETED", "CANCELLED", "x")}}, prGreen, ""},
 	} {
 		v, reason := judgePR(tc.pr)

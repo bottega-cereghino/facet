@@ -740,10 +740,11 @@ its branch has the same shape. Only repositories still in `repos` are
 looked at. A state file that cannot be read is a refusal, with the fix
 printed.
 
-A queue pull request needs fixing when it is red (the latest run of a check
-by name, as `gh pr checks` reads them, concluded `FAILURE`, `TIMED_OUT`,
+A queue pull request needs fixing when it is red (the latest run of a check,
+told apart by its workflow and its name, concluded `FAILURE`, `TIMED_OUT`,
 `ACTION_REQUIRED`, `STARTUP_FAILURE` or `ERROR`) or conflicting (`mergeable`
-is `CONFLICTING`). A pull request with any check still pending, or whose
+is `CONFLICTING`). A run that is queued or in progress is the
+latest whatever its start time says. A pull request with any check still pending, or whose
 mergeable state is `UNKNOWN`, is not judged that round. Nor is one whose fix
 run ended less than `wait` ago, or one listed before that, since its new
 checks may not be listed yet.

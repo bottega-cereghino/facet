@@ -8,7 +8,7 @@ import (
 
 func TestOpenPRsListsEachOpenPullRequestWithItsChecks(t *testing.T) {
 	args := fakeGh(t, `[{"number": 4, "headRefName": "feature/7-bell", "baseRefName": "main", "mergeable": "CONFLICTING",
-		"statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "FAILURE", "startedAt": "2026-01-01T00:00:00Z"},
+		"statusCheckRollup": [{"__typename": "CheckRun", "workflowName": "build", "name": "ci", "status": "COMPLETED", "conclusion": "FAILURE", "startedAt": "2026-01-01T00:00:00Z"},
 		{"__typename": "StatusContext", "context": "deploy", "state": "PENDING"}]},
 		{"number": 5, "headRefName": "renovate/go", "headRefOid": "abc", "isCrossRepository": true, "isDraft": true,
 		"createdAt": "2026-01-02T00:00:00Z", "mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND", "statusCheckRollup": []}]`, "", 0)
@@ -20,7 +20,7 @@ func TestOpenPRsListsEachOpenPullRequestWithItsChecks(t *testing.T) {
 		got[0].Mergeable != "CONFLICTING" || got[1].HeadRefName != "renovate/go" {
 		t.Fatalf("OpenPRs = %+v", got)
 	}
-	if c := got[0].Checks; len(c) != 2 || c[0].Name != "ci" || c[0].Conclusion != "FAILURE" || c[1].Context != "deploy" || c[1].State != "PENDING" {
+	if c := got[0].Checks; len(c) != 2 || c[0].Name != "ci" || c[0].WorkflowName != "build" || c[0].Conclusion != "FAILURE" || c[1].Context != "deploy" || c[1].State != "PENDING" {
 		t.Fatalf("checks = %+v", got[0].Checks)
 	}
 	if p := got[1]; p.HeadRefOid != "abc" || !p.IsCrossRepository || !p.IsDraft || p.CreatedAt != "2026-01-02T00:00:00Z" || p.MergeStateStatus != "BEHIND" {

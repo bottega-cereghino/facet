@@ -48,6 +48,10 @@ type CheckRun struct {
 	Conclusion string `json:"conclusion"`
 	State      string `json:"state"`
 	StartedAt  string `json:"startedAt"`
+	// WorkflowName is the workflow a check run belongs to, so two checks of
+	// the same name in different workflows are told apart. Empty for a
+	// commit status.
+	WorkflowName string `json:"workflowName"`
 }
 
 // openPRFields is what OpenPRs asks gh for.
