@@ -22,8 +22,7 @@ const (
 // redConclusions are the check results that make a pull request red.
 var redConclusions = []string{"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"}
 
-// judgePR reads a pull request as `gh pr checks` would: the latest run of
-// each check by name. Pending wins over red, so a check that is running
+// judgePR reads the latest run of each check, by workflow and name. Pending wins over red, so a check that is running
 // again is not counted as a failure. A conflict is reported before a red
 // check, since a fix has to merge the base first.
 func judgePR(pr ghx.OpenPR) (prVerdict, string) {
@@ -85,25 +84,47 @@ func isRed(result string) bool {
 	return false
 }
 
-// latestChecks keeps the most recently started run of each check name, in
-// name order. Of two that started together, the later one listed wins.
+// checkKey is what tells two checks apart: the workflow and the name, so a
+// check called "test" in one workflow does not hide one of the same name in
+// another. A commit status has no workflow.
+func checkKey(c ghx.CheckRun) string {
+	if isStatus(c) {
+		return "\n" + c.Context
+	}
+	return c.WorkflowName + "\n" + c.Name
+}
+
+// newerCheck reports whether c is a later run than prev of the same check.
+// A run that is queued or in progress is newer than a finished one whatever
+// its start time says: a queued run has not started, and its time is empty
+// or zero. Otherwise the most recently started wins, and of two that
+// started together, the later one listed.
+func newerCheck(c, prev ghx.CheckRun) bool {
+	if cp, pp := checkPending(c), checkPending(prev); cp != pp {
+		return cp
+	}
+	return compareCreated(c.StartedAt, prev.StartedAt) >= 0
+}
+
+// latestChecks keeps the latest run of each check, by workflow and name, in
+// that order.
 func latestChecks(all []ghx.CheckRun) []ghx.CheckRun {
-	byName := map[string]ghx.CheckRun{}
+	byKey := map[string]ghx.CheckRun{}
 	for _, c := range all {
-		name := checkName(c)
-		if prev, ok := byName[name]; ok && compareCreated(c.StartedAt, prev.StartedAt) < 0 {
+		key := checkKey(c)
+		if prev, ok := byKey[key]; ok && !newerCheck(c, prev) {
 			continue
 		}
-		byName[name] = c
+		byKey[key] = c
 	}
-	names := make([]string, 0, len(byName))
-	for n := range byName {
-		names = append(names, n)
+	keys := make([]string, 0, len(byKey))
+	for k := range byKey {
+		keys = append(keys, k)
 	}
-	sort.Strings(names)
-	out := make([]ghx.CheckRun, len(names))
-	for i, n := range names {
-		out[i] = byName[n]
+	sort.Strings(keys)
+	out := make([]ghx.CheckRun, len(keys))
+	for i, k := range keys {
+		out[i] = byKey[k]
 	}
 	return out
 }

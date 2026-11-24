@@ -8,7 +8,8 @@ import (
 
 func TestOpenPRsListsEachOpenPullRequestWithItsChecks(t *testing.T) {
 	args := fakeGh(t, `[{"number": 4, "headRefName": "feature/7-bell", "baseRefName": "main", "mergeable": "CONFLICTING",
-		"statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "FAILURE", "startedAt": "2026-01-01T00:00:00Z"},
+		"author": {"login": "octo"}, "body": "text\nFacet-Queue-Run: abc",
+		"statusCheckRollup": [{"__typename": "CheckRun", "workflowName": "build", "name": "ci", "status": "COMPLETED", "conclusion": "FAILURE", "startedAt": "2026-01-01T00:00:00Z"},
 		{"__typename": "StatusContext", "context": "deploy", "state": "PENDING"}]},
 		{"number": 5, "headRefName": "renovate/go", "headRefOid": "abc", "isCrossRepository": true, "isDraft": true,
 		"createdAt": "2026-01-02T00:00:00Z", "mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND", "statusCheckRollup": []}]`, "", 0)
@@ -17,17 +18,18 @@ func TestOpenPRsListsEachOpenPullRequestWithItsChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0].Number != 4 || got[0].HeadRefName != "feature/7-bell" || got[0].BaseRefName != "main" ||
-		got[0].Mergeable != "CONFLICTING" || got[1].HeadRefName != "renovate/go" {
+		got[0].Mergeable != "CONFLICTING" || got[1].HeadRefName != "renovate/go" ||
+		got[0].Author.Login != "octo" || got[0].Body != "text\nFacet-Queue-Run: abc" {
 		t.Fatalf("OpenPRs = %+v", got)
 	}
-	if c := got[0].Checks; len(c) != 2 || c[0].Name != "ci" || c[0].Conclusion != "FAILURE" || c[1].Context != "deploy" || c[1].State != "PENDING" {
+	if c := got[0].Checks; len(c) != 2 || c[0].Name != "ci" || c[0].WorkflowName != "build" || c[0].Conclusion != "FAILURE" || c[1].Context != "deploy" || c[1].State != "PENDING" {
 		t.Fatalf("checks = %+v", got[0].Checks)
 	}
 	if p := got[1]; p.HeadRefOid != "abc" || !p.IsCrossRepository || !p.IsDraft || p.CreatedAt != "2026-01-02T00:00:00Z" || p.MergeStateStatus != "BEHIND" {
 		t.Fatalf("second = %+v", p)
 	}
 	want := []string{"pr", "list", "--repo", "acme/widgets", "--state", "open", "--limit", "1000",
-		"--json", "number,headRefName,headRefOid,baseRefName,isCrossRepository,isDraft,createdAt,mergeable,mergeStateStatus,statusCheckRollup"}
+		"--json", "number,headRefName,headRefOid,baseRefName,isCrossRepository,isDraft,createdAt,author,body,mergeable,mergeStateStatus,statusCheckRollup"}
 	if strings.Join(args(), "\x00") != strings.Join(want, "\x00") {
 		t.Errorf("gh args = %q\nwant %q", args(), want)
 	}
@@ -175,5 +177,23 @@ func TestHeadBehindBaseReadsCompareStatus(t *testing.T) {
 	fakeGh(t, "", "HTTP 502", 1)
 	if _, err := (CLI{}).HeadBehindBase("acme/widgets", "main", "abc123"); err == nil {
 		t.Fatal("failed compare returned no error")
+	}
+}
+
+func TestViewerReadsTheLogin(t *testing.T) {
+	args := fakeGh(t, `{"login": "octo", "id": 1}`, "", 0)
+	got, err := (CLI{}).Viewer()
+	if err != nil || got != "octo" {
+		t.Fatalf("Viewer = %q, %v", got, err)
+	}
+	if strings.Join(args(), " ") != "api user" {
+		t.Errorf("gh args = %q", args())
+	}
+}
+
+func TestViewerFailsWithoutALogin(t *testing.T) {
+	fakeGh(t, `{}`, "", 0)
+	if _, err := (CLI{}).Viewer(); err == nil {
+		t.Fatal("an empty login returned no error")
 	}
 }

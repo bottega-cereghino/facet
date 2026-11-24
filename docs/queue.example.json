@@ -7,7 +7,7 @@
   "label": "next",
   "priorities": "priorities.example.txt",
   "repos": ["acme/widgets", "acme/other"],
-  "prompt": "Do each issue below, in order. The workspace is {workspace}. {issues} Do the work each issue describes. Merge when the checks are green. Comment the result on the issue. Remove the {label} label when the issue is done. Then exit.",
+  "prompt": "Do each issue below, in order. The workspace is {workspace}. {issues} Do the work each issue describes. Merge when the checks are green. Comment the result on the issue. Remove the {label} label when the issue is done. End the pull request's description with this line: {marker} Then exit.",
   "effort": {
     "default": "medium",
     "labels": {

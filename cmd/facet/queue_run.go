@@ -42,7 +42,15 @@ type queueEnv struct {
 	// fallback: a non-success conclusion other than neutral or skipped
 	// is not green.
 	requiredChecks func(repo, branch string) (names []string, known bool, err error)
-	spawn          func(repo string, number int) (string, error)
+	// viewer is the login of the account the queue runs as. A pull request
+	// is the queue's only when that account opened it. Nil means the
+	// account cannot be read, and no pull request is the queue's.
+	viewer func() (string, error)
+	// issue reads one issue again before the queue fixes, updates or
+	// merges its pull request. Nil means it cannot be read, and nothing is
+	// touched.
+	issue func(repo string, number int) (*ghx.Issue, error)
+	spawn func(repo string, number int) (string, error)
 	// route runs spawn's routing checks for a repository, without the
 	// network. Only --dry-run calls it; nil skips it.
 	route func(repo string) error
@@ -71,6 +79,8 @@ func realQueueEnv() queueEnv {
 		prFiles:        ghx.CLI{}.PRFiles,
 		compareFiles:   ghx.CLI{}.CompareFiles,
 		requiredChecks: ghx.CLI{}.RequiredChecks,
+		viewer:         ghx.CLI{}.Viewer,
+		issue:          func(repo string, number int) (*ghx.Issue, error) { return gh.ViewIssue(repo, number) },
 		spawn:          prepareWorkspace,
 		route: func(repo string) error {
 			_, _, err := spawnRoute(repo)
@@ -182,6 +192,16 @@ type queueRunner struct {
 	prCache    map[string]prListing
 	landed     map[string]time.Time
 	waited     map[string]string
+	// updateHolds backs off a pull request whose update failed for a
+	// reason other than a conflict, and forbidHolds one whose fix diff
+	// could not be read.
+	updateHolds map[string]*retryHold
+	forbidHolds map[string]*retryHold
+	// viewer is the account the queue runs as, once read. issueRound is
+	// this round's reading of a started issue: why its pull request is
+	// left alone, or "" when it may be touched.
+	viewer     string
+	issueRound map[string]string
 	// noted remembers a line already logged for a key, so a refusal is
 	// logged once per head rather than once per tick.
 	noted        map[string]string
@@ -237,6 +257,9 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		labelRetry:   map[string]time.Time{},
 		prCache:      map[string]prListing{},
 		landed:       map[string]time.Time{},
+		updateHolds:  map[string]*retryHold{},
+		forbidHolds:  map[string]*retryHold{},
+		issueRound:   map[string]string{},
 		waited:       map[string]string{},
 		noted:        map[string]string{},
 		mergeMethods: map[string]string{},
@@ -258,6 +281,13 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 }
 
 func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
+	if cfg.State != "" && (cfg.Fix != nil || cfg.Cap != nil) {
+		release, err := lockQueueState(cfg.State)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	r, err := newQueueRunner(cfg, env, false)
 	if err != nil {
 		return err
@@ -292,6 +322,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 	disk := r.noteDisk()
 	r.mu.Lock()
 	r.round = map[string]prListing{}
+	r.issueRound = map[string]string{}
 	r.mu.Unlock()
 	r.resetCapRound()
 	// The fix stage looks even when every slot is taken: landing a green
@@ -623,7 +654,13 @@ func (r *queueRunner) start(ctx context.Context, run []queuedIssue, rooms map[st
 	r.active[key] = heartbeatRun{Issue: key, Agent: agent, Since: r.env.now().UTC()}
 	r.mu.Unlock()
 	r.writeHeartbeat()
-	r.recordStarted(run)
+	// A run whose pull request the fix stage may take as its own gets a
+	// marker: its agent ends the pull request's description with it.
+	marker := ""
+	if r.state != nil && r.cfg.Fix != nil {
+		marker = newRunMarker()
+	}
+	r.recordStarted(run, marker)
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -639,11 +676,11 @@ func (r *queueRunner) start(ctx context.Context, run []queuedIssue, rooms map[st
 			r.mu.Unlock()
 			r.writeHeartbeat()
 		}()
-		r.runOne(ctx, run, rooms)
+		r.runOne(ctx, run, rooms, marker)
 	}()
 }
 
-func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[string]string) {
+func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[string]string, marker string) {
 	if ctx.Err() != nil || len(run) == 0 {
 		return
 	}
@@ -674,7 +711,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 		}
 		return
 	}
-	argv, who, from, cmdSummary, err := r.argvFor(run, ws, effort, rooms)
+	argv, who, from, cmdSummary, err := r.argvFor(run, ws, effort, rooms, marker)
 	if err != nil {
 		r.setLastError(err.Error())
 		r.logf("queue: %s#%d: %v", iss.Repo, iss.Issue.Number, err)

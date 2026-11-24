@@ -105,7 +105,7 @@ func joinsBundle(cfg queueConfig, primary, iss queuedIssue, who, effort string, 
 	return ok && gotWho == who && strings.EqualFold(gotEffort, effort)
 }
 
-func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string, rooms map[string]string) ([]string, string, string, string, error) {
+func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string, rooms map[string]string, marker string) ([]string, string, string, string, error) {
 	iss := run[0]
 	a, from, err := r.cfg.resolveAgent(iss.Issue.LabelNames(), rooms)
 	if err != nil {
@@ -114,7 +114,10 @@ func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string, rooms map[st
 	vars := queueVars(r.cfg, run, ws, effort)
 	// prompt is expanded first, then dropped in as a single value, so a title
 	// is not scanned for further placeholders.
-	prompt := expand(r.cfg.Prompt, vars)
+	if marker != "" {
+		vars["marker"] = markerLine(marker)
+	}
+	prompt := expand(promptWithMarker(r.cfg.Prompt, marker), vars)
 	vars["prompt"] = prompt
 	vars["fallback_from"] = from
 	out := make([]string, len(a.Command))
@@ -146,6 +149,7 @@ func queueVars(cfg queueConfig, run []queuedIssue, ws, effort string) map[string
 		"bundle":        strconv.Itoa(len(run)),
 		"labels":        strings.Join(iss.Issue.LabelNames(), ","),
 		"fallback_from": "",
+		"marker":        "",
 	}
 }
 

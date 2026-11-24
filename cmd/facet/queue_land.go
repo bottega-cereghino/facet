@@ -71,6 +71,11 @@ func (r *queueRunner) land(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, 
 			return false
 		}
 	}
+	// An update or a merge acts on the pull request: read the issue again
+	// first.
+	if r.touchStop(iss) != "" {
+		return false
+	}
 	behind, err := r.isBehindBase(iss.Repo, pr, status)
 	if err != nil {
 		r.markLanded(key, got.at)
@@ -79,6 +84,9 @@ func (r *queueRunner) land(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, 
 	}
 	if behind {
 		r.markLanded(key, got.at)
+		if !r.mayRetry(r.updateHolds, key, pr.HeadRefOid) {
+			return false
+		}
 		return r.updatePR(iss, pr)
 	}
 	if mergedRepo[iss.Repo] {
@@ -119,6 +127,9 @@ func (r *queueRunner) isBehindBase(repo string, pr ghx.OpenPR, status string) (b
 }
 
 // updatePR merges the base into a green pull request that is behind it.
+// A failure other than a conflict keeps the listing and backs the pull
+// request off with the merge backoff, logged once per step, so a failing
+// update is not tried on every tick.
 func (r *queueRunner) updatePR(iss queuedIssue, pr ghx.OpenPR) bool {
 	k := iss.key()
 	if r.dry {
@@ -128,18 +139,64 @@ func (r *queueRunner) updatePR(iss queuedIssue, pr ghx.OpenPR) bool {
 	if r.env.updateBranch == nil {
 		return false
 	}
+	key := landKey(iss.Repo, pr.Number)
 	err := r.env.updateBranch(iss.Repo, pr.Number)
+	if err != nil && !errors.Is(err, ghx.ErrUpdateConflict) {
+		wait := r.noteFailure(r.updateHolds, key, pr.HeadRefOid)
+		r.logf("queue: update %s PR #%d: %v; trying again after %s", k, pr.Number, err, wait)
+		return false
+	}
+	r.clearFailure(r.updateHolds, key)
 	r.forgetListing(iss.Repo)
-	switch {
-	case errors.Is(err, ghx.ErrUpdateConflict):
+	if err != nil {
 		r.logf("queue: update %s PR #%d: %s does not merge cleanly; fixing it as a conflict", k, pr.Number, baseName(pr))
 		return true
-	case err != nil:
-		r.logf("queue: update %s PR #%d: %v; trying again on the next listing", k, pr.Number, err)
-		return false
 	}
 	r.logf("queue: updated %s PR #%d: merged %s into it", k, pr.Number, baseName(pr))
 	return false
+}
+
+// retryHold is one pull request's failed reads or updates of one kind, for
+// this process. A new head starts the count again.
+type retryHold struct {
+	head  string
+	count int
+	next  time.Time
+}
+
+// mayRetry reports whether the step that failed for key at head may be
+// tried again now.
+func (r *queueRunner) mayRetry(holds map[string]*retryHold, key, head string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := holds[key]
+	if h == nil || h.head != head {
+		return true
+	}
+	return !r.env.now().Before(h.next)
+}
+
+// noteFailure counts one failure of the step for key at head and returns
+// how long it now waits: the queue's wait, doubling up to an hour, as a
+// refused merge does.
+func (r *queueRunner) noteFailure(holds map[string]*retryHold, key, head string) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := holds[key]
+	if h == nil || h.head != head {
+		h = &retryHold{head: head}
+		holds[key] = h
+	}
+	h.count++
+	wait := mergeBackoff(r.cfg.Wait, h.count)
+	h.next = r.env.now().Add(wait)
+	return wait
+}
+
+func (r *queueRunner) clearFailure(holds map[string]*retryHold, key string) {
+	r.mu.Lock()
+	delete(holds, key)
+	r.mu.Unlock()
 }
 
 // mergePR merges a green, up to date pull request with the repository's
@@ -343,8 +400,10 @@ type checkRules struct {
 }
 
 // landBlockReason is why pr is not green enough to land. Empty means it is.
-// Required checks come from the base branch. When they cannot be read, a
-// conclusion other than success, neutral or skipped is not a pass.
+// Every latest check must have passed: success, or neutral or skipped for a
+// check the base branch does not require. Required checks come from the
+// base branch; when they cannot be read, every check is held to that rule
+// and none is known to be required.
 func (r *queueRunner) landBlockReason(repo string, pr ghx.OpenPR) string {
 	names, known := r.requiredNames(repo, pr.BaseRefName)
 	if ok, why := landableChecks(pr, names, known); !ok {
@@ -376,47 +435,45 @@ func (r *queueRunner) requiredNames(repo, branch string) ([]string, bool) {
 	return names, known
 }
 
-// landableChecks reports whether the checks allow a merge. When known is
-// false, neutral and skipped are the only conclusions besides success that
-// pass. When known is true, every required name must be a success: a
-// cancelled, skipped or missing required check does not pass.
+// landableChecks reports whether the checks allow a merge. Every latest
+// check must be complete and a success, or neutral or skipped when it is not
+// required: a cancelled, stale, failed or unset check never passes, whether
+// or not the base branch requires it. When known is true, every required
+// name must also be present and a success: a skipped or missing required
+// check does not pass. An empty required list that is known checks every
+// check the same way.
 func landableChecks(pr ghx.OpenPR, required []string, known bool) (bool, string) {
 	latest := latestChecks(pr.Checks)
-	if !known {
-		for _, c := range latest {
-			if checkPending(c) {
-				return false, checkName(c) + " is pending"
-			}
-			switch strings.ToUpper(checkResult(c)) {
-			case "SUCCESS", "NEUTRAL", "SKIPPED":
-			default:
-				res := strings.ToUpper(checkResult(c))
-				if res == "" {
-					res = "UNSET"
-				}
-				return false, fmt.Sprintf("%s is %s", checkName(c), res)
-			}
+	isRequired := map[string]bool{}
+	if known {
+		for _, name := range required {
+			isRequired[name] = true
 		}
-		return true, ""
 	}
 	byName := map[string]ghx.CheckRun{}
 	for _, c := range latest {
-		byName[checkName(c)] = c
-	}
-	for _, name := range required {
-		c, ok := byName[name]
-		if !ok {
-			return false, name + " is missing"
-		}
+		name := checkName(c)
+		byName[name] = c
 		if checkPending(c) {
 			return false, name + " is pending"
 		}
 		res := strings.ToUpper(checkResult(c))
-		if res != "SUCCESS" {
+		switch {
+		case res == "SUCCESS":
+		case (res == "NEUTRAL" || res == "SKIPPED") && !isRequired[name]:
+		default:
 			if res == "" {
 				res = "UNSET"
 			}
 			return false, fmt.Sprintf("%s is %s", name, res)
+		}
+	}
+	for _, name := range required {
+		if !known {
+			break
+		}
+		if _, ok := byName[name]; !ok {
+			return false, name + " is missing"
 		}
 	}
 	return true, ""

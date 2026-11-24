@@ -23,11 +23,15 @@ type prListing struct {
 // to judge that run's pull request.
 const prListTTL = 5 * time.Minute
 
-// listPRs lists repo's open pull requests once per round. New work's open
-// pull request check reads it fresh each round, as it did before the fix
-// stage, and the fix stage shares the same listing.
+// listPRs is repo's open pull requests for new work's open pull request
+// check: the round's listing, else a cached one younger than prListTTL,
+// else a new one shared with the fix stage. An issue waiting for its pull
+// request to land is seen in every round's pick, so a fresh listing each
+// round would spend a call per tick on a pull request nothing acts on. An
+// issue this process started is not started again whatever the listing
+// says, and a restarted process lists afresh.
 func (r *queueRunner) listPRs(repo string) ([]ghx.OpenPR, error) {
-	got := r.roundListing(repo)
+	got := r.fixListing(repo, time.Time{})
 	return got.prs, got.err
 }
 

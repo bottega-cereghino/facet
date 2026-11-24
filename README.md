@@ -481,10 +481,10 @@ never passed through a shell.
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
-| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}`. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}` `{marker}`. `{marker}` is the line the agent ends its pull request's description with when `fix` is set (below), and empty otherwise. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
-| `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. |
+| `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. While the queue runs it holds an exclusive lock on the file beside it named `<state>.lock`, and a second queue on the same state file refuses to start, with the fix. |
 | `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
 | `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`, `disk`, `disk_clear`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
@@ -746,22 +746,43 @@ decision line.
 With a `fix` block, each tick looks at the queue's own pull requests before
 it picks a new issue. The queue records each issue it starts in the `state`
 file (JSON, written to a temp file, flushed to disk and renamed), so a
-restarted queue still knows them. A **queue pull request** is, for an issue
-this queue started, the first open pull request seen after the start whose
+restarted queue still knows them. A **queue pull request** is one the queue's own run opened, never a
+person's. Each start gets a token, kept in the state file, and the run's
+prompt tells the agent to end its pull request's description with the line
+`Facet-Queue-Run: <token>` (`{marker}` in `prompt` places that line; a prompt
+without it has the sentence added at its end). For an issue this queue
+started, the queue pull request is the first open pull request seen whose
 head branch is the issue's spawn branch (`feature/<number>-…`), that comes
-from the repository itself (not a fork), and that was opened after the
-start. The queue records its number the first time it sees it, and from then
-on only that pull request is the issue's. **A person's own pull request is
-never touched**: one for an issue the queue never started, one from a fork,
-one opened before the start, or a later one beside the queue's, even when
-its branch has the same shape. Only repositories still in `repos` are
+from the repository itself (not a fork), that was opened after the start,
+whose author is the account `gh` runs as, and whose description carries
+that start's line. The queue records its number the first time it sees it,
+and from then on only that pull request is the issue's, and only while it
+still meets all of that. **A person's own pull request is never touched**:
+one for an issue the queue never started, one from a fork, one opened
+before the start, one opened by another account, or one without the start's
+line, such as a person's pull request opened from the same account on the
+same branch shape. When the account cannot be read, no pull request is the
+queue's that round, and no start is forgotten. A start recorded before the
+token existed has none, so the queue takes no pull request of it as its own.
+
+Before the queue fixes, updates or merges its pull request, or labels the
+issue blocked, it reads the issue again (once per round, conditionally, so
+an unchanged issue costs no API quota). An issue that is closed, no longer
+carries the queue label, or carries `fix.blockLabel` is a person's call now:
+the queue leaves its pull request alone, and logs that once. So does an
+issue that cannot be read. Removing the label or adding the block label
+stops the queue; putting the label back, or removing the block label,
+lets it act again on a pull request it has not given up on.
+
+Only repositories still in `repos` are
 looked at. A state file that cannot be read is a refusal, with the fix
 printed.
 
-A queue pull request needs fixing when it is red (the latest run of a check
-by name, as `gh pr checks` reads them, concluded `FAILURE`, `TIMED_OUT`,
+A queue pull request needs fixing when it is red (the latest run of a check,
+told apart by its workflow and its name, concluded `FAILURE`, `TIMED_OUT`,
 `ACTION_REQUIRED`, `STARTUP_FAILURE` or `ERROR`) or conflicting (`mergeable`
-is `CONFLICTING`). A pull request with any check still pending, or whose
+is `CONFLICTING`). A run that is queued or in progress is the
+latest whatever its start time says. A pull request with any check still pending, or whose
 mergeable state is `UNKNOWN`, is not judged that round. Nor is one whose fix
 run ended less than `wait` ago, or one listed before that, since its new
 checks may not be listed yet.
@@ -776,9 +797,11 @@ Every session on a machine shares one GitHub API limit, so the fix stage
 reuses a repository's listing of pull requests, with their checks, for 5
 minutes, and does not list a repository at all while none of its started
 issues can act (each is running, waiting, settling or blocked). New work
-still lists the repository of the issue it is about to start each round, to
-see whether a pull request is already open for it, and that listing is
-shared with the fix stage. A listing that fails starts no fix in that
+reads the same listing, cached the same way, to see whether a pull request
+is already open for the issue it is about to start, so an issue whose pull
+request waits to land does not cost a listing every round. A restarted
+queue lists afresh, and an issue this process already started is not
+started again whatever the listing says. A listing that fails starts no fix in that
 repository, and is logged.
 
 A pull request still red or conflicting once CI has finished after a fix run
@@ -786,7 +809,9 @@ is a failed try. So is a fix whose own commits suppress a finding instead of
 fixing it: after the run, and before anything of that pull request is
 landed, the queue reads the diff from the head the first fix run started
 at. An added line that matches `fix.forbid`, or a higher number in a file
-named like a baseline, ratchet or limit, is refused. The refusal is a failed
+named like a baseline, ratchet or limit, is refused. A diff that cannot be read (a changed file with no patch, say) is not a
+pass and is not landed: the queue reads it again after `wait`, then twice
+that, doubling up to an hour, and logs each read that fails. The refusal is a failed
 try. Nothing of that pull request is landed, and the next try is told the
 same way a red one is. After `fix.tries` failed tries the queue adds the
 `fix.blockLabel` label to the issue, logs it, runs `fix.notify` once, and
@@ -810,21 +835,28 @@ path above. One that is green and up to date is merged with the
 repository's own method, read from its settings (squash, merge or rebase,
 in that order of preference; squash where it is the only one allowed), and
 only at the head commit that was judged. A pull request is green for landing
-only when every required check passed. The queue reads those names from the
-base branch's rules and from classic branch protection. When that cannot be
-read, a conclusion other than success, neutral or skipped is not a pass, so
-a cancelled check is not landed. A skipped or missing required check is not
-a pass either. Required checks and branch rules are GitHub's to enforce: a
+only when every latest check passed: success, or neutral or skipped for a
+check the base branch does not require. A cancelled, stale or unset check is
+not a pass, required or not, and neither is a skipped or missing required
+check. The queue reads the required names from the base branch's rules and
+from classic branch protection. A branch with neither requires nothing, and
+every check is still held to that rule; when they cannot be read, no check is
+taken as required and the same rule applies. Required checks and branch rules are GitHub's to enforce: a
 merge GitHub refuses is never forced (no `--admin`). It is retried after
 `wait`, then after twice that, doubling up to an hour, and the refusal is
 logged once per step rather than once per tick. The count and the wait are
 kept in the state file, so a restart does not start them over. A new head,
 or a check result that changed, resets the count. After five refusals of
 the same head the queue stops trying that pull request, adds
-`fix.blockLabel`, runs `fix.notify` with the refusal text, and logs it. At
+`fix.blockLabel`, runs `fix.notify` with the refusal text, and logs it.
+While that label is on the issue the queue does not touch the pull request,
+new head or not. At
 most one pull request per repository is merged per round. Neither step runs
 an agent or the gate, and neither takes a slot. An update of a pull request
-that is behind is once per listing. A merge GitHub refuses waits as above.
+that is behind is once per listing. An update that fails for a reason other
+than a conflict keeps the listing and waits like a refused merge: `wait`,
+then twice that, doubling up to an hour, logged once per step; a new head
+starts that count again. A merge GitHub refuses waits as above.
 
 **Serialize pull requests that touch a shared file.** Optional top-level
 `serialize` takes `paths`, a list of globs (for example `**/*baseline*`,
@@ -858,6 +890,11 @@ writes no state. It runs the gate as for a start.
 `TestQueueFixesARedQueuePRBeforeANewIssue`,
 `TestQueueFixesAConflictingQueuePR`, `TestQueueDoesNotJudgeAPendingQueuePR`,
 `TestQueueNeverTouchesAPROfAnIssueItDidNotStart`,
+`TestQueueNeverAdoptsAPersonsPROnTheIssueBranch`,
+`TestQueueLeavesAPRAloneOnceItsIssueIsClosedUnlabelledOrBlocked`,
+`TestQueuePromptCarriesTheRunMarker`, `TestQueuePromptHasNoMarkerWithoutFix`,
+`TestQueueKeepsTheStartWhenTheAccountCannotBeRead`,
+`TestQueueDoesNotTouchARecordedPRFromAFork`,
 `TestQueueActsOnlyInTheConfiguredRepositories`,
 `TestQueueBlocksAfterTheLastFailedTry`,
 `TestQueueKeepsABlockedIssueBlocked`,
@@ -865,18 +902,22 @@ writes no state. It runs the gate as for a start.
 `TestQueueClearsTheRecordOfAPRThatTurnedGreen`,
 `TestQueueDoesNotCountAFixStoppedWithTheQueue`,
 `TestQueueStateSurvivesARestart`, `TestQueueStateIsSyncedBeforeTheRenameAndAfter`,
+`TestQueueRefusesAStateFileAnotherQueueHolds`,
 `TestQueueStartsNoFixWhenThePRListingFails`,
 `TestQueueListsARepositoryOnlyWhenItsIssuesCanAct`,
+`TestQueueReusesTheListingForAnIssueThatWaitsToLand`,
 `TestQueueUpdatesAGreenPRBehindItsBaseWithoutAnAgent`,
-`TestQueueFixesAPRWhoseUpdateConflicts`, `TestQueueMergesAGreenUpToDatePR`,
+`TestQueueFixesAPRWhoseUpdateConflicts`, `TestQueueBacksOffAFailedUpdate`, `TestQueueMergesAGreenUpToDatePR`,
+`TestQueueLandsNeitherADraftNorAPRWithNoChecks`,
 `TestQueueTriesARefusedMergeOncePerListing`,
 `TestQueueRetriesARefusedMergeAfterTheWait`,
 `TestQueueStopsMergingAfterFiveRefusals`,
 `TestQueueResetsAMergeRefusalWhenTheHeadChanges`,
 `TestQueueKeepsAMergeWaitAcrossARestart`,
 `TestQueueDoesNotLandACancelledRequiredCheck`,
-`TestQueueLandsWhenACancelledCheckIsNotRequired`,
-`TestQueueRefusesAFixThatSuppresses`,
+`TestQueueDoesNotLandACancelledCheckThatIsNotRequired`,
+`TestQueueDoesNotLandACancelledCheckWhenNothingIsRequired`,
+`TestQueueRefusesAFixThatSuppresses`, `TestQueueBacksOffAnUnreadableFixDiff`,
 `TestQueueLandsNothingWithLandOff`, `TestQueueFixPromptNamesTheBase`,
 `TestQueueDryRunListsFixRunsFirstAndWritesNothing`,
 `TestQueueDryRunSaysWhatItWouldLand`, `TestQueueDryRunSaysItWouldClearARecord`,

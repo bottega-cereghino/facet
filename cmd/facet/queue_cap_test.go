@@ -66,6 +66,9 @@ func seedWindow(t *testing.T, path string, rows []startedIssue) {
 	t.Helper()
 	st := newQueueState()
 	for _, s := range rows {
+		if s.Marker == "" {
+			s.Marker = testMarker(s.Number)
+		}
 		st.Started[s.Repo+"#"+strconv.Itoa(s.Number)] = s
 	}
 	if err := st.save(path); err != nil {
@@ -187,7 +190,7 @@ func TestQueueCapStartsStandardsWhenTheWindowHasNone(t *testing.T) {
 	seedWindow(t, cfg.State, productStarts("acme/widgets", time.Now().Add(-3*time.Hour)))
 	pass := &passCount{}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{labelled(10, "2026-01-01T00:00:00Z", "Standards", "next", "standards")}, nil
 		},
@@ -213,7 +216,7 @@ func TestQueueCapPassesFailingDisablesTheCap(t *testing.T) {
 	seedWindow(t, cfg.State, rows)
 	pass := &passCount{fail: true}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{labelled(10, "2026-01-01T00:00:00Z", "Standards", "next", "standards")}, nil
 		},
@@ -254,7 +257,7 @@ func TestQueueCapLabelsMatchWholeAndIgnoreCase(t *testing.T) {
 			})
 			pass := &passCount{}
 			var buf bytes.Buffer
-			err := dryQueue(context.Background(), cfg, queueEnv{
+			err := testDryQueue(context.Background(), cfg, queueEnv{
 				list: func(string, string) ([]ghx.Issue, error) {
 					return []ghx.Issue{labelled(10, "2026-01-01T00:00:00Z", "Work", append([]string{"next"}, tc.labels...)...)}, nil
 				},
@@ -290,7 +293,7 @@ func TestQueueCapOmittedChangesNothing(t *testing.T) {
 	rows[2].Labels = []string{"standards"}
 	seedWindow(t, cfg.State, rows)
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{labelled(10, "2026-01-01T00:00:00Z", "Standards", "next", "standards")}, nil
 		},
@@ -316,7 +319,7 @@ func TestQueueCapRestartKeepsTheWindow(t *testing.T) {
 	before := readFile(t, cfg.State)
 	pass := &passCount{}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{
 				labelled(10, "2026-01-01T00:00:00Z", "Standards", "next", "standards"),
@@ -345,7 +348,7 @@ func TestQueueCapDryRunSkipsTheSecondStandardsIssue(t *testing.T) {
 	cfg := capQueue(t, nil)
 	pass := &passCount{}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{
 				labelled(1, "2026-01-01T00:00:00Z", "Standards", "next", "standards"),
@@ -380,7 +383,7 @@ func TestQueueCapPassesRunsOncePerRepository(t *testing.T) {
 	seedWindow(t, cfg.State, rows)
 	pass := &passCount{}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(repo, _ string) ([]ghx.Issue, error) {
 			switch repo {
 			case "acme/widgets":
@@ -426,7 +429,7 @@ func TestQueueCapFixAndLandAreNotCapped(t *testing.T) {
 		seed(t, cfg.State)
 		pass := &passCount{}
 		var buf bytes.Buffer
-		err := dryQueue(context.Background(), cfg, queueEnv{
+		err := testDryQueue(context.Background(), cfg, queueEnv{
 			list: issues,
 			prs:  staticPRs(redPR(11, "feature/1-bell")),
 			run:  pass.run,
@@ -448,7 +451,7 @@ func TestQueueCapFixAndLandAreNotCapped(t *testing.T) {
 		pass := &passCount{}
 		land := &landCalls{}
 		var buf bytes.Buffer
-		err := dryQueue(context.Background(), cfg, land.env(queueEnv{
+		err := testDryQueue(context.Background(), cfg, land.env(queueEnv{
 			list: issues,
 			prs:  staticPRs(landPR(11, "feature/1-bell", "CLEAN")),
 			run:  pass.run,

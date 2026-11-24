@@ -250,12 +250,12 @@ func TestQueueDiskOmittedChangesNothing(t *testing.T) {
 		return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
 	}
 	var without, with bytes.Buffer
-	if err := dryQueue(context.Background(), plain, queueEnv{list: list, out: &without}); err != nil {
+	if err := testDryQueue(context.Background(), plain, queueEnv{list: list, out: &without}); err != nil {
 		t.Fatal(err)
 	}
 	watched := plain
 	watched.Disk = &queueDisk{Path: t.TempDir(), MinFreeGB: 20}
-	if err := dryQueue(context.Background(), watched, queueEnv{
+	if err := testDryQueue(context.Background(), watched, queueEnv{
 		list:     list,
 		out:      &with,
 		diskFree: func(string) (int64, error) { return 80 * diskGB, nil },
@@ -277,7 +277,7 @@ func TestQueueDiskDryRunPrintsTheRefusalAndTheStarts(t *testing.T) {
 	seedState(t, cfg.State, []int{1, 2, 3}, nil)
 	var buf bytes.Buffer
 	var spawned atomic.Int32
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{openIssue(9, "2026-01-04T00:00:00Z")}, nil
 		},

@@ -175,6 +175,7 @@ func TestQueueDecisionsStartAndFixStart(t *testing.T) {
 		Number: 7,
 		At:     time.Now().Add(-time.Hour),
 		PR:     77,
+		Marker: testMarker(7),
 	}
 	if err := st.save(statePath); err != nil {
 		t.Fatal(err)
@@ -197,7 +198,7 @@ func TestQueueDecisionsStartAndFixStart(t *testing.T) {
 		},
 	}
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	err = runQueue(ctx2, fixCfg, queueEnv{
+	err = runQueue(ctx2, fixCfg, ownerSeams(queueEnv{
 		out:  &bytes.Buffer{},
 		list: func(string, string) ([]ghx.Issue, error) { return nil, nil },
 		prs: func(string) ([]ghx.OpenPR, error) {
@@ -206,6 +207,8 @@ func TestQueueDecisionsStartAndFixStart(t *testing.T) {
 				HeadRefName: "feature/7-bug",
 				BaseRefName: "main",
 				Mergeable:   "MERGEABLE",
+				Author:      ghx.User{Login: testViewer},
+				Body:        markerLine(testMarker(7)),
 				Checks: []ghx.CheckRun{{
 					Typename:   "CheckRun",
 					Name:       "ci",
@@ -220,7 +223,7 @@ func TestQueueDecisionsStartAndFixStart(t *testing.T) {
 			cancel2()
 			return nil
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

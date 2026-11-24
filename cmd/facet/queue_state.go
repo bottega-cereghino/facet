@@ -53,6 +53,10 @@ type startedIssue struct {
 	// time one is seen after the start. From then on only that pull
 	// request is the queue's.
 	PR int `json:"pr,omitempty"`
+	// Marker is the token of the trailer line the run's agent was told to
+	// end its pull request's description with. Only a pull request that
+	// carries it is the queue's. A start recorded without one has none.
+	Marker string `json:"marker,omitempty"`
 }
 
 // fixRecord counts the fix runs made for one issue's pull request.
@@ -156,4 +160,26 @@ func firstErr(errs ...error) error {
 		}
 	}
 	return nil
+}
+
+// lockQueueState takes an exclusive lock on a file beside the state file,
+// path + ".lock", for as long as the queue runs, and returns its release.
+// Two queues on one state file would each start the same issue and each
+// overwrite the other's record, so a second one refuses instead. The lock
+// is flock(2): the kernel drops it when the process exits, however it
+// exits, so a crash leaves no stale lock behind. The file stays.
+func lockQueueState(path string) (func(), error) {
+	lock := path + ".lock"
+	f, err := os.OpenFile(lock, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("lock queue state: %w\nfix: the directory of state must exist and be writable", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("queue state %s is in use: another facet queue holds %s\nfix: stop the other queue first, or give this config a state file of its own", path, lock)
+		}
+		return nil, fmt.Errorf("lock queue state %s: %w", lock, err)
+	}
+	return func() { _ = f.Close() }, nil
 }

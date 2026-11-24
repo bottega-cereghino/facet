@@ -27,6 +27,12 @@ type OpenPR struct {
 	IsCrossRepository bool   `json:"isCrossRepository"`
 	IsDraft           bool   `json:"isDraft"`
 	CreatedAt         string `json:"createdAt"`
+	// Author opened the pull request. The queue takes as its own only a
+	// pull request opened by the account it runs as.
+	Author User `json:"author"`
+	// Body is the pull request's description. The queue looks in it for
+	// the line its own agent was told to end it with.
+	Body string `json:"body"`
 	// Mergeable is MERGEABLE, CONFLICTING or UNKNOWN.
 	Mergeable string `json:"mergeable"`
 	// MergeStateStatus is GitHub's view of the merge against the base:
@@ -48,11 +54,15 @@ type CheckRun struct {
 	Conclusion string `json:"conclusion"`
 	State      string `json:"state"`
 	StartedAt  string `json:"startedAt"`
+	// WorkflowName is the workflow a check run belongs to, so two checks of
+	// the same name in different workflows are told apart. Empty for a
+	// commit status.
+	WorkflowName string `json:"workflowName"`
 }
 
 // openPRFields is what OpenPRs asks gh for.
 const openPRFields = "number,headRefName,headRefOid,baseRefName,isCrossRepository,isDraft,createdAt," +
-	"mergeable,mergeStateStatus,statusCheckRollup"
+	"author,body,mergeable,mergeStateStatus,statusCheckRollup"
 
 // OpenPRs lists every open pull request in repo with its head branch, its
 // mergeable state and its checks, in one call.
@@ -234,4 +244,20 @@ func (CLI) HeadBehindBase(repo, base, head string) (bool, error) {
 	default:
 		return false, fmt.Errorf("compare %s %s...%s: unexpected status %q", repo, base, head, cmp.Status)
 	}
+}
+
+// Viewer is the login of the account gh runs as.
+func (CLI) Viewer() (string, error) {
+	out, err := run("api", "user")
+	if err != nil {
+		return "", err
+	}
+	var u User
+	if err := json.Unmarshal(out, &u); err != nil {
+		return "", fmt.Errorf("parse the signed-in user: %w", err)
+	}
+	if u.Login == "" {
+		return "", errors.New("the signed-in user has no login\nfix: run gh auth status, and gh auth login if it shows no account")
+	}
+	return u.Login, nil
 }

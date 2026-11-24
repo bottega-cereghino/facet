@@ -37,28 +37,42 @@ func branchPR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool) {
 // say it was opened, for a clock that is behind GitHub's.
 const prClockSkew = time.Minute
 
-// queuePR is the queue's own pull request for iss. Once the state names
-// its number, only that pull request is. Before then it is the first pull
-// request from this repository (not a fork) on the spawn branch, opened
-// after the queue started the issue; its number is then recorded. A
-// person's pull request, a fork's, or one opened before the start, is never
-// the queue's, whatever its branch is called.
-func (r *queueRunner) queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool) {
+// queuePR is the queue's own pull request for iss: one its own run
+// opened, never a person's. It comes from this repository (not a fork), on
+// the spawn branch, opened after the start by the account the queue runs
+// as, and its description carries the start's trailer line (ownsPR). The
+// first such pull request's number is recorded, and from then on only that
+// pull request is the queue's, and only while it still passes ownsPR. An
+// error means the account could not be read: the caller must not take it
+// as "no pull request" and forget the start.
+func (r *queueRunner) queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool, error) {
 	k := iss.key()
 	r.mu.Lock()
 	s := r.state.Started[k]
 	r.mu.Unlock()
 	if s.PR != 0 {
 		for _, pr := range prs {
-			if pr.Number == s.PR && !pr.IsCrossRepository {
-				return pr, true
+			if pr.Number != s.PR {
+				continue
 			}
+			ok, err := r.ownsPR(s, pr)
+			if err != nil || !ok {
+				return ghx.OpenPR{}, false, err
+			}
+			return pr, true, nil
 		}
-		return ghx.OpenPR{}, false
+		return ghx.OpenPR{}, false, nil
 	}
 	prefix := issueBranchName(iss.Issue.Number, "")
 	for _, pr := range prs {
-		if pr.IsCrossRepository || !strings.HasPrefix(pr.HeadRefName, prefix) || openedBefore(pr, s.At) {
+		if !strings.HasPrefix(pr.HeadRefName, prefix) || openedBefore(pr, s.At) {
+			continue
+		}
+		ok, err := r.ownsPR(s, pr)
+		if err != nil {
+			return ghx.OpenPR{}, false, err
+		}
+		if !ok {
 			continue
 		}
 		if !r.dry {
@@ -68,9 +82,9 @@ func (r *queueRunner) queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bo
 			r.mu.Unlock()
 			r.saveState()
 		}
-		return pr, true
+		return pr, true, nil
 	}
-	return ghx.OpenPR{}, false
+	return ghx.OpenPR{}, false, nil
 }
 
 func openedBefore(pr ghx.OpenPR, start time.Time) bool {
@@ -134,7 +148,13 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 			}
 			continue
 		}
-		pr, ok := r.queuePR(iss, got.prs)
+		pr, ok, err := r.queuePR(iss, got.prs)
+		if err != nil {
+			r.noteOnce(iss.key()+" owner", err.Error(), func() {
+				r.logf("queue: %s: %v; touching nothing of it this round", iss.key(), err)
+			})
+			continue
+		}
 		if !ok {
 			r.forgetStarted(iss)
 			continue
@@ -199,7 +219,7 @@ func (r *queueRunner) forgetIfGone(iss queuedIssue) {
 	if !ok {
 		return
 	}
-	if _, open := r.queuePR(iss, got.prs); !open {
+	if _, open, err := r.queuePR(iss, got.prs); err == nil && !open {
 		r.forgetStarted(iss)
 	}
 }
@@ -234,14 +254,21 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 			})
 			return nil
 		}
+		if !r.mayRetry(r.forbidHolds, k, pr.HeadRefOid) {
+			// The diff of this head could not be read; it is read again
+			// after its wait, not every tick.
+			return nil
+		}
 		pattern, file, bad, err := r.suppression(iss, pr)
+		if err == nil {
+			r.clearFailure(r.forbidHolds, k)
+		}
 		switch {
 		case err != nil:
 			// A diff that cannot be read is not a pass: landing it could
 			// merge a suppression the check did not see.
-			r.noteOnce(k+" forbid "+pr.HeadRefOid, err.Error(), func() {
-				r.logf("queue: %s PR #%d: %v; not landing", k, pr.Number, err)
-			})
+			wait := r.noteFailure(r.forbidHolds, k, pr.HeadRefOid)
+			r.logf("queue: %s PR #%d: %v; not landing, reading it again after %s", k, pr.Number, err, wait)
 			return nil
 		case bad:
 			reason = fmt.Sprintf("the fix suppresses instead of fixing: %s in %s", pattern, file)
@@ -260,6 +287,11 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 			}
 			reason = "conflicts with " + baseName(pr)
 		}
+	}
+	// A fix run and a block label act on the pull request and the issue:
+	// read the issue again first.
+	if r.touchStop(iss) != "" {
+		return nil
 	}
 	if runs >= r.cfg.Fix.Tries {
 		r.block(ctx, iss, pr, reason, runs)
@@ -526,7 +558,8 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 
 // recordStarted remembers the issues of a run, so their pull requests are
 // the queue's own after a restart, and so the cap window counts them.
-func (r *queueRunner) recordStarted(run []queuedIssue) {
+// marker is the run's trailer token, empty when the fix stage is off.
+func (r *queueRunner) recordStarted(run []queuedIssue, marker string) {
 	if r.state == nil {
 		return
 	}
@@ -535,7 +568,7 @@ func (r *queueRunner) recordStarted(run []queuedIssue) {
 		rec := startedIssue{
 			Repo: iss.Repo, Number: iss.Issue.Number, At: r.env.now(),
 			Title: iss.Issue.Title, URL: iss.Issue.URL, CreatedAt: iss.Issue.CreatedAt,
-			Labels: iss.Issue.LabelNames(),
+			Labels: iss.Issue.LabelNames(), Marker: marker,
 		}
 		r.state.Started[iss.key()] = rec
 		if r.cfg.Cap != nil {
