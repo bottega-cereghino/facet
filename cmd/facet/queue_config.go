@@ -59,6 +59,8 @@ type queueConfig struct {
 	// Cap is nil when the config has no cap block. Standards and CI issues
 	// then start like any other issue.
 	Cap *queueCap
+	// Heartbeat is the heartbeat file's path; empty means none.
+	Heartbeat string
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -132,6 +134,7 @@ type queueFile struct {
 	Lanes      *queueLanesFile     `json:"lanes"`
 	Serialize  *queueSerializeFile `json:"serialize"`
 	Cap        *queueCapFile       `json:"cap"`
+	Heartbeat  string              `json:"heartbeat"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -143,7 +146,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, decisions, lanes, serialize, cap", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, decisions, lanes, serialize, cap, heartbeat", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -230,6 +233,12 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 		if cfg.State == "" {
 			return queueConfig{}, fmt.Errorf("queue config: cap is set and state is not\nfix: set state to a file path, where the queue records the issues it started")
 		}
+	}
+	if p := strings.TrimSpace(f.Heartbeat); p != "" {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(filepath.Dir(configPath), p)
+		}
+		cfg.Heartbeat = p
 	}
 	if err := cfg.validate(); err != nil {
 		return queueConfig{}, err
