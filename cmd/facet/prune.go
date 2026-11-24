@@ -43,10 +43,16 @@ func newPruneCmd() *cobra.Command {
 			"HEAD or reflog, or an install), or while a session, pane, process or launchd\n" +
 			"job runs from it, as reap asks. With no workspace named it looks at every one\n" +
 			"under the root. --apply lists, asks once, and checks each workspace again\n" +
-			"just before deleting.",
+			"just before deleting, then prints each directory it removed with its size.\n\n" +
+			"--safe is --apply --yes for a run nobody watches: it asks nothing, and every\n" +
+			"hold above still applies. It refuses an --idle-days below the default of\n" +
+			"14, which would take a workspace in use; a longer window is accepted.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if safe {
+				if idleDays < defaultIdleDays {
+					return fmt.Errorf("--safe keeps the idle window of at least %d days; --idle-days %d would prune a workspace in use\nfix: drop --idle-days, or run `facet prune --apply --idle-days %d` yourself", defaultIdleDays, idleDays, idleDays)
+				}
 				apply = true
 				yes = true
 			}
@@ -79,10 +85,13 @@ func newPruneCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&apply, "apply", false, "delete what is listed, after one confirmation; without it prune only lists")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
-	cmd.Flags().IntVar(&idleDays, "idle-days", 14, "hold a workspace used within this many days; 0 holds none for age")
-	cmd.Flags().BoolVar(&safe, "safe", false, "delete only rebuildable caches in idle, unheld workspaces, without prompting")
+	cmd.Flags().IntVar(&idleDays, "idle-days", defaultIdleDays, "hold a workspace used within this many days; 0 holds none for age")
+	cmd.Flags().BoolVar(&safe, "safe", false, "--apply without a prompt, for unattended runs; refuses an --idle-days below the default")
 	return cmd
 }
+
+// defaultIdleDays is prune's idle window, and the shortest --safe accepts.
+const defaultIdleDays = 14
 
 // runPrune lists what each workspace would free and, with apply, deletes it
 // from the ones nothing holds. Each workspace is inspected again just before
@@ -145,14 +154,16 @@ func runPrune(w io.Writer, dirs []string, git gitx.Runner, live workspace.LiveCh
 			}
 		}
 		again.Found = kept
-		if err := workspace.Prune(again); err != nil {
+		// Log what is gone even when another directory failed: the log is
+		// the record of what an unattended run deleted.
+		removed, err := workspace.Prune(again)
+		for _, r := range removed {
+			_, _ = fmt.Fprintf(w, "removed %s (%s)\n", filepath.Join(st.Dir, r.Clone, filepath.FromSlash(r.Rel)), humanBytes(r.Bytes))
+			freed += r.Bytes
+		}
+		if err != nil {
 			errs = append(errs, err)
-			continue
 		}
-		for _, r := range again.Found {
-			_, _ = fmt.Fprintf(w, "removed %s/%s (%s)\n", r.Clone, r.Rel, humanBytes(r.Bytes))
-		}
-		freed += again.Frees()
 	}
 	_, _ = fmt.Fprintf(w, "\nfreed %s.\n", humanBytes(freed))
 	return errors.Join(errs...)

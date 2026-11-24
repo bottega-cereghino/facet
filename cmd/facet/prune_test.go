@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,7 +93,7 @@ func TestPruneListsWithoutApplyAndDeletesOnlyWhatNothingHolds(t *testing.T) {
 	if exists(t, idleDeps) {
 		t.Error("the idle workspace's node_modules survived --apply")
 	}
-	if !strings.Contains(out.String(), "removed repo/node_modules") {
+	if !strings.Contains(out.String(), "removed "+idleDeps+" (") {
 		t.Errorf("--apply did not log the removed cache:\n%s", out.String())
 	}
 	if !exists(t, busyDeps) {
@@ -103,25 +104,148 @@ func TestPruneListsWithoutApplyAndDeletesOnlyWhatNothingHolds(t *testing.T) {
 	}
 }
 
-func TestPruneSafeCommandAppliesWithoutPrompt(t *testing.T) {
-	root := t.TempDir()
-	ws, deps := pruneWorkspace(t, root, "idle")
-	savedRoots, savedGit := roots, git
-	t.Cleanup(func() { roots, git = savedRoots, savedGit })
+// pruneCommandRoot points facet at root for a test that runs the prune
+// command itself: no launchd jobs, and a tmux server of the test's own.
+func pruneCommandRoot(t *testing.T, root string) {
+	t.Helper()
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	t.Setenv("TMUX", "")
+	savedRoots, savedGit, savedJobs := roots, git, jobs
+	t.Cleanup(func() { roots, git, jobs = savedRoots, savedGit, savedJobs })
 	roots = config.Roots{Workspaces: root}
 	git = gitx.Git{}
-	cmd := newPruneCmd()
-	cmd.SetArgs([]string{"--safe", "--idle-days", "0"})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
+	jobs = &launchd.Jobs{Dirs: []string{t.TempDir()}, Run: noTools}
+}
+
+// age sets every file under dir to have last changed d ago, as a workspace
+// nobody has touched for that long reads.
+func age(t *testing.T, dir string, d time.Duration) {
+	t.Helper()
+	then := time.Now().Add(-d)
+	err := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, then, then)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func runPruneCmd(args ...string) (string, error) {
+	var out bytes.Buffer
+	cmd := newPruneCmd()
+	cmd.SetArgs(args)
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// --safe prunes an idle workspace without asking, holds one used today under
+// the default window, and logs each directory it removed by its full path.
+func TestPruneSafeCommandAppliesWithoutPrompt(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws, deps := pruneWorkspace(t, root, "idle")
+	_, usedDeps := pruneWorkspace(t, root, "today")
+	age(t, ws, 30*24*time.Hour)
+	pruneCommandRoot(t, root)
+	out := captureStdout(t, func() {
+		if _, err := runPruneCmd("--safe"); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if exists(t, deps) {
-		t.Fatal("--safe did not prune the idle rebuildable cache")
+		t.Fatalf("--safe did not prune the idle rebuildable cache:\n%s", out)
 	}
 	if !exists(t, filepath.Join(ws, "repo", "only-copy-of-notes.md")) {
 		t.Fatal("--safe removed a non-cache file")
+	}
+	if !exists(t, usedDeps) {
+		t.Fatalf("--safe pruned a workspace used today:\n%s", out)
+	}
+	if want := "removed " + deps + " ("; !strings.Contains(out, want) {
+		t.Errorf("output lacks %q, the removed directory by its full path:\n%s", want, out)
+	}
+	if strings.Contains(out, "removed "+usedDeps) {
+		t.Errorf("output names a directory that was kept as removed:\n%s", out)
+	}
+}
+
+// --safe never shortens the idle window: prune's own hold message says "pass
+// --idle-days 0", and a session following it must not take a workspace in
+// use. A longer window only narrows, so it is accepted.
+func TestPruneSafeRefusesAShorterIdleWindow(t *testing.T) {
+	root := t.TempDir()
+	_, deps := pruneWorkspace(t, root, "today")
+	pruneCommandRoot(t, root)
+	for _, days := range []string{"0", "13"} {
+		out, err := runPruneCmd("--safe", "--idle-days", days)
+		if err == nil || !strings.Contains(err.Error(), "--safe keeps the idle window") {
+			t.Errorf("prune --safe --idle-days %s: err = %v; want the refusal\n%s", days, err, out)
+		}
+		if !exists(t, deps) {
+			t.Fatalf("prune --safe --idle-days %s deleted from a workspace used today", days)
+		}
+	}
+	if out, err := runPruneCmd("--safe", "--idle-days", "30"); err != nil {
+		t.Errorf("prune --safe --idle-days 30: %v\n%s", err, out)
+	}
+	if !exists(t, deps) {
+		t.Fatal("prune --safe --idle-days 30 deleted from a workspace used today")
+	}
+}
+
+// The log is the record of an unattended run: a directory removed is logged
+// and counted even when another in the same workspace could not be deleted.
+func TestPruneLogsWhatItRemovedWhenAnotherFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root deletes inside a read-only directory: the failure cannot be planted")
+	}
+	root := t.TempDir()
+	ws, deps := pruneWorkspace(t, root, "idle")
+	clone := filepath.Join(ws, "repo")
+	web := filepath.Join(clone, "web")
+	stuck := filepath.Join(web, "node_modules", "stuck")
+	for path, body := range map[string]string{
+		filepath.Join(web, "package.json"): `{"dependencies": {"left-pad": "1.3.0"}}` + "\n",
+		filepath.Join(stuck, "index.js"):   strings.Repeat("facet\n", 2<<20/6),
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := (gitx.Git{}).Run(clone, nil, "add", "web/package.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stuck, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stuck, 0o755) })
+
+	var out bytes.Buffer
+	err := runPrune(&out, []string{ws}, gitx.Git{}, nil, time.Now(), 0, true, yesAll)
+	if err == nil {
+		t.Errorf("runPrune returned no error although web/node_modules could not be deleted:\n%s", out.String())
+	}
+	if exists(t, deps) {
+		t.Fatalf("repo/node_modules survived:\n%s", out.String())
+	}
+	if want := "removed " + deps + " (2M)"; !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q although it was deleted:\n%s", want, out.String())
+	}
+	if strings.Contains(out.String(), "removed "+filepath.Join(web, "node_modules")) {
+		t.Errorf("output says the directory it failed to delete was removed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "freed 2M.") {
+		t.Errorf("output should count what was freed:\n%s", out.String())
 	}
 }
 
