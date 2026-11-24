@@ -38,9 +38,9 @@ func printOutput(label, p, wd string) string {
 }
 
 // gonePlist is a runner for one loaded label whose plist file p is gone: plutil
-// fails on it, and launchctl print answers with print in the domains it is
+// fails on it, and launchctl print answers with answers[domain] in the domains it is
 // given. Every print target asked is recorded in asked.
-func gonePlist(label, p string, print map[string]string, asked *[]string) Runner {
+func gonePlist(label, p string, answers map[string]string, asked *[]string) Runner {
 	return func(name string, args ...string) ([]byte, error) {
 		switch {
 		case name == "launchctl" && args[0] == "list":
@@ -48,7 +48,7 @@ func gonePlist(label, p string, print map[string]string, asked *[]string) Runner
 		case name == "launchctl" && args[0] == "print":
 			*asked = append(*asked, args[1])
 			domain, _, _ := strings.Cut(args[1], "/")
-			if out, ok := print[domain]; ok {
+			if out, ok := answers[domain]; ok {
 				return []byte(out), nil
 			}
 			return nil, errors.New("exit status 113")
