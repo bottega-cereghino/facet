@@ -6,6 +6,18 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.16.0](https://github.com/bottega-cereghino/facet/compare/v0.15.0...v0.16.0) (2026-11-24)
+
+
+### Added
+
+* add safe unattended reap and prune modes ([#472](https://github.com/bottega-cereghino/facet/issues/472)) ([7325c51](https://github.com/bottega-cereghino/facet/commit/7325c517143154b0c59493b4bd06caa7d373ce99))
+
+
+### Fixed
+
+* **queue:** guard landing against a person's pull request and an unchecked merge ([#506](https://github.com/bottega-cereghino/facet/issues/506)) ([1eedc4d](https://github.com/bottega-cereghino/facet/commit/1eedc4da23c262cab33de160a1c6c881041082dd))
+
 ## [0.15.0](https://github.com/bottega-cereghino/facet/compare/v0.14.0...v0.15.0) (2026-11-24)
 
 
