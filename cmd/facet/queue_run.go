@@ -182,6 +182,9 @@ type queueRunner struct {
 	prCache    map[string]prListing
 	landed     map[string]time.Time
 	waited     map[string]string
+	// updateHolds backs off a pull request whose update failed for a
+	// reason other than a conflict.
+	updateHolds map[string]*updateHold
 	// noted remembers a line already logged for a key, so a refusal is
 	// logged once per head rather than once per tick.
 	noted        map[string]string
@@ -237,6 +240,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		labelRetry:   map[string]time.Time{},
 		prCache:      map[string]prListing{},
 		landed:       map[string]time.Time{},
+		updateHolds:  map[string]*updateHold{},
 		waited:       map[string]string{},
 		noted:        map[string]string{},
 		mergeMethods: map[string]string{},

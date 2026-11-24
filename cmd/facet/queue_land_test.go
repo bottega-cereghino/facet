@@ -48,6 +48,48 @@ func TestQueueUpdatesAGreenPRBehindItsBaseWithoutAnAgent(t *testing.T) {
 	}
 }
 
+// An update that fails for a reason other than a conflict keeps the
+// listing and waits, with the merge backoff, before it is tried again.
+func TestQueueBacksOffAFailedUpdate(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	land := &landCalls{update: func(int) error { return errors.New("HTTP 502") }}
+	ticks := &countCalls{}
+	listings := &countCalls{}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var now atomic.Value
+	now.Store(start)
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+		prs: func(repo string) ([]ghx.OpenPR, error) {
+			listings.add(repo)
+			return []ghx.OpenPR{landPR(11, "feature/1-bell", "BEHIND")}, nil
+		},
+		now: func() time.Time { return now.Load().(time.Time) },
+	}))
+	waitFor(t, "ten rounds", func() bool { return ticks.get("acme/widgets") >= 10 })
+	if got := len(land.list()); got != 1 {
+		t.Fatalf("updates = %d in ten rounds, want 1", got)
+	}
+	if got := listings.get("acme/widgets"); got != 1 {
+		t.Fatalf("listings = %d in ten rounds, want the cached one", got)
+	}
+	if n := strings.Count(s.buf.String(), "HTTP 502; trying again after"); n != 1 {
+		t.Fatalf("logged %d times, want once:\n%s", n, s.buf.String())
+	}
+	now.Store(start.Add(prListTTL + time.Second))
+	waitFor(t, "the second update", func() bool { return len(land.list()) >= 2 })
+	before := ticks.get("acme/widgets")
+	waitFor(t, "ten more rounds", func() bool { return ticks.get("acme/widgets") >= before+10 })
+	s.stop(t)
+	if got := len(land.list()); got != 2 {
+		t.Fatalf("updates = %d, want 2", got)
+	}
+	if !strings.Contains(s.buf.String(), "trying again after "+(2*cfg.Wait).String()) {
+		t.Fatalf("the second wait did not double:\n%s", s.buf.String())
+	}
+}
+
 func TestQueueFixesAPRWhoseUpdateConflicts(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "log")
 	cfg := fixQueue(t, log)
@@ -668,5 +710,35 @@ func TestQueueFixPromptNamesTheBase(t *testing.T) {
 	if !strings.HasPrefix(got, "release: Never take a shortcut.") || !strings.Contains(got, "merge origin/release into it") ||
 		!strings.Contains(got, "Never clear a ratchet") || strings.Contains(got, "<base>") {
 		t.Fatalf("fix run = %q", got)
+	}
+}
+
+func TestUpdateBackoffDoublesAndResetsOnANewHead(t *testing.T) {
+	cfg := oneAgentConfig(nil)
+	cfg.Wait = time.Minute
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	now := start
+	r, err := newQueueRunner(cfg, queueEnv{now: func() time.Time { return now }, out: &bytes.Buffer{}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.mayUpdate("k", "h1") {
+		t.Fatal("a pull request with no failure may not be updated")
+	}
+	if wait := r.noteUpdateFailure("k", "h1"); wait != time.Minute {
+		t.Fatalf("first wait = %s", wait)
+	}
+	if r.mayUpdate("k", "h1") {
+		t.Fatal("updated again before the wait")
+	}
+	if !r.mayUpdate("k", "h2") {
+		t.Fatal("a new head is held by the old head's failure")
+	}
+	now = start.Add(time.Minute)
+	if !r.mayUpdate("k", "h1") {
+		t.Fatal("held after the wait")
+	}
+	if wait := r.noteUpdateFailure("k", "h1"); wait != 2*time.Minute {
+		t.Fatalf("second wait = %s", wait)
 	}
 }

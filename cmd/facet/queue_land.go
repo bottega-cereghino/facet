@@ -79,6 +79,9 @@ func (r *queueRunner) land(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, 
 	}
 	if behind {
 		r.markLanded(key, got.at)
+		if !r.mayUpdate(key, pr.HeadRefOid) {
+			return false
+		}
 		return r.updatePR(iss, pr)
 	}
 	if mergedRepo[iss.Repo] {
@@ -119,6 +122,9 @@ func (r *queueRunner) isBehindBase(repo string, pr ghx.OpenPR, status string) (b
 }
 
 // updatePR merges the base into a green pull request that is behind it.
+// A failure other than a conflict keeps the listing and backs the pull
+// request off with the merge backoff, logged once per step, so a failing
+// update is not tried on every tick.
 func (r *queueRunner) updatePR(iss queuedIssue, pr ghx.OpenPR) bool {
 	k := iss.key()
 	if r.dry {
@@ -128,18 +134,59 @@ func (r *queueRunner) updatePR(iss queuedIssue, pr ghx.OpenPR) bool {
 	if r.env.updateBranch == nil {
 		return false
 	}
+	key := landKey(iss.Repo, pr.Number)
 	err := r.env.updateBranch(iss.Repo, pr.Number)
+	if err != nil && !errors.Is(err, ghx.ErrUpdateConflict) {
+		wait := r.noteUpdateFailure(key, pr.HeadRefOid)
+		r.logf("queue: update %s PR #%d: %v; trying again after %s", k, pr.Number, err, wait)
+		return false
+	}
+	r.mu.Lock()
+	delete(r.updateHolds, key)
+	r.mu.Unlock()
 	r.forgetListing(iss.Repo)
-	switch {
-	case errors.Is(err, ghx.ErrUpdateConflict):
+	if err != nil {
 		r.logf("queue: update %s PR #%d: %s does not merge cleanly; fixing it as a conflict", k, pr.Number, baseName(pr))
 		return true
-	case err != nil:
-		r.logf("queue: update %s PR #%d: %v; trying again on the next listing", k, pr.Number, err)
-		return false
 	}
 	r.logf("queue: updated %s PR #%d: merged %s into it", k, pr.Number, baseName(pr))
 	return false
+}
+
+// updateHold is one pull request's failed updates, for this process. A new
+// head starts the count again.
+type updateHold struct {
+	head  string
+	count int
+	next  time.Time
+}
+
+// mayUpdate reports whether a pull request whose update failed may be
+// updated again now.
+func (r *queueRunner) mayUpdate(key, head string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := r.updateHolds[key]
+	if h == nil || h.head != head {
+		return true
+	}
+	return !r.env.now().Before(h.next)
+}
+
+// noteUpdateFailure counts one failed update of head and returns how long
+// the pull request now waits: the queue's wait, doubling up to an hour.
+func (r *queueRunner) noteUpdateFailure(key, head string) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	h := r.updateHolds[key]
+	if h == nil || h.head != head {
+		h = &updateHold{head: head}
+		r.updateHolds[key] = h
+	}
+	h.count++
+	wait := mergeBackoff(r.cfg.Wait, h.count)
+	h.next = r.env.now().Add(wait)
+	return wait
 }
 
 // mergePR merges a green, up to date pull request with the repository's
