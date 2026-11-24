@@ -16,8 +16,8 @@ func TestReapVerdictSaysWhatItDidNotCheck(t *testing.T) {
 	}{
 		{clean, false, "reapable"},
 		{clean, true, "reapable offline (PR unchecked)"},
-		{stale, false, "stale fetch"},
-		{stale, true, "stale fetch"},
+		{stale, false, "held (1)"},
+		{stale, true, "held (1)"},
 	} {
 		if got := reapVerdict(c.st, c.offline); got != c.want {
 			t.Errorf("reapVerdict(offline=%v) = %q, want %q", c.offline, got, c.want)
