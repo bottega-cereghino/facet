@@ -463,7 +463,7 @@ never passed through a shell.
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
-| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}`. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
+| `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}` `{marker}`. `{marker}` is the line the agent ends its pull request's description with when `fix` is set (below), and empty otherwise. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. While the queue runs it holds an exclusive lock on the file beside it named `<state>.lock`, and a second queue on the same state file refuses to start, with the fix. |
@@ -728,15 +728,35 @@ decision line.
 With a `fix` block, each tick looks at the queue's own pull requests before
 it picks a new issue. The queue records each issue it starts in the `state`
 file (JSON, written to a temp file, flushed to disk and renamed), so a
-restarted queue still knows them. A **queue pull request** is, for an issue
-this queue started, the first open pull request seen after the start whose
+restarted queue still knows them. A **queue pull request** is one the queue's own run opened, never a
+person's. Each start gets a token, kept in the state file, and the run's
+prompt tells the agent to end its pull request's description with the line
+`Facet-Queue-Run: <token>` (`{marker}` in `prompt` places that line; a prompt
+without it has the sentence added at its end). For an issue this queue
+started, the queue pull request is the first open pull request seen whose
 head branch is the issue's spawn branch (`feature/<number>-…`), that comes
-from the repository itself (not a fork), and that was opened after the
-start. The queue records its number the first time it sees it, and from then
-on only that pull request is the issue's. **A person's own pull request is
-never touched**: one for an issue the queue never started, one from a fork,
-one opened before the start, or a later one beside the queue's, even when
-its branch has the same shape. Only repositories still in `repos` are
+from the repository itself (not a fork), that was opened after the start,
+whose author is the account `gh` runs as, and whose description carries
+that start's line. The queue records its number the first time it sees it,
+and from then on only that pull request is the issue's, and only while it
+still meets all of that. **A person's own pull request is never touched**:
+one for an issue the queue never started, one from a fork, one opened
+before the start, one opened by another account, or one without the start's
+line, such as a person's pull request opened from the same account on the
+same branch shape. When the account cannot be read, no pull request is the
+queue's that round, and no start is forgotten. A start recorded before the
+token existed has none, so the queue takes no pull request of it as its own.
+
+Before the queue fixes, updates or merges its pull request, or labels the
+issue blocked, it reads the issue again (once per round, conditionally, so
+an unchanged issue costs no API quota). An issue that is closed, no longer
+carries the queue label, or carries `fix.blockLabel` is a person's call now:
+the queue leaves its pull request alone, and logs that once. So does an
+issue that cannot be read. Removing the label or adding the block label
+stops the queue; putting the label back, or removing the block label,
+lets it act again on a pull request it has not given up on.
+
+Only repositories still in `repos` are
 looked at. A state file that cannot be read is a refusal, with the fix
 printed.
 
@@ -810,7 +830,9 @@ logged once per step rather than once per tick. The count and the wait are
 kept in the state file, so a restart does not start them over. A new head,
 or a check result that changed, resets the count. After five refusals of
 the same head the queue stops trying that pull request, adds
-`fix.blockLabel`, runs `fix.notify` with the refusal text, and logs it. At
+`fix.blockLabel`, runs `fix.notify` with the refusal text, and logs it.
+While that label is on the issue the queue does not touch the pull request,
+new head or not. At
 most one pull request per repository is merged per round. Neither step runs
 an agent or the gate, and neither takes a slot. An update of a pull request
 that is behind is once per listing. An update that fails for a reason other
@@ -850,6 +872,10 @@ writes no state. It runs the gate as for a start.
 `TestQueueFixesARedQueuePRBeforeANewIssue`,
 `TestQueueFixesAConflictingQueuePR`, `TestQueueDoesNotJudgeAPendingQueuePR`,
 `TestQueueNeverTouchesAPROfAnIssueItDidNotStart`,
+`TestQueueNeverAdoptsAPersonsPROnTheIssueBranch`,
+`TestQueueLeavesAPRAloneOnceItsIssueIsClosedUnlabelledOrBlocked`,
+`TestQueuePromptCarriesTheRunMarker`, `TestQueuePromptHasNoMarkerWithoutFix`,
+`TestQueueKeepsTheStartWhenTheAccountCannotBeRead`,
 `TestQueueDoesNotTouchARecordedPRFromAFork`,
 `TestQueueActsOnlyInTheConfiguredRepositories`,
 `TestQueueBlocksAfterTheLastFailedTry`,

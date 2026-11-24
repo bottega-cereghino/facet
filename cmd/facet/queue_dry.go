@@ -113,7 +113,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		r.mu.Unlock()
 		// Count the run in the cap window, as a real start would. A dry run
 		// still writes nothing: saveState leaves the file alone.
-		r.recordStarted(run)
+		r.recordStarted(run, "")
 		started++
 	}
 	run, err := r.candidate(ctx)

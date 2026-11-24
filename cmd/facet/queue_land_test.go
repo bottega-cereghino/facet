@@ -521,7 +521,7 @@ func TestQueueDryRunSaysWhatItWouldLand(t *testing.T) {
 	before := readFile(t, cfg.State)
 	land := &landCalls{}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, land.env(queueEnv{
+	err := testDryQueue(context.Background(), cfg, land.env(queueEnv{
 		list: noIssues,
 		prs:  staticPRs(landPR(11, "feature/1-bell", "BEHIND"), landPR(12, "feature/2-horn", "CLEAN")),
 		out:  &buf,
@@ -601,7 +601,7 @@ func TestQueueActsOnlyInTheConfiguredRepositories(t *testing.T) {
 	}
 	listed := &countCalls{}
 	var buf bytes.Buffer
-	err = dryQueue(context.Background(), cfg, queueEnv{
+	err = testDryQueue(context.Background(), cfg, queueEnv{
 		list: noIssues,
 		prs: func(repo string) ([]ghx.OpenPR, error) {
 			listed.add(repo)
@@ -694,7 +694,7 @@ func TestQueueDryRunSaysItWouldClearARecord(t *testing.T) {
 	seedState(t, cfg.State, []int{1}, map[int]int{1: 1})
 	before := readFile(t, cfg.State)
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{list: noIssues, prs: staticPRs(greenPR(11, "feature/1-bell")), out: &buf})
+	err := testDryQueue(context.Background(), cfg, queueEnv{list: noIssues, prs: staticPRs(greenPR(11, "feature/1-bell")), out: &buf})
 	got := buf.String()
 	if err != nil || !strings.Contains(got, "dry-run: would clear the fix record of acme/widgets#1: PR #11 is green") ||
 		strings.Contains(got, "clearing") {

@@ -1526,6 +1526,7 @@ func startQueue(t *testing.T, cfg queueConfig, env queueEnv) *queueRun {
 	if env.list == nil {
 		t.Fatal("queue test left list unset")
 	}
+	env = ownerSeams(env)
 	go func() { q.errCh <- runQueue(ctx, cfg, env) }()
 	t.Cleanup(func() { q.stop(t) })
 	return q

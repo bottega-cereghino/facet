@@ -71,6 +71,11 @@ func (r *queueRunner) land(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, 
 			return false
 		}
 	}
+	// An update or a merge acts on the pull request: read the issue again
+	// first.
+	if r.touchStop(iss) != "" {
+		return false
+	}
 	behind, err := r.isBehindBase(iss.Repo, pr, status)
 	if err != nil {
 		r.markLanded(key, got.at)

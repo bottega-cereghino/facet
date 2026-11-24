@@ -183,7 +183,7 @@ func (r *queueRunner) olderQueuePRs(repo string, pr ghx.OpenPR, prs []ghx.OpenPR
 		if iss.Repo != repo {
 			continue
 		}
-		other, ok := r.queuePR(iss, prs)
+		other, ok, _ := r.queuePR(iss, prs)
 		if !ok || seen[other.Number] {
 			continue
 		}

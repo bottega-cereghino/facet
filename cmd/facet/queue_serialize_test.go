@@ -366,7 +366,7 @@ func TestQueueDryRunListsSerializeWaitsAndAtMostOneMergePerRepo(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, land.env(queueEnv{
+	err := testDryQueue(context.Background(), cfg, land.env(queueEnv{
 		list: noIssues,
 		prs:  staticPRs(pr11, pr12, pr13),
 		out:  &buf,

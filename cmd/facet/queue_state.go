@@ -53,6 +53,10 @@ type startedIssue struct {
 	// time one is seen after the start. From then on only that pull
 	// request is the queue's.
 	PR int `json:"pr,omitempty"`
+	// Marker is the token of the trailer line the run's agent was told to
+	// end its pull request's description with. Only a pull request that
+	// carries it is the queue's. A start recorded without one has none.
+	Marker string `json:"marker,omitempty"`
 }
 
 // fixRecord counts the fix runs made for one issue's pull request.
