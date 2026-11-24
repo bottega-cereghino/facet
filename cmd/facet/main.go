@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -59,6 +60,10 @@ func main() {
 		newScopeCmd(), newCommentCmd(), newQueueCmd())
 
 	if err := root.Execute(); err != nil {
+		var exitErr exitCodeError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.code)
+		}
 		fmt.Fprintln(os.Stderr, "facet:", err)
 		os.Exit(1)
 	}
