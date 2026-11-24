@@ -229,8 +229,11 @@ func TestQueueDecisionsStartAndFixStart(t *testing.T) {
 	}
 
 	rows, _ := readDecisionLines(t, logFile)
-	if len(rows) != 2 {
-		t.Fatalf("got %d rows, want 2: %+v", len(rows), rows)
+	if len(rows) != 4 {
+		t.Fatalf("got %d rows, want 4 (start, exit_ok, fix_start, exit_ok): %+v", len(rows), rows)
+	}
+	if rows[1].Decision != decisionExitOK || rows[1].Lane != "lane:gemini" || rows[3].Decision != decisionExitOK || rows[3].Lane != "fix" {
+		t.Fatalf("exit rows = %+v, %+v", rows[1], rows[3])
 	}
 	startRow := rows[0]
 	if startRow.Repo != "acme/widgets" || startRow.Issue != "42" || startRow.Lane != "lane:gemini" || startRow.Decision != "start" || startRow.Source != "queue" {
@@ -239,7 +242,7 @@ func TestQueueDecisionsStartAndFixStart(t *testing.T) {
 	if !strings.Contains(startRow.Why, "run-gemini --effort medium") || strings.Contains(startRow.Why, "SECRET_PROMPT_TEXT") {
 		t.Fatalf("start why = %q", startRow.Why)
 	}
-	fixRow := rows[1]
+	fixRow := rows[2]
 	if fixRow.Repo != "acme/widgets" || fixRow.Issue != "7" || fixRow.Lane != "fix" || fixRow.Decision != "fix_start" || fixRow.Source != "queue" {
 		t.Fatalf("fix_start row = %+v", fixRow)
 	}
