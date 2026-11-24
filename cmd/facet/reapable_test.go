@@ -600,7 +600,7 @@ func TestReapReapableHoldsAWorkspaceJudgedAgainstAFailedFetch(t *testing.T) {
 	if !exists(t, filepath.Join(ws, "app")) {
 		t.Fatalf("a workspace judged against a failed fetch was deleted:\n%s", out.String())
 	}
-	for _, want := range []string{"could not fetch origin", "facet reap facet-test-reapable-stale"} {
+	for _, want := range []string{"could not check", "facet-test-reapable-stale"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}

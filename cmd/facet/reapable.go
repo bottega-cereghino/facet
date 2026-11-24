@@ -56,9 +56,6 @@ func reapBatch(out io.Writer, dirs []string, yes, dryRun bool, narrow func(*work
 		case len(st.Blockers()) > 0:
 			held++
 			heldBy = append(heldBy, st)
-		case st.StaleFetch():
-			held++
-			_, _ = fmt.Fprintf(out, "left alone %s: %s\n", reapName(st), staleReason(st))
 		default:
 			picked = append(picked, st)
 			total += st.SizeBytes
@@ -136,10 +133,6 @@ func reapBatch(out io.Writer, dirs []string, yes, dryRun bool, narrow func(*work
 			_, _ = fmt.Fprintf(out, "skipped %s: since the list was made it is held by %s\n", reapName(again), b[0])
 			continue
 		}
-		if again.StaleFetch() {
-			_, _ = fmt.Fprintf(out, "skipped %s: %s\n", reapName(again), staleReason(again))
-			continue
-		}
 		if why := narrowReason(narrow, again); why != "" {
 			_, _ = fmt.Fprintf(out, "skipped %s: since the list was made, %s\n", reapName(again), why)
 			continue
@@ -186,29 +179,6 @@ func hasWorktree(sts []*workspace.IssueState) bool {
 		}
 	}
 	return false
-}
-
-// staleReason says why a workspace judged against a failed fetch is left
-// alone, and how to reap it: online again, or by name, where a note says what
-// was not checked.
-func staleReason(st *workspace.IssueState) string {
-	var remotes []string
-	for _, c := range st.Clone {
-		for _, r := range c.StaleRemotes {
-			remotes = append(remotes, r+" for "+c.Dir)
-		}
-	}
-	return fmt.Sprintf("could not fetch %s, so its pushed work cannot be confirmed; run --reapable again online, or `facet reap %s` to decide yourself",
-		strings.Join(remotes, ", "), reapArg(st))
-}
-
-// reapArg is what `facet reap` takes to name st: a workspace's directory name,
-// a worktree's path.
-func reapArg(st *workspace.IssueState) string {
-	if st.Worktree {
-		return st.Dir
-	}
-	return filepath.Base(st.Dir)
 }
 
 // printHeld lists the held workspaces grouped by what holds them, one line

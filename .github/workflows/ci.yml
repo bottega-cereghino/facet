@@ -45,7 +45,7 @@ jobs:
   linux:
     name: linux
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -125,7 +125,7 @@ jobs:
     needs: linux
     if: github.event_name != 'pull_request' || (github.event.pull_request.draft == false && github.event.pull_request.base.ref == 'main')
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -140,6 +140,9 @@ jobs:
         env:
           FACET_DENYLIST: ${{ secrets.FACET_DENYLIST }}
 
+  # A warning, not a gate: it is left out of `ci`'s needs (fleet standard
+  # ci-time), so a broken renovate.json shows red on the PR without blocking it.
+  #
   # renovate.json must pass Renovate's own validator. The image is the Renovate
   # release that holds it, pinned by tag and digest; Renovate moves it like any
   # other dependency. It comes from Docker Hub, not GHCR: the same image and
@@ -148,7 +151,7 @@ jobs:
   renovate:
     name: renovate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     container:
       image: renovate/renovate:44.155.1@sha256:f5796f26088c0f5debb07c16fa9e801145e4d3ba9717d9cc22ca8cd265e2a0eb
       # The checkout writes into the runner workspace, which the image user
@@ -163,11 +166,11 @@ jobs:
   # The one result. It runs even when a job above fails or is skipped, so one
   # name says whether a pull request is green. A skipped job passes here: macos
   # skips on drafts on purpose, and the ruleset still requires macos by name.
-  # Add every new job to `needs`.
+  # Add every new blocking job to `needs`; a warning-only job stays out.
   ci:
     name: ci
     if: always()
-    needs: [linux, macos, renovate]
+    needs: [linux, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

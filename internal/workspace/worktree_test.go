@@ -337,8 +337,15 @@ func TestPlainWorktreeIsHeldByItsBranchsPullRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := st.Blockers(); len(b) > 0 {
-		t.Errorf("a merged pull request holds: %v", b)
+	// The unreachable origin also holds the worktree (the fetch failed, #491);
+	// that is expected here. A merged pull request itself must hold nothing.
+	for _, b := range st.Blockers() {
+		if strings.Contains(b, "pull request") {
+			t.Errorf("a merged pull request holds: %v", b)
+		}
+	}
+	if !hasBlocker(st, "fetch failed, so the remote's state is unknown") {
+		t.Errorf("a failed fetch does not hold: %v", st.Blockers())
 	}
 }
 

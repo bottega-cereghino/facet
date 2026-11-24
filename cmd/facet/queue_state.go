@@ -12,10 +12,31 @@ import (
 
 // queueState is the state file: the issues this queue started, and the fix
 // runs it made per issue. It is what lets a restarted queue tell its own
-// pull requests from a person's, and keep counting tries.
+// pull requests from a person's, and keep counting tries. Merges is the
+// backoff after a merge GitHub refused, keyed by repo#pr, so a restart
+// does not try again before the wait is up.
 type queueState struct {
 	Started map[string]startedIssue `json:"started"`
 	Fixes   map[string]*fixRecord   `json:"fixes"`
+	Merges  map[string]*mergeHold   `json:"merges,omitempty"`
+	// Starts is every issue the queue started, kept after Started drops a
+	// merged one, so the cap window still counts that run. Empty when the
+	// config has no cap.
+	Starts []startedIssue `json:"starts,omitempty"`
+}
+
+// mergeHold is one pull request's refused merges. Head and Checks are what
+// the count is for: a new head, or a check that changed, starts the count
+// again. Next is when another try is allowed. Stopped means five refusals
+// of this head, and the queue is not trying that merge again.
+type mergeHold struct {
+	Head    string    `json:"head"`
+	Checks  string    `json:"checks"`
+	Count   int       `json:"count"`
+	Next    time.Time `json:"next"`
+	Stopped bool      `json:"stopped,omitempty"`
+	Labeled bool      `json:"labeled,omitempty"`
+	Reason  string    `json:"reason,omitempty"`
 }
 
 // startedIssue is one issue the queue started. The issue's fields are kept
@@ -40,10 +61,18 @@ type fixRecord struct {
 	Runs    int       `json:"runs"`
 	Last    time.Time `json:"last"`
 	Blocked bool      `json:"blocked,omitempty"`
+	// Head is the pull request's head when the first fix run of this
+	// record started. The suppression check reads the diff from Head to
+	// the head now, so a later try is judged with the earlier one.
+	Head string `json:"head,omitempty"`
 }
 
 func newQueueState() *queueState {
-	return &queueState{Started: map[string]startedIssue{}, Fixes: map[string]*fixRecord{}}
+	return &queueState{
+		Started: map[string]startedIssue{},
+		Fixes:   map[string]*fixRecord{},
+		Merges:  map[string]*mergeHold{},
+	}
 }
 
 // loadQueueState reads the state file. A missing file is an empty state. A
@@ -66,6 +95,9 @@ func loadQueueState(path string) (*queueState, error) {
 	}
 	if st.Fixes == nil {
 		st.Fixes = map[string]*fixRecord{}
+	}
+	if st.Merges == nil {
+		st.Merges = map[string]*mergeHold{}
 	}
 	return st, nil
 }
