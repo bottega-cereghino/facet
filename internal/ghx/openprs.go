@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 )
 
 // OpenPRLimit is how many open pull requests OpenPRs reads from one
-// repository. A repository with more than this is truncated, and the caller
-// can see that it got exactly this many.
+// repository. A result at this limit may be truncated, so OpenPRs returns an
+// error instead of treating it as complete.
 const OpenPRLimit = 1000
 
 // OpenPR is one open pull request, with what the queue needs to tell
@@ -26,6 +27,12 @@ type OpenPR struct {
 	IsCrossRepository bool   `json:"isCrossRepository"`
 	IsDraft           bool   `json:"isDraft"`
 	CreatedAt         string `json:"createdAt"`
+	// Author opened the pull request. The queue takes as its own only a
+	// pull request opened by the account it runs as.
+	Author User `json:"author"`
+	// Body is the pull request's description. The queue looks in it for
+	// the line its own agent was told to end it with.
+	Body string `json:"body"`
 	// Mergeable is MERGEABLE, CONFLICTING or UNKNOWN.
 	Mergeable string `json:"mergeable"`
 	// MergeStateStatus is GitHub's view of the merge against the base:
@@ -47,11 +54,15 @@ type CheckRun struct {
 	Conclusion string `json:"conclusion"`
 	State      string `json:"state"`
 	StartedAt  string `json:"startedAt"`
+	// WorkflowName is the workflow a check run belongs to, so two checks of
+	// the same name in different workflows are told apart. Empty for a
+	// commit status.
+	WorkflowName string `json:"workflowName"`
 }
 
 // openPRFields is what OpenPRs asks gh for.
 const openPRFields = "number,headRefName,headRefOid,baseRefName,isCrossRepository,isDraft,createdAt," +
-	"mergeable,mergeStateStatus,statusCheckRollup"
+	"author,body,mergeable,mergeStateStatus,statusCheckRollup"
 
 // OpenPRs lists every open pull request in repo with its head branch, its
 // mergeable state and its checks, in one call.
@@ -71,6 +82,9 @@ func (CLI) OpenPRs(repo string) ([]OpenPR, error) {
 	var prs []OpenPR
 	if err := json.Unmarshal(out, &prs); err != nil {
 		return nil, fmt.Errorf("parse open pull requests in %s: %w", repo, err)
+	}
+	if len(prs) == OpenPRLimit {
+		return nil, fmt.Errorf("list open pull requests in %s: reached limit %d; results may be incomplete", repo, OpenPRLimit)
 	}
 	return prs, nil
 }
@@ -152,4 +166,98 @@ func (CLI) MergePR(repo string, number int, method, head string) error {
 	}
 	_, err := run(args...)
 	return err
+}
+
+// PRFiles lists the file paths changed by pull request number in repo.
+// It uses the paginated REST endpoint so a pull request with more than one
+// page of files is not silently truncated.
+func (CLI) PRFiles(repo string, number int) ([]string, error) {
+	if _, _, err := splitRepo("PRFiles", repo); err != nil {
+		return nil, err
+	}
+	out, err := run("api", "--paginate",
+		fmt.Sprintf("repos/%s/pulls/%d/files?per_page=%d", repo, number, restPerPage))
+	if err != nil {
+		return nil, err
+	}
+	files, err := parsePRFiles(out)
+	if err != nil {
+		return nil, fmt.Errorf("parse files of %s#%d: %w", repo, number, err)
+	}
+	return files, nil
+}
+
+func parsePRFiles(out []byte) ([]string, error) {
+	dec := json.NewDecoder(strings.NewReader(string(out)))
+	var all []string
+	for dec.More() {
+		var page []struct {
+			Filename         string `json:"filename"`
+			PreviousFilename string `json:"previous_filename"`
+		}
+		if err := dec.Decode(&page); err != nil {
+			return nil, err
+		}
+		for _, f := range page {
+			if f.Filename != "" {
+				all = append(all, f.Filename)
+			}
+			if f.PreviousFilename != "" && f.PreviousFilename != f.Filename {
+				all = append(all, f.PreviousFilename)
+			}
+		}
+	}
+	return all, nil
+}
+
+// HeadBehindBase reports whether base has commits that head does not
+// contain, via GitHub's compare endpoint. A pull request whose head is
+// behind its base must merge the base in and pass checks again before
+// landing, whatever the repository's branch protection requires.
+func (CLI) HeadBehindBase(repo, base, head string) (bool, error) {
+	if _, _, err := splitRepo("HeadBehindBase", repo); err != nil {
+		return false, err
+	}
+	if base == "" || head == "" {
+		return false, fmt.Errorf("compare %s: base and head are required", repo)
+	}
+	out, err := run("api",
+		fmt.Sprintf("repos/%s/compare/%s...%s", repo, url.PathEscape(base), url.PathEscape(head)))
+	if err != nil {
+		return false, err
+	}
+	var cmp struct {
+		Status   string `json:"status"`
+		BehindBy int    `json:"behind_by"`
+	}
+	if err := json.Unmarshal(out, &cmp); err != nil {
+		return false, fmt.Errorf("parse compare %s %s...%s: %w", repo, base, head, err)
+	}
+	if cmp.BehindBy > 0 {
+		return true, nil
+	}
+	switch strings.ToLower(cmp.Status) {
+	case "ahead", "identical":
+		return false, nil
+	case "behind", "diverged":
+		return true, nil
+	default:
+		return false, fmt.Errorf("compare %s %s...%s: unexpected status %q", repo, base, head, cmp.Status)
+	}
+}
+
+// Viewer is the login of the account gh runs as.
+func (CLI) Viewer() (string, error) {
+	out, err := run("api", "user")
+	if err != nil {
+		return "", err
+	}
+	var u User
+	if err := json.Unmarshal(out, &u); err != nil {
+		return "", fmt.Errorf("parse the signed-in user: %w", err)
+	}
+	if u.Login == "" {
+		return "", errors.New("the signed-in user has no login\nfix: run gh auth status, and gh auth login if it shows no account")
+	}
+	return u.Login, nil
 }

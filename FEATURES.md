@@ -39,7 +39,7 @@ The feature map of facet. States: shipped (on main), in progress (an open PR), p
 | F21 | `prune` deletes only what the listing named | Confirmed listing is what goes | shipped | [#445](https://github.com/bottega-cereghino/facet/pull/445) |
 | F22 | `reap --closed` | Limit `--reapable` to merged or closed PRs | in progress | [#435](https://github.com/bottega-cereghino/facet/pull/435) |
 | F23 | `issues` and `ls --size` offline wording | Say reapable offline and stale fetch where the check did not run in full | in progress | [#449](https://github.com/bottega-cereghino/facet/pull/449) |
-| F24 | Landing proof follows symbolic ref chains | Reap sees a branch behind a symbolic ref | planned | [#408](https://github.com/bottega-cereghino/facet/issues/408) |
+| F24 | Landing proof follows symbolic ref chains | Reap sees a branch behind a symbolic ref | shipped | [#478](https://github.com/bottega-cereghino/facet/pull/478) |
 | F25 | Launchd hold: plist path and case handling | Read the loaded plist; match without resolving last element | planned | [#329](https://github.com/bottega-cereghino/facet/issues/329) |
 | F26 | Failing plutil or launchctl holds the workspace | Today it drops the job | planned | [#291](https://github.com/bottega-cereghino/facet/issues/291) |
 | F27 | Prune symlink checks on clone and workspace dirs | Check the directories, not only steps below | planned | [#301](https://github.com/bottega-cereghino/facet/issues/301) |
@@ -52,6 +52,8 @@ The feature map of facet. States: shipped (on main), in progress (an open PR), p
 | F29 | Queue gate and hold | Gate exits 3 and 4 skip a run or a repository; hold names stop files | shipped | [#434](https://github.com/bottega-cereghino/facet/pull/434) |
 | F30 | Queue skips issues with an open PR branch |  | shipped | [#425](https://github.com/bottega-cereghino/facet/pull/425) |
 | F31 | Queue fixes its own red or conflicting PRs first |  | planned | [#446](https://github.com/bottega-cereghino/facet/issues/446) |
+| F44 | A `lane:` label is a preference | No room starts the default agent the same tick and logs `fallback_from`. A `model:` label keeps its agent | in progress | [#475](https://github.com/bottega-cereghino/facet/pull/475) |
+| F45 | Cap standards and CI starts | Once a repository's check passes, at most 1 of every 3 starts there is standards or CI work | in progress | [#482](https://github.com/bottega-cereghino/facet/issues/482) |
 
 ## Build, CI and docs
 
@@ -63,9 +65,9 @@ The feature map of facet. States: shipped (on main), in progress (an open PR), p
 | F35 | `AGENTS.md`, `CONTRIBUTING.md`, `docs/CODE.md` | House rules | shipped | [#200](https://github.com/bottega-cereghino/facet/pull/200) |
 | F36 | shfmt in `make check` and CI |  | in progress | [#441](https://github.com/bottega-cereghino/facet/pull/441) |
 | F37 | Format Go on write via `.claude/settings.json` hook |  | in progress | [#442](https://github.com/bottega-cereghino/facet/pull/442) |
-| F38 | Decision records in `docs/decisions/` |  | in progress | [#440](https://github.com/bottega-cereghino/facet/pull/440) |
+| F38 | Decision records in `docs/decisions/` |  | shipped | [#440](https://github.com/bottega-cereghino/facet/pull/440) |
 | F39 | Same hook and shfmt tracked as issues |  | planned | [#439](https://github.com/bottega-cereghino/facet/issues/439) |
-| F40 | `FEATURES.md`, this map | Fleet standard features-file | in progress | [#450](https://github.com/bottega-cereghino/facet/issues/450) |
+| F40 | `FEATURES.md`, this map | Fleet standard features-file | shipped | [#451](https://github.com/bottega-cereghino/facet/pull/451) |
 
 ## Removed
 

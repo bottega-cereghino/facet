@@ -7,11 +7,13 @@ import (
 )
 
 // prListing is one repository's open pull requests, and when they were
-// listed.
+// listed. files caches each pull request's changed-file list for the life
+// of the listing.
 type prListing struct {
-	prs []ghx.OpenPR
-	err error
-	at  time.Time
+	prs   []ghx.OpenPR
+	files map[int][]string
+	err   error
+	at    time.Time
 }
 
 // prListTTL is how long the fix stage reuses a repository's listing. Every
@@ -21,11 +23,15 @@ type prListing struct {
 // to judge that run's pull request.
 const prListTTL = 5 * time.Minute
 
-// listPRs lists repo's open pull requests once per round. New work's open
-// pull request check reads it fresh each round, as it did before the fix
-// stage, and the fix stage shares the same listing.
+// listPRs is repo's open pull requests for new work's open pull request
+// check: the round's listing, else a cached one younger than prListTTL,
+// else a new one shared with the fix stage. An issue waiting for its pull
+// request to land is seen in every round's pick, so a fresh listing each
+// round would spend a call per tick on a pull request nothing acts on. An
+// issue this process started is not started again whatever the listing
+// says, and a restarted process lists afresh.
 func (r *queueRunner) listPRs(repo string) ([]ghx.OpenPR, error) {
-	got := r.roundListing(repo)
+	got := r.fixListing(repo, time.Time{})
 	return got.prs, got.err
 }
 
@@ -37,7 +43,11 @@ func (r *queueRunner) roundListing(repo string) prListing {
 		return got
 	}
 	prs, err := r.env.prs(repo)
-	got = prListing{prs: prs, err: err, at: r.env.now()}
+	var files map[int][]string
+	if err == nil {
+		files = map[int][]string{}
+	}
+	got = prListing{prs: prs, files: files, err: err, at: r.env.now()}
 	r.mu.Lock()
 	r.round[repo] = got
 	if err == nil {
@@ -81,4 +91,27 @@ func (r *queueRunner) forgetListing(repo string) {
 	r.mu.Lock()
 	delete(r.prCache, repo)
 	r.mu.Unlock()
+}
+
+// prFiles returns pull request number's changed files, cached with got so
+// each pull request is read at most once per listing.
+func (r *queueRunner) prFiles(repo string, number int, got prListing) ([]string, error) {
+	if got.files != nil {
+		r.mu.Lock()
+		cached, ok := got.files[number]
+		r.mu.Unlock()
+		if ok {
+			return cached, nil
+		}
+	}
+	files, err := r.env.prFiles(repo, number)
+	if err != nil {
+		return nil, err
+	}
+	if got.files != nil {
+		r.mu.Lock()
+		got.files[number] = files
+		r.mu.Unlock()
+	}
+	return files, nil
 }

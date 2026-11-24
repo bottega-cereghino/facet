@@ -45,8 +45,8 @@ func TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed(t *testing.T) {
 	}
 }
 
-// A remote that cannot be fetched is named in the note, so the operator
-// knows which one the count was judged against stale.
+// A remote that cannot be fetched is named in the blocker, so the operator
+// knows which one failed.
 func TestReapNamesTheRemoteItCouldNotFetch(t *testing.T) {
 	ws, clone := issueWorkspace(t)
 	gitOut(t, clone, "remote", "add", "fork", filepath.Join(t.TempDir(), "gone.git"))
@@ -59,8 +59,8 @@ func TestReapNamesTheRemoteItCouldNotFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := st.Notes(); len(n) != 1 || !strings.Contains(n[0], "could not fetch fork") || strings.Contains(n[0], "origin") {
-		t.Errorf("Notes() = %v; want one naming fork alone", n)
+	if b := st.Blockers(); len(b) != 1 || !strings.Contains(b[0], "could not fetch fork") || strings.Contains(b[0], "origin") {
+		t.Errorf("Blockers() = %v; want one naming fork alone", b)
 	}
 }
 
@@ -156,4 +156,74 @@ func TestReapsFetchNeverWritesOutsideRefsRemotes(t *testing.T) {
 	if !hasBlocker(st, "1 unpushed commit") {
 		t.Errorf("branch wip's commit is not held: %v", st.Blockers())
 	}
+}
+
+// A branch pushed to origin, then deleted or force-pushed away there since the
+// last good fetch, while the next fetch fails (network down, unreachable remote,
+// or missing path): the commit exists only in this clone and its stale
+// refs/remotes/origin/<branch> ref. Reap must hold the workspace rather than
+// counting the stale remote ref as pushed (#491).
+func TestReapHoldsWorkWhenTheFetchFailsAndOnlyAStaleRemoteRefHasIt(t *testing.T) {
+	setup := func(t *testing.T) (ws, clone, origin string) {
+		t.Helper()
+		root := t.TempDir()
+		origin = filepath.Join(root, "origin.git")
+		gitOut(t, "", "init", "-q", "--bare", "-b", "main", origin)
+		seed := filepath.Join(root, "seed")
+		gitOut(t, "", "clone", "-q", origin, seed)
+		commitFile(t, seed, "README", "hello\n", "init")
+		gitOut(t, seed, "push", "-q", "origin", "main")
+
+		ws = filepath.Join(root, "iss-repo-491-x")
+		if err := os.MkdirAll(ws, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		m := &manifest.Manifest{
+			Name:   "iss-repo-491-x",
+			Clones: map[string]string{"repo": origin},
+			Issue:  &manifest.Issue{Repo: "o/repo", Number: 491, Branch: "feature", Home: "repo"},
+		}
+		if err := m.Write(ws); err != nil {
+			t.Fatal(err)
+		}
+		if err := Sync(testRoots(root), ws, gitx.Git{}, quiet(), SyncOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		clone = filepath.Join(ws, "repo")
+
+		// Push a branch so refs/remotes/origin/feature records the commit.
+		gitOut(t, clone, "switch", "-q", "-c", "feature")
+		commitFile(t, clone, "idea.txt", "only copy\n", "only copy")
+		gitOut(t, clone, "push", "-q", "origin", "feature")
+
+		// Rewrite origin so the commit exists nowhere on origin anymore, leaving
+		// the clone's refs/remotes/origin/feature stale.
+		gitOut(t, seed, "switch", "-q", "-c", "feature")
+		commitFile(t, seed, "other.txt", "rewritten\n", "rewritten")
+		gitOut(t, seed, "push", "-q", "--force", "origin", "feature")
+		return ws, clone, origin
+	}
+
+	t.Run("fetch fails while remote is unreachable", func(t *testing.T) {
+		ws, _, _ := setup(t)
+		st, err := InspectIssue(ws, fetchFailGit(), nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasBlocker(st, "fetch failed, so the remote's state is unknown") {
+			t.Fatalf("reap would delete the only copy when fetch fails and only a stale remote ref has it; Blockers() = %v, Notes() = %v", st.Blockers(), st.Notes())
+		}
+	})
+
+	t.Run("remote points at a missing path", func(t *testing.T) {
+		ws, clone, _ := setup(t)
+		gitOut(t, clone, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "missing.git"))
+		st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasBlocker(st, "fetch failed, so the remote's state is unknown") {
+			t.Fatalf("reap would delete the only copy when the remote path is missing and only a stale remote ref has it; Blockers() = %v, Notes() = %v", st.Blockers(), st.Notes())
+		}
+	})
 }

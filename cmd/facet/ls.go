@@ -168,15 +168,11 @@ func inspectEach(dirs []string) ([]*workspace.IssueState, []error) {
 }
 
 // reapVerdict says whether reap would delete the workspace now, in the words
-// `facet issues` uses. A workspace judged against a failed fetch is "stale
-// fetch": a single reap goes ahead with a note, `reap --reapable` leaves it alone.
-// With offline set no pull-request lookup ran, so a clean verdict says so.
+// `facet issues` uses. With offline set no pull-request lookup ran, so a clean
+// verdict says so.
 func reapVerdict(st *workspace.IssueState, offline bool) string {
 	if b := st.Blockers(); len(b) > 0 {
 		return fmt.Sprintf("held (%d)", len(b))
-	}
-	if st.StaleFetch() {
-		return "stale fetch"
 	}
 	if offline {
 		return "reapable offline (PR unchecked)"

@@ -34,6 +34,45 @@ func fixQueue(t *testing.T, log string) queueConfig {
 	return cfg
 }
 
+// testViewer is the account a test queue runs as, and the author of the
+// pull requests its helpers build.
+const testViewer = "queue-bot"
+
+// ownerSeams fills the seams that tell the queue's own pull requests from a
+// person's, when a test left them unset: the queue runs as testViewer, and
+// every issue is open and carries the queue label.
+func ownerSeams(env queueEnv) queueEnv {
+	if env.viewer == nil {
+		env.viewer = func() (string, error) { return testViewer, nil }
+	}
+	if env.issue == nil {
+		env.issue = func(_ string, n int) (*ghx.Issue, error) {
+			return &ghx.Issue{Number: n, State: "OPEN", Labels: []ghx.Label{{Name: "next"}}}, nil
+		}
+	}
+	return env
+}
+
+// testMarker is the trailer token seedState gives issue n's start.
+func testMarker(n int) string {
+	return "m" + strconv.Itoa(n)
+}
+
+// markerFor is the trailer token of the issue named by a spawn branch
+// (feature/<n>-slug), or "" for any other branch.
+func markerFor(branch string) string {
+	rest, ok := strings.CutPrefix(branch, "feature/")
+	if !ok {
+		return ""
+	}
+	num, _, _ := strings.Cut(rest, "-")
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return ""
+	}
+	return testMarker(n)
+}
+
 // recordPR writes into the state that number's queue pull request is pr.
 func recordPR(t *testing.T, path string, number, pr int) {
 	t.Helper()
@@ -50,13 +89,15 @@ func recordPR(t *testing.T, path string, number, pr int) {
 	}
 }
 
-// landCalls records the update and merge seams. update and merge, when
-// set, answer them; otherwise they succeed.
+// landCalls records the update and merge seams. update, merge, behind and
+// files, when set, answer them; otherwise they succeed.
 type landCalls struct {
 	mu     sync.Mutex
 	calls  []string
 	update func(n int) error
 	merge  func(n int) error
+	behind func(repo, base, head string) (bool, error)
+	files  func(repo string, n int) ([]string, error)
 }
 
 func (l *landCalls) env(e queueEnv) queueEnv {
@@ -74,6 +115,15 @@ func (l *landCalls) env(e queueEnv) queueEnv {
 			return l.merge(n)
 		}
 		return nil
+	}
+	e.behindBase = func(repo, base, head string) (bool, error) {
+		if l.behind != nil {
+			return l.behind(repo, base, head)
+		}
+		return false, nil
+	}
+	if l.files != nil {
+		e.prFiles = l.files
 	}
 	return e
 }
@@ -125,7 +175,7 @@ func seedState(t *testing.T, path string, started []int, runs map[int]int) {
 	st := newQueueState()
 	for _, n := range started {
 		k := queuedIssue{Repo: "acme/widgets", Issue: ghx.Issue{Number: n}}.key()
-		st.Started[k] = startedIssue{Repo: "acme/widgets", Number: n, At: time.Now().Add(-48 * time.Hour), CreatedAt: "2026-01-01T00:00:00Z"}
+		st.Started[k] = startedIssue{Repo: "acme/widgets", Number: n, At: time.Now().Add(-48 * time.Hour), CreatedAt: "2026-01-01T00:00:00Z", Marker: testMarker(n)}
 		if r, ok := runs[n]; ok {
 			st.Fixes[k] = &fixRecord{PR: 10 + n, Runs: r, Last: time.Now().Add(-time.Hour)}
 		}
@@ -135,9 +185,19 @@ func seedState(t *testing.T, path string, started []int, runs map[int]int) {
 	}
 }
 
+// redPR is a red pull request the queue's run opened: by testViewer, with
+// the trailer line of the issue its branch names.
 func redPR(number int, branch string) ghx.OpenPR {
 	return ghx.OpenPR{Number: number, HeadRefName: branch, BaseRefName: "main", Mergeable: "MERGEABLE",
+		Author: ghx.User{Login: testViewer}, Body: "Fixes the thing.\n\n" + markerLine(markerFor(branch)),
 		Checks: []ghx.CheckRun{{Typename: "CheckRun", Name: "ci", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: "2026-01-01T00:00:00Z"}}}
+}
+
+func conflictingPR(number int, branch string) ghx.OpenPR {
+	pr := redPR(number, branch)
+	pr.Mergeable = "CONFLICTING"
+	pr.Checks = nil
+	return pr
 }
 
 func greenPR(number int, branch string) ghx.OpenPR {
@@ -190,6 +250,11 @@ func TestJudgePR(t *testing.T) {
 		{"conflicting", ghx.OpenPR{Mergeable: "CONFLICTING", BaseRefName: "main"}, prNeedsFix, "conflicts with main"},
 		{"a commit status in error", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{{Typename: "StatusContext", Context: "deploy", State: "ERROR"}}}, prNeedsFix, "red: deploy is ERROR"},
 		{"a pending commit status", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{{Typename: "StatusContext", Context: "deploy", State: "PENDING"}}}, prPending, ""},
+		{"a same-named check in another workflow does not hide a failure", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{
+			{Typename: "CheckRun", WorkflowName: "ci", Name: "test", Status: "COMPLETED", Conclusion: "FAILURE", StartedAt: "2026-01-01T00:00:00Z"},
+			{Typename: "CheckRun", WorkflowName: "nightly", Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS", StartedAt: "2026-01-02T00:00:00Z"}}}, prNeedsFix, "red: test is FAILURE"},
+		{"a queued rerun with a zero start is newer than a finished run", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{
+			run("ci", "COMPLETED", "FAILURE", "2026-01-01T00:00:00Z"), run("ci", "QUEUED", "", "0001-01-01T00:00:00Z")}}, prPending, ""},
 		{"cancelled is not red", ghx.OpenPR{Mergeable: "MERGEABLE", Checks: []ghx.CheckRun{run("ci", "COMPLETED", "CANCELLED", "x")}}, prGreen, ""},
 	} {
 		v, reason := judgePR(tc.pr)
@@ -233,9 +298,9 @@ func TestQueueFixesAConflictingQueuePR(t *testing.T) {
 	cfg := fixQueue(t, "unused")
 	seedState(t, cfg.State, []int{1}, nil)
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) { return nil, nil },
-		prs:  staticPRs(ghx.OpenPR{Number: 11, HeadRefName: "feature/1-bell", BaseRefName: "main", Mergeable: "CONFLICTING"}),
+		prs:  staticPRs(conflictingPR(11, "feature/1-bell")),
 		out:  &buf,
 	})
 	if err != nil || !strings.Contains(buf.String(), "would fix acme/widgets#1 PR #11: conflicts with main, try 1 of 2") {
@@ -251,7 +316,7 @@ func TestQueueDoesNotJudgeAPendingQueuePR(t *testing.T) {
 	unknown := redPR(12, "feature/2-horn")
 	unknown.Mergeable = "UNKNOWN"
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) { return nil, nil },
 		prs:  staticPRs(pending, unknown),
 		out:  &buf,
@@ -273,7 +338,7 @@ func TestQueueNeverTouchesAPROfAnIssueItDidNotStart(t *testing.T) {
 	early.CreatedAt = time.Now().Add(-72 * time.Hour).UTC().Format(time.RFC3339)
 	labels := &labelCalls{}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) { return nil, nil },
 		prs: staticPRs(redPR(12, "feature/2-mine"), redPR(110, "feature/10-also-mine"),
 			greenPR(13, "feature/3-horn"), redPR(23, "feature/3-later"), fork, early),
@@ -372,9 +437,17 @@ func TestQueueStateSurvivesARestart(t *testing.T) {
 	})
 	waitFor(t, "the start", func() bool { return len(readLines(t, log)) >= 1 })
 	first.stop(t)
+	// The agent ended its pull request's description with the start's
+	// trailer line.
+	st0, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr := redPR(15, "feature/5-issue-5")
+	pr.Body = markerLine(st0.Started["acme/widgets#5"].Marker)
 	// A new queue sees #5's pull request red, knows #5 is its own, and
 	// makes one fix run. Its long wait keeps it from judging that run.
-	red := staticPRs(redPR(15, "feature/5-issue-5"))
+	red := staticPRs(pr)
 	slow := cfg
 	slow.Wait = time.Minute
 	second := startQueue(t, slow, queueEnv{
@@ -412,7 +485,7 @@ func TestQueueStartsNoFixWhenThePRListingFails(t *testing.T) {
 	seedState(t, cfg.State, []int{1}, nil)
 	before := readFile(t, cfg.State)
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) { return nil, nil },
 		prs:  func(string) ([]ghx.OpenPR, error) { return nil, errors.New("HTTP 502") },
 		out:  &buf,
@@ -435,7 +508,7 @@ func TestQueueDryRunListsFixRunsFirstAndWritesNothing(t *testing.T) {
 	before := readFile(t, cfg.State)
 	labels := &labelCalls{}
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{
+	err := testDryQueue(context.Background(), cfg, queueEnv{
 		list: func(string, string) ([]ghx.Issue, error) {
 			return []ghx.Issue{openIssue(5, "2025-01-01T00:00:00Z")}, nil
 		},
@@ -470,7 +543,7 @@ func TestQueueWithoutFixChangesNothing(t *testing.T) {
 	green.MergeStateStatus = "CLEAN"
 	prs := staticPRs(redPR(11, "feature/1-bell"), green)
 	var buf bytes.Buffer
-	err := dryQueue(context.Background(), cfg, queueEnv{list: issues, prs: prs, out: &buf})
+	err := testDryQueue(context.Background(), cfg, queueEnv{list: issues, prs: prs, out: &buf})
 	got := buf.String()
 	if err != nil || strings.Contains(got, "fix") || strings.Contains(got, "merge") || !strings.Contains(got, "would start acme/widgets#5") ||
 		!strings.Contains(got, "acme/widgets#1 has an open pull request from feature/1-bell") {
@@ -495,7 +568,7 @@ func TestQueueRefusesAStateFileItCannotParse(t *testing.T) {
 	if err := os.WriteFile(cfg.State, []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := dryQueue(context.Background(), cfg, queueEnv{list: func(string, string) ([]ghx.Issue, error) { return nil, nil }, out: &bytes.Buffer{}})
+	err := testDryQueue(context.Background(), cfg, queueEnv{list: func(string, string) ([]ghx.Issue, error) { return nil, nil }, out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "fix:") {
 		t.Fatalf("err = %v", err)
 	}
@@ -508,8 +581,12 @@ func TestQueueFixConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Fix == nil || cfg.Fix.Tries != 2 || cfg.Fix.BlockLabel != "blocked" || cfg.Fix.Prompt != defaultFixPrompt || !cfg.Fix.Land ||
+		cfg.Fix.forbidOff || len(cfg.Fix.Forbid) != len(defaultForbid) ||
 		!filepath.IsAbs(cfg.State) || filepath.Base(cfg.State) != "q-state.json" {
 		t.Fatalf("fix = %+v, state %q", cfg.Fix, cfg.State)
+	}
+	if !strings.HasPrefix(cfg.Fix.Prompt, "Never take a shortcut.") || !strings.Contains(cfg.Fix.Prompt, "Never clear a ratchet") {
+		t.Fatalf("prompt = %q", cfg.Fix.Prompt)
 	}
 	off, err := loadTempConfig(t, `{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "land": false}, `+base+`}`)
 	if err != nil || off.Fix.Land {
@@ -519,15 +596,52 @@ func TestQueueFixConfig(t *testing.T) {
 	if err != nil || none.Fix != nil || none.State != "" {
 		t.Fatalf("no fix: %+v, %v", none, err)
 	}
+	offForbid, err := loadTempConfig(t, `{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": []}, `+base+`}`)
+	if err != nil || !offForbid.Fix.forbidOff || offForbid.Fix.Forbid != nil {
+		t.Fatalf("forbid off: %+v, %v", offForbid.Fix, err)
+	}
 	for _, tc := range []struct{ body, want string }{
 		{`{"fix": {"command": ["fixer", "{prompt}"]}, ` + base + `}`, "state"},
 		{`{"state": "s", "fix": {"command": ["fixer"]}, ` + base + `}`, "{prompt}"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "tries": 6}, ` + base + `}`, "tries"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "tries": 0}, ` + base + `}`, "tries"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "blockLabel": "a,b"}, ` + base + `}`, "comma"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": ["("]}, ` + base + `}`, "forbid"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": [""]}, ` + base + `}`, "empty pattern"},
 	} {
 		if _, err := loadTempConfig(t, tc.body); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", tc.body, err, tc.want)
 		}
 	}
+}
+
+// Two queues on one state file would start the same issue twice and lose
+// each other's records. The second one refuses, with the fix, and starts
+// nothing; once the first has stopped, a new one runs.
+func TestQueueRefusesAStateFileAnotherQueueHolds(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	release, err := lockQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := &countCalls{}
+	env := queueEnv{list: func(repo, _ string) ([]ghx.Issue, error) { listed.add(repo); return nil, nil }, out: &bytes.Buffer{}}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = runQueue(ctx, cfg, env)
+	if err == nil || !strings.Contains(err.Error(), "is in use") || !strings.Contains(err.Error(), "fix:") {
+		t.Fatalf("err = %v, want a refusal with the fix", err)
+	}
+	if listed.get("acme/widgets") != 0 {
+		t.Fatal("the second queue listed issues")
+	}
+	release()
+	s := startQueue(t, cfg, env)
+	waitFor(t, "a round", func() bool { return listed.get("acme/widgets") >= 1 })
+	s.stop(t)
+}
+
+// testDryQueue is dryQueue with ownerSeams filled.
+func testDryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
+	return dryQueue(ctx, cfg, ownerSeams(env))
 }
