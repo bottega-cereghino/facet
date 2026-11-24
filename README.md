@@ -871,6 +871,11 @@ than a conflict keeps the listing and waits like a refused merge: `wait`,
 then twice that, doubling up to an hour, logged once per step; a new head
 starts that count again. A merge GitHub refuses waits as above.
 
+After a successful merge, the queue runs `facet reap --path <workspace>
+--yes` for that issue. Reap's normal checks still apply; if it refuses, the
+queue logs the reason and leaves the workspace for manual or nightly reap.
+Reaping runs no agent or gate and takes no slot.
+
 **Serialize pull requests that touch a shared file.** Optional top-level
 `serialize` takes `paths`, a list of globs (for example `**/*baseline*`,
 `**/config.json`, `**/*.lock`, `package-lock.json`, `go.sum`). Omitted means
