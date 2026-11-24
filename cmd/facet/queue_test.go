@@ -96,6 +96,9 @@ func TestQueueExampleConfigLoads(t *testing.T) {
 	if cfg.Cap == nil || cfg.Cap.Num != 1 || cfg.Cap.Den != 3 || len(cfg.Cap.Passes) != 2 || cfg.Cap.Passes[1] != "{repo}" {
 		t.Fatalf("example cap = %+v", cfg.Cap)
 	}
+	if cfg.Disk == nil || cfg.Disk.MinFreeGB != 20 || cfg.Disk.Path != "" || cfg.Disk.MaxWorkspaces == nil || *cfg.Disk.MaxWorkspaces != 40 {
+		t.Fatalf("example disk = %+v", cfg.Disk)
+	}
 	if !cfg.Cap.matches([]string{"Standards"}) || cfg.Cap.matches([]string{"standards-extra"}) || cfg.Cap.matches([]string{"science"}) {
 		t.Fatalf("example cap labels = %v", cfg.Cap.Labels)
 	}

@@ -61,6 +61,9 @@ type queueConfig struct {
 	Cap *queueCap
 	// Heartbeat is the heartbeat file's path; empty means none.
 	Heartbeat string
+	// Disk is nil when the config has no disk block. The queue then does
+	// not look at free space or at how many issue workspaces exist.
+	Disk *queueDisk
 }
 
 // queueAgent is one command, chosen when the issue carries Label.
@@ -135,6 +138,7 @@ type queueFile struct {
 	Serialize  *queueSerializeFile `json:"serialize"`
 	Cap        *queueCapFile       `json:"cap"`
 	Heartbeat  string              `json:"heartbeat"`
+	Disk       *queueDiskFile      `json:"disk"`
 }
 
 func loadQueueConfig(path string) (queueConfig, error) {
@@ -146,7 +150,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, decisions, lanes, serialize, cap, heartbeat", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, decisions, lanes, serialize, cap, heartbeat, disk", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -239,6 +243,10 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 			p = filepath.Join(filepath.Dir(configPath), p)
 		}
 		cfg.Heartbeat = p
+	}
+	cfg.Disk, err = normalizeDisk(configPath, f.Disk)
+	if err != nil {
+		return queueConfig{}, err
 	}
 	if err := cfg.validate(); err != nil {
 		return queueConfig{}, err
