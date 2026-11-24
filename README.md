@@ -809,7 +809,10 @@ the same head the queue stops trying that pull request, adds
 `fix.blockLabel`, runs `fix.notify` with the refusal text, and logs it. At
 most one pull request per repository is merged per round. Neither step runs
 an agent or the gate, and neither takes a slot. An update of a pull request
-that is behind is once per listing. A merge GitHub refuses waits as above.
+that is behind is once per listing. An update that fails for a reason other
+than a conflict keeps the listing and waits like a refused merge: `wait`,
+then twice that, doubling up to an hour, logged once per step; a new head
+starts that count again. A merge GitHub refuses waits as above.
 
 **Serialize pull requests that touch a shared file.** Optional top-level
 `serialize` takes `paths`, a list of globs (for example `**/*baseline*`,
@@ -853,7 +856,7 @@ writes no state. It runs the gate as for a start.
 `TestQueueStartsNoFixWhenThePRListingFails`,
 `TestQueueListsARepositoryOnlyWhenItsIssuesCanAct`,
 `TestQueueUpdatesAGreenPRBehindItsBaseWithoutAnAgent`,
-`TestQueueFixesAPRWhoseUpdateConflicts`, `TestQueueMergesAGreenUpToDatePR`,
+`TestQueueFixesAPRWhoseUpdateConflicts`, `TestQueueBacksOffAFailedUpdate`, `TestQueueMergesAGreenUpToDatePR`,
 `TestQueueTriesARefusedMergeOncePerListing`,
 `TestQueueRetriesARefusedMergeAfterTheWait`,
 `TestQueueStopsMergingAfterFiveRefusals`,
