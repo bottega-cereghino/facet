@@ -337,18 +337,26 @@ func roundDays(d time.Duration) string {
 // Prune deletes what InspectPrune found, and refuses a held state. A directory
 // that has turned into something else since it was found (a symlink, a file)
 // is left alone: removing it would follow nothing, but it is no longer what
-// was shown.
-func Prune(s *PruneState) error {
+// was shown. It returns the directories it removed, so a caller logs only
+// what is gone: on an error the others found may still be there, and one that
+// vanished or changed since it was found was not removed by this call.
+func Prune(s *PruneState) ([]Regen, error) {
 	if len(s.Held) > 0 {
-		return fmt.Errorf("%s is held (%s); prune refuses it", s.Dir, strings.Join(s.Held, "; "))
+		return nil, fmt.Errorf("%s is held (%s); prune refuses it", s.Dir, strings.Join(s.Held, "; "))
 	}
+	var removed []Regen
 	var errs []error
 	for _, r := range s.Found {
-		if err := removeInClone(s.Dir, r.Clone, r.Rel); err != nil {
+		gone, err := removeInClone(s.Dir, r.Clone, r.Rel)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s/%s: %w", r.Clone, r.Rel, err))
+			continue
+		}
+		if gone {
+			removed = append(removed, r)
 		}
 	}
-	return errors.Join(errs...)
+	return removed, errors.Join(errs...)
 }
 
 // removeInClone deletes rel inside clone, after checking that no step of the
@@ -357,32 +365,36 @@ func Prune(s *PruneState) error {
 // the delete are not one step, so a swap in the instant between them is not
 // caught; os.Root would close that gap, but its Windows flaw (GO-2026-6604) is
 // fixed only in a Go newer than this module's. A path that is no longer a
-// directory is left alone, since it is not what was listed.
-func removeInClone(dir, clone, rel string) error {
+// directory is left alone, since it is not what was listed, and reported as
+// not removed.
+func removeInClone(dir, clone, rel string) (bool, error) {
 	// The workspace and the clone are steps too: either swapped for a link
 	// after the listing would be followed.
 	p := dir
 	if fi, err := os.Lstat(p); err != nil {
-		return nil
+		return false, nil
 	} else if fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is now a symlink; left alone", p)
+		return false, fmt.Errorf("%s is now a symlink; left alone", p)
 	}
 	steps := append(strings.Split(clone, "/"), strings.Split(rel, "/")...)
 	for _, seg := range steps {
 		if seg == "" || seg == "." || seg == ".." {
-			return fmt.Errorf("refusing the path %q in %q", rel, clone)
+			return false, fmt.Errorf("refusing the path %q in %q", rel, clone)
 		}
 		p = filepath.Join(p, seg)
 		fi, err := os.Lstat(p)
 		if err != nil {
-			return nil
+			return false, nil
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s is now a symlink; left alone", p)
+			return false, fmt.Errorf("%s is now a symlink; left alone", p)
 		}
 		if !fi.IsDir() {
-			return nil
+			return false, nil
 		}
 	}
-	return os.RemoveAll(p)
+	if err := os.RemoveAll(p); err != nil {
+		return false, err
+	}
+	return true, nil
 }

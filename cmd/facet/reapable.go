@@ -145,7 +145,7 @@ func reapBatch(out io.Writer, dirs []string, yes, dryRun bool, narrow func(*work
 			errs = append(errs, fmt.Errorf("%s: %w", reapName(again), err))
 			continue
 		}
-		_, _ = fmt.Fprintf(out, "removed %s\n", again.Dir)
+		_, _ = fmt.Fprintf(out, "removed %s (%s)\n", again.Dir, humanBytes(again.SizeBytes))
 		freed += again.SizeBytes
 		if again.Enclosing != "" {
 			enclosing[again.Enclosing] = true

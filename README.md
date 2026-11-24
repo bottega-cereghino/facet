@@ -323,6 +323,16 @@ each repository once, however many worktree clones share it. `--dry-run`
 prints the list, worktrees included, and stops there; `facet ls --size` shows
 the workspaces without deleting.
 
+For a run nobody watches (a session, a scheduled job), `facet reap --safe`
+is `--reapable --yes`: the same sweep of workspaces and of the worktrees under
+the projects root, with no prompt and no read from stdin. It deletes only what
+`--reapable` would, and every hold above keeps a workspace. It refuses
+`--force`, a workspace name and `--path`, so no flag widens it. Each deletion
+is printed as `removed <path> (<size>)`, followed by the total freed; a held
+workspace is listed with what holds it, and is not an error. `--closed`
+narrows it as it narrows `--reapable`, and `--safe --dry-run` lists without
+deleting.
+
 `facet reap --reapable --closed` is narrower, for a run nobody watches: it
 takes only an issue workspace whose branch has a merged or closed pull request
 and no open one, and reap would still delete it now. A pull request is found by
@@ -377,6 +387,14 @@ alone (`[tool.ruff]`, `[flake8]`) still count for that tool's cache. Without
 such a file the directory is kept, and the listing says so on a `kept:` line.
 `.terraform` is never named: it keeps the selected `terraform workspace`, and
 a fresh `init` would quietly plan against `default`.
+
+`facet prune --safe` is `--apply --yes`, for a run nobody watches: it asks
+nothing, and every hold above still keeps a workspace. It refuses an
+`--idle-days` below the default of 14, which would take a workspace in use; a
+longer window is accepted. Each directory deleted is printed as
+`removed <path> (<size>)`, by its full path, followed by the total freed; a
+directory that could not be deleted is reported as an error and not listed as
+removed. `facet prune` alone lists what it would delete.
 
 ## The issue graph was removed
 
@@ -1262,6 +1280,13 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   just before deleting, and checks that no step of the path is a symlink, so a
   parent swapped for one cannot send it outside the clone
   (`TestPruneChecksAgainBeforeDeleting`, `TestPruneDoesNotFollowASwappedParent`).
+- **`prune --safe` never shortens the idle window**: it refuses an
+  `--idle-days` below the default, so a workspace used today keeps its
+  dependencies (`TestPruneSafeRefusesAShorterIdleWindow`,
+  `TestPruneSafeCommandAppliesWithoutPrompt`). What `prune` prints as removed
+  is what it removed, by full path, even when another directory failed
+  (`TestPruneLogsWhatItRemovedWhenAnotherFails`,
+  `TestPruneReturnsOnlyWhatItRemoved`).
 - **`reap` deletes a whole workspace or worktree, never a folder inside one.**
   Pointed at a clone or a folder within a workspace, or at a folder inside a
   worktree, it refuses and names what to reap instead; a worktree git will not
@@ -1303,6 +1328,16 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   workspace again right before deleting it (`TestReapReapableChecksAgainBeforeDeleting`).
   It refuses `--force`, and with `--dry-run` it deletes nothing
   (`TestReapReapableDryRunDeletesNothing`).
+- **`reap --safe` is `reap --reapable` without the prompt, and nothing
+  widens it.** Every hold keeps a workspace through it: the only copy of a
+  file, an unpushed commit, an uncommitted change, a stash, an open pull
+  request or a failed lookup, a remote it cannot fetch, a process or a loaded
+  launchd job running from it, or launchd jobs it cannot read
+  (`TestReapSafeKeepsEveryHeldWorkspace`). It refuses `--force`, a name and
+  `--path` before reading the root (`TestReapSafeRejectsNamedAndForcedTargets`),
+  never reads stdin, and logs each path it removed with its size
+  (`TestReapSafeCommandReapsOnlyWhatIsReapableWithoutPrompt`,
+  `TestReapSafeDryRunDeletesNothing`).
 - **`reap --reapable --closed` takes only issue workspaces whose pull request
   is merged or closed**, and keeps the rest with their reason, a failed lookup
   among them (`TestReapClosedReapsOnlyMergedOrClosedPullRequests`,
