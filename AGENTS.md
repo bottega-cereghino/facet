@@ -30,7 +30,7 @@ Code moves to `internal/` when a second caller needs it, not before.
 
 | Command | What |
 | --- | --- |
-| `make check` | fmt, vet, lint, shellcheck, test, tidy, vuln: every gate CI's Linux job runs except `make build`. Run it before every push |
+| `make check` | fmt, vet, lint, shellcheck, shfmt, test, tidy, vuln: every gate CI's Linux job runs except `make build`. Run it before every push |
 | `make test` | `go test ./... -race -shuffle=on -cover`; coverage is printed, never a target |
 | `make health` | functions over cognitive complexity 15 and Go files over 400 lines. A budget the review reads, never a gate |
 | `make fmt-fix` | `gofmt -s -w .` |
@@ -42,7 +42,9 @@ golangci-lint and govulncheck are pinned in the Makefile and run with
 `go run`. Change a version there and nowhere else. shellcheck is no Go
 program: CI installs the release `SHELLCHECK_VERSION` in `ci.yml` names,
 checked by its SHA-256, and locally the one on PATH runs
-(`brew install shellcheck`).
+(`brew install shellcheck`). shfmt is the same: CI installs the
+`SHFMT_VERSION` release, checked by its SHA-256, and locally the one on PATH
+runs (`brew install shfmt`).
 
 ## CI
 
