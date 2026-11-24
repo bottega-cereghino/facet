@@ -1459,11 +1459,18 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   (`TestReapReapableLeavesAWorkspaceALaunchdJobRunsFrom`). A `launchctl list`
   that fails holds every workspace, since no job can be ruled out; only a
   launchctl that is not installed (off macOS) reads as no jobs
-  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`). A loaded job whose plist
-  facet cannot read, or whose `launchctl print` fails, holds every workspace
-  with the label and fix to show what to check
-  (`TestUnderFailsWhenLoadedPlistCannotBeRead`,
-  `TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob`). An unreadable plist
+  (`TestReapHoldsAWorkspaceWhenLaunchctlListFails`). A loaded job is read
+  from its plist, or, when that file is gone or cannot be read, from
+  `launchctl print` (the `gui/<uid>` domain, then `user/<uid>`, with the label
+  as `launchctl list` prints it): its program, arguments, working directory,
+  standard paths, environment and watched paths are checked as a plist's are
+  (`TestUnderReadsALoadedJobFromLaunchctlPrintWhenItsPlistIsGone`,
+  `TestUnderDoesNotHoldWhenTheGoneJobRunsElsewhere`). It holds every workspace,
+  with the label and fix to show what to check, only when neither can be read
+  (`TestUnderHoldsWhenBothThePlistAndLaunchctlPrintFail`,
+  `TestUnderFailsWhenLoadedPlistCannotBeRead`,
+  `TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob`). No job is skipped or
+  excluded from the check. An unreadable plist
   for an unloaded job is skipped (`TestUnderSkipsAnUnreadableUnloadedPlist`).
 - **An issue's body stays quoted in the `CLAUDE.md` spawn writes.** Every line
   of it starts with `>`, whatever it holds, so it cannot pose as the file's own
