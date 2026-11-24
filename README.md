@@ -792,11 +792,13 @@ path above. One that is green and up to date is merged with the
 repository's own method, read from its settings (squash, merge or rebase,
 in that order of preference; squash where it is the only one allowed), and
 only at the head commit that was judged. A pull request is green for landing
-only when every required check passed. The queue reads those names from the
-base branch's rules and from classic branch protection. When that cannot be
-read, a conclusion other than success, neutral or skipped is not a pass, so
-a cancelled check is not landed. A skipped or missing required check is not
-a pass either. Required checks and branch rules are GitHub's to enforce: a
+only when every latest check passed: success, or neutral or skipped for a
+check the base branch does not require. A cancelled, stale or unset check is
+not a pass, required or not, and neither is a skipped or missing required
+check. The queue reads the required names from the base branch's rules and
+from classic branch protection. A branch with neither requires nothing, and
+every check is still held to that rule; when they cannot be read, no check is
+taken as required and the same rule applies. Required checks and branch rules are GitHub's to enforce: a
 merge GitHub refuses is never forced (no `--admin`). It is retried after
 `wait`, then after twice that, doubling up to an hour, and the refusal is
 logged once per step rather than once per tick. The count and the wait are
@@ -857,7 +859,8 @@ writes no state. It runs the gate as for a start.
 `TestQueueResetsAMergeRefusalWhenTheHeadChanges`,
 `TestQueueKeepsAMergeWaitAcrossARestart`,
 `TestQueueDoesNotLandACancelledRequiredCheck`,
-`TestQueueLandsWhenACancelledCheckIsNotRequired`,
+`TestQueueDoesNotLandACancelledCheckThatIsNotRequired`,
+`TestQueueDoesNotLandACancelledCheckWhenNothingIsRequired`,
 `TestQueueRefusesAFixThatSuppresses`,
 `TestQueueLandsNothingWithLandOff`, `TestQueueFixPromptNamesTheBase`,
 `TestQueueDryRunListsFixRunsFirstAndWritesNothing`,

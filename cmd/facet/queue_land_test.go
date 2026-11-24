@@ -299,22 +299,52 @@ func TestQueueDoesNotLandACancelledRequiredCheck(t *testing.T) {
 	}
 }
 
-func TestQueueLandsWhenACancelledCheckIsNotRequired(t *testing.T) {
+func TestQueueDoesNotLandACancelledCheckThatIsNotRequired(t *testing.T) {
 	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
 	seedState(t, cfg.State, []int{1}, nil)
 	pr := landPR(11, "feature/1-bell", "CLEAN")
 	pr.Checks = append(pr.Checks, ghx.CheckRun{Typename: "CheckRun", Name: "lint", Status: "COMPLETED", Conclusion: "CANCELLED", StartedAt: "2026-01-01T00:00:00Z"})
-	var merged atomic.Bool
-	land := &landCalls{merge: func(int) error { merged.Store(true); return nil }}
+	land := &landCalls{}
+	ticks := &countCalls{}
 	s := startQueue(t, cfg, land.env(queueEnv{
-		list: noIssues,
+		list: func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
 		prs:  staticPRs(pr),
 		requiredChecks: func(string, string) ([]string, bool, error) {
 			return []string{"ci"}, true, nil
 		},
 	}))
-	waitFor(t, "the merge", func() bool { return merged.Load() })
+	waitFor(t, "the refusal", func() bool {
+		return ticks.get("acme/widgets") >= 3 && strings.Contains(s.buf.String(), "not landing: lint is CANCELLED")
+	})
 	s.stop(t)
+	if len(land.list()) != 0 {
+		t.Fatalf("landed = %q", land.list())
+	}
+}
+
+// A branch with neither a ruleset nor classic protection requires nothing,
+// and that is known. A cancelled check there still does not land.
+func TestQueueDoesNotLandACancelledCheckWhenNothingIsRequired(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	pr := landPR(11, "feature/1-bell", "CLEAN")
+	pr.Checks[0].Conclusion = "CANCELLED"
+	land := &landCalls{}
+	ticks := &countCalls{}
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+		prs:  staticPRs(pr),
+		requiredChecks: func(string, string) ([]string, bool, error) {
+			return nil, true, nil
+		},
+	}))
+	waitFor(t, "the refusal", func() bool {
+		return ticks.get("acme/widgets") >= 3 && strings.Contains(s.buf.String(), "not landing: ci is CANCELLED")
+	})
+	s.stop(t)
+	if len(land.list()) != 0 {
+		t.Fatalf("landed = %q", land.list())
+	}
 }
 
 func TestLandableChecks(t *testing.T) {
@@ -342,6 +372,22 @@ func TestLandableChecks(t *testing.T) {
 	neutral := ghx.OpenPR{Checks: []ghx.CheckRun{run("ci", "SUCCESS"), run("extra", "NEUTRAL")}}
 	if ok, why := landableChecks(neutral, nil, false); !ok {
 		t.Fatalf("neutral = %v %q", ok, why)
+	}
+	if ok, why := landableChecks(neutral, []string{"ci"}, true); !ok {
+		t.Fatalf("neutral, not required = %v %q", ok, why)
+	}
+	for _, res := range []string{"CANCELLED", "STALE", "FAILURE", ""} {
+		other := ghx.OpenPR{Checks: []ghx.CheckRun{run("ci", "SUCCESS"), run("extra", res)}}
+		want := "extra is " + res
+		if res == "" {
+			want = "extra is UNSET"
+		}
+		if ok, why := landableChecks(other, []string{"ci"}, true); ok || why != want {
+			t.Fatalf("%s, not required = %v %q", res, ok, why)
+		}
+		if ok, why := landableChecks(other, nil, true); ok || why != want {
+			t.Fatalf("%s, nothing required = %v %q", res, ok, why)
+		}
 	}
 }
 

@@ -343,8 +343,10 @@ type checkRules struct {
 }
 
 // landBlockReason is why pr is not green enough to land. Empty means it is.
-// Required checks come from the base branch. When they cannot be read, a
-// conclusion other than success, neutral or skipped is not a pass.
+// Every latest check must have passed: success, or neutral or skipped for a
+// check the base branch does not require. Required checks come from the
+// base branch; when they cannot be read, every check is held to that rule
+// and none is known to be required.
 func (r *queueRunner) landBlockReason(repo string, pr ghx.OpenPR) string {
 	names, known := r.requiredNames(repo, pr.BaseRefName)
 	if ok, why := landableChecks(pr, names, known); !ok {
@@ -376,47 +378,45 @@ func (r *queueRunner) requiredNames(repo, branch string) ([]string, bool) {
 	return names, known
 }
 
-// landableChecks reports whether the checks allow a merge. When known is
-// false, neutral and skipped are the only conclusions besides success that
-// pass. When known is true, every required name must be a success: a
-// cancelled, skipped or missing required check does not pass.
+// landableChecks reports whether the checks allow a merge. Every latest
+// check must be complete and a success, or neutral or skipped when it is not
+// required: a cancelled, stale, failed or unset check never passes, whether
+// or not the base branch requires it. When known is true, every required
+// name must also be present and a success: a skipped or missing required
+// check does not pass. An empty required list that is known checks every
+// check the same way.
 func landableChecks(pr ghx.OpenPR, required []string, known bool) (bool, string) {
 	latest := latestChecks(pr.Checks)
-	if !known {
-		for _, c := range latest {
-			if checkPending(c) {
-				return false, checkName(c) + " is pending"
-			}
-			switch strings.ToUpper(checkResult(c)) {
-			case "SUCCESS", "NEUTRAL", "SKIPPED":
-			default:
-				res := strings.ToUpper(checkResult(c))
-				if res == "" {
-					res = "UNSET"
-				}
-				return false, fmt.Sprintf("%s is %s", checkName(c), res)
-			}
+	isRequired := map[string]bool{}
+	if known {
+		for _, name := range required {
+			isRequired[name] = true
 		}
-		return true, ""
 	}
 	byName := map[string]ghx.CheckRun{}
 	for _, c := range latest {
-		byName[checkName(c)] = c
-	}
-	for _, name := range required {
-		c, ok := byName[name]
-		if !ok {
-			return false, name + " is missing"
-		}
+		name := checkName(c)
+		byName[name] = c
 		if checkPending(c) {
 			return false, name + " is pending"
 		}
 		res := strings.ToUpper(checkResult(c))
-		if res != "SUCCESS" {
+		switch {
+		case res == "SUCCESS":
+		case (res == "NEUTRAL" || res == "SKIPPED") && !isRequired[name]:
+		default:
 			if res == "" {
 				res = "UNSET"
 			}
 			return false, fmt.Sprintf("%s is %s", name, res)
+		}
+	}
+	for _, name := range required {
+		if !known {
+			break
+		}
+		if _, ok := byName[name]; !ok {
+			return false, name + " is missing"
 		}
 	}
 	return true, ""
