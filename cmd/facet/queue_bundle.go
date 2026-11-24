@@ -69,10 +69,10 @@ func fillBundle(cfg queueConfig, primary queuedIssue, rest []queuedIssue, blocke
 }
 
 // runLimit is how many issues may follow the primary, including it.
-// A feature or research issue is one. A missing agent is one, and the
-// start reports that.
+// A feature or research issue is one, and so is a standards or CI issue
+// while cap is set. A missing agent is one, and the start reports that.
 func runLimit(cfg queueConfig, primary queuedIssue, rooms map[string]string) int {
-	if issueStaysAlone(primary.Issue.LabelNames()) {
+	if cfg.staysAlone(primary.Issue.LabelNames()) {
 		return 1
 	}
 	a, _, err := cfg.resolveAgent(primary.Issue.LabelNames(), rooms)
@@ -98,18 +98,18 @@ func bundleKey(cfg queueConfig, iss queuedIssue, rooms map[string]string) (strin
 }
 
 func joinsBundle(cfg queueConfig, primary, iss queuedIssue, who, effort string, rooms map[string]string) bool {
-	if iss.Repo != primary.Repo || issueStaysAlone(iss.Issue.LabelNames()) {
+	if iss.Repo != primary.Repo || cfg.staysAlone(iss.Issue.LabelNames()) {
 		return false
 	}
 	gotWho, gotEffort, ok := bundleKey(cfg, iss, rooms)
 	return ok && gotWho == who && strings.EqualFold(gotEffort, effort)
 }
 
-func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string, rooms map[string]string) ([]string, string, string, error) {
+func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string, rooms map[string]string) ([]string, string, string, string, error) {
 	iss := run[0]
 	a, from, err := r.cfg.resolveAgent(iss.Issue.LabelNames(), rooms)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", "", err
 	}
 	vars := queueVars(r.cfg, run, ws, effort)
 	// prompt is expanded first, then dropped in as a single value, so a title
@@ -125,7 +125,7 @@ func (r *queueRunner) argvFor(run []queuedIssue, ws, effort string, rooms map[st
 	if who == "" {
 		who = "default"
 	}
-	return out, who, from, nil
+	return out, who, from, commandSummary(a.Command, out), nil
 }
 
 // queueVars is the placeholders one run substitutes. {prompt} is added by

@@ -20,14 +20,26 @@
   },
   "state": "facet-queue.state.json",
   "heartbeat": "facet-queue.heartbeat.json",
+  "decisions": "queue-gate.jsonl",
   "fix": {
     "command": ["agent", "--effort", "{effort}", "{prompt}"],
-    "prompt": "Pull request #{pr} on {branch} in {repo} is {reason}. This is try {try}. The workspace is {workspace}. Make CI green on the same branch. If it conflicts, merge origin/{base} into it. Never weaken a test without the repository's own rule for that. Push, then exit.",
+    "prompt": "Never take a shortcut. Take the long road, or stop, say so in the report, and label the issue blocked. Pull request #{pr} on {branch} in {repo} is {reason}. This is try {try}. The workspace is {workspace}. Make CI green on the same branch. If it conflicts, merge origin/{base} into it. Never weaken a test without the repository's own rule for that. Never clear a ratchet, baseline or lint finding by suppressing it (a non-null assertion, an as cast, any, @ts-ignore, # type: ignore, eslint-disable, nolint, or a higher baseline or limit). If that is the only way, stop and say so. Push, then exit.",
     "gate": ["fix-gate", "{repo}", "{number}", "{pr}"],
     "tries": 2,
     "blockLabel": "blocked",
     "notify": ["notify", "{repo}#{number} PR #{pr}: {reason}"],
-    "land": true
+    "land": true,
+    "forbid": [
+      "(?:[[:alpha:]_][[:alnum:]_]*|\\]|\\))!(?:[^\\w=]|$)",
+      " as ",
+      "\\bas any\\b",
+      "@ts-ignore",
+      "@ts-expect-error",
+      "# type: ignore",
+      "eslint-disable",
+      "\\bnolint\\b",
+      "\\bnoqa\\b"
+    ]
   },
   "lanes": {
     "command": ["lanes", "--json"],
@@ -35,6 +47,11 @@
   },
   "serialize": {
     "paths": ["**/*baseline*", "**/config.json", "**/*.lock", "package-lock.json", "go.sum"]
+  },
+  "cap": {
+    "labels": ["standards", "ci"],
+    "share": [1, 3],
+    "passes": ["standards-check", "{repo}"]
   },
   "agents": [
     {

@@ -48,12 +48,17 @@ type queueConfig struct {
 	State string
 	// Fix is nil when the config has no fix block.
 	Fix *queueFix
+	// Decisions is the JSONL file where dispatch decisions are appended.
+	Decisions string
 	// Lanes is nil when the config has no lanes block. A lane: label is
 	// then always its own agent, as before.
 	Lanes *queueLanes
 	// Serialize is nil when the config has no serialize block. Landing then
 	// does not serialize on shared files.
 	Serialize *queueSerialize
+	// Cap is nil when the config has no cap block. Standards and CI issues
+	// then start like any other issue.
+	Cap *queueCap
 	// Heartbeat is the heartbeat file's path; empty means none.
 	Heartbeat string
 }
@@ -125,8 +130,10 @@ type queueFile struct {
 	Effort     queueEffortFile     `json:"effort"`
 	State      string              `json:"state"`
 	Fix        *queueFixFile       `json:"fix"`
+	Decisions  string              `json:"decisions"`
 	Lanes      *queueLanesFile     `json:"lanes"`
 	Serialize  *queueSerializeFile `json:"serialize"`
+	Cap        *queueCapFile       `json:"cap"`
 	Heartbeat  string              `json:"heartbeat"`
 }
 
@@ -139,7 +146,7 @@ func loadQueueConfig(path string) (queueConfig, error) {
 	dec.DisallowUnknownFields()
 	var raw queueFile
 	if err := dec.Decode(&raw); err != nil {
-		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, lanes, serialize, heartbeat", path, err)
+		return queueConfig{}, fmt.Errorf("queue config %s: %w\nfix: the fields are max, per_repo, hold, gate, wait, label, priorities, repos, prompt, agents, effort, state, fix, decisions, lanes, serialize, cap, heartbeat", path, err)
 	}
 	if dec.More() {
 		return queueConfig{}, fmt.Errorf("queue config %s: extra data after the JSON value\nfix: the file must be one JSON object", path)
@@ -203,6 +210,12 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	if err != nil {
 		return queueConfig{}, err
 	}
+	if p := strings.TrimSpace(f.Decisions); p != "" {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(filepath.Dir(configPath), p)
+		}
+		cfg.Decisions = p
+	}
 	cfg.Lanes, err = normalizeLanes(configPath, f.Lanes)
 	if err != nil {
 		return queueConfig{}, err
@@ -210,6 +223,16 @@ func (f queueFile) normalize(configPath string) (queueConfig, error) {
 	cfg.Serialize, err = normalizeSerialize(f.Serialize)
 	if err != nil {
 		return queueConfig{}, err
+	}
+	cfg.Cap, err = normalizeCap(f.Cap)
+	if err != nil {
+		return queueConfig{}, err
+	}
+	if cfg.Cap != nil && cfg.State == "" {
+		cfg.State = resolveQueueState(configPath, f.State)
+		if cfg.State == "" {
+			return queueConfig{}, fmt.Errorf("queue config: cap is set and state is not\nfix: set state to a file path, where the queue records the issues it started")
+		}
 	}
 	if p := strings.TrimSpace(f.Heartbeat); p != "" {
 		if !filepath.IsAbs(p) {

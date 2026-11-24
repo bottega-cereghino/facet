@@ -41,7 +41,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		run, err := r.candidate()
+		run, err := r.candidate(ctx)
 		if err != nil {
 			return err
 		}
@@ -103,9 +103,12 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 			r.inflight[iss.key()] = true
 		}
 		r.mu.Unlock()
+		// Count the run in the cap window, as a real start would. A dry run
+		// still writes nothing: saveState leaves the file alone.
+		r.recordStarted(run)
 		started++
 	}
-	run, err := r.candidate()
+	run, err := r.candidate(ctx)
 	if err != nil {
 		return err
 	}

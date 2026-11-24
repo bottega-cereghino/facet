@@ -52,14 +52,22 @@ func newQueueCmd() *cobra.Command {
 			"exists, it starts nothing and stops; an agent already running is left to finish.\n\n" +
 			"--dry-run prints the runs the next starts would take, up to max, and does\n" +
 			"not spawn a workspace or start an agent. It runs the gate, so a gate that\n" +
-			"would refuse a start is reported instead of a start.\n\n" +
+			"would refuse a start is reported instead of a start. It also applies cap,\n" +
+			"and prints each standards or CI issue the cap skipped.\n\n" +
+			"cap, when set, starts at most share[0] standards or CI issues in every\n" +
+			"share[1] issues the queue started in that repository, once passes exits\n" +
+			"0 for it. A skipped issue is logged once and the next issue is taken.\n" +
+			"Omitting passes, or any other exit, leaves the cap off. A fix run and a\n" +
+			"landing are never capped.\n\n" +
 			"With a fix block, each tick first looks for an open pull request of an\n" +
 			"issue this queue started (recorded in the state file) that is red or\n" +
 			"conflicting, and starts a fix run for it instead of new work. After\n" +
 			"fix.tries failed tries it labels the issue blocked, and leaves it. With\n" +
 			"fix.land (the default) a green one behind its base is updated by merging\n" +
 			"the base, and a green one up to date is merged, without an agent, at most\n" +
-			"one per repository per round. Optional serialize.paths serializes open\n" +
+			"one per repository per round. A merge GitHub refuses waits, doubling up\n" +
+			"to an hour, and stops after five. A fix that suppresses a finding is not\n" +
+			"landed. Optional serialize.paths serializes open\n" +
 			"queue pull requests touching a matching glob one at a time per repository.\n" +
 			"A person's own pull request, or a fork's, is never touched.\n\n" +
 			"It does not reap workspaces. A workspace already on disk for the issue is\n" +
@@ -79,6 +87,9 @@ func newQueueCmd() *cobra.Command {
 			env := realQueueEnv()
 			if dryRun {
 				return dryQueue(ctx, cfg, env)
+			}
+			if cfg.Decisions == "" {
+				cfg.Decisions = defaultQueueDecisionPath()
 			}
 			return runQueueWithLog(ctx, cfg, env, logPath)
 		},

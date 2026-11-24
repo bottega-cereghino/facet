@@ -36,6 +36,9 @@ func fakeTools(loaded ...string) Runner {
 	return func(name string, args ...string) ([]byte, error) {
 		switch name {
 		case "launchctl":
+			if args[0] == "print" {
+				return nil, nil
+			}
 			var b strings.Builder
 			b.WriteString("PID\tStatus\tLabel\n")
 			for i, l := range loaded {
@@ -49,6 +52,68 @@ func fakeTools(loaded ...string) Runner {
 			return os.ReadFile(args[len(args)-1])
 		}
 		return nil, errors.New("unexpected tool " + name)
+	}
+}
+
+func TestUnderFailsWhenLoadedPlistCannotBeRead(t *testing.T) {
+	agents, root := t.TempDir(), t.TempDir()
+	ws := filepath.Join(root, "svc")
+	label := "com.example.broken"
+	p := plist(t, agents, label, "<key>WorkingDirectory</key><string>"+ws+"</string>")
+	run := func(name string, args ...string) ([]byte, error) {
+		switch {
+		case name == "launchctl" && args[0] == "list":
+			return []byte("PID\tStatus\tLabel\n-\t0\t" + label + "\n"), nil
+		case name == "launchctl" && args[0] == "print":
+			return []byte("\tpath = " + p + "\n"), nil
+		case name == "plutil":
+			return nil, errors.New("invalid plist")
+		}
+		return nil, errors.New("unexpected tool call")
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: run}).Under(ws)
+	if err == nil || len(got) != 0 || !strings.Contains(err.Error(), label) || !strings.Contains(err.Error(), "unload it or fix the plist") {
+		t.Fatalf("Under = %v, %v; want a labeled error with a fix", got, err)
+	}
+}
+
+func TestUnderFailsWhenLaunchctlPrintFailsForLoadedJob(t *testing.T) {
+	agents := t.TempDir()
+	label := "com.example.loaded"
+	plist(t, agents, label, "<key>WorkingDirectory</key><string>/workspace</string>")
+	run := func(name string, args ...string) ([]byte, error) {
+		if name == "launchctl" && args[0] == "list" {
+			return []byte("PID\tStatus\tLabel\n-\t0\t" + label + "\n"), nil
+		}
+		if name == "launchctl" && args[0] == "print" {
+			return nil, errors.New("exit status 5")
+		}
+		if name == "plutil" {
+			return os.ReadFile(args[len(args)-1])
+		}
+		return nil, errors.New("unexpected tool call")
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: run}).Under("/workspace")
+	if err == nil || len(got) != 0 || !strings.Contains(err.Error(), label) || !strings.Contains(err.Error(), "unload it or fix its plist") {
+		t.Fatalf("Under = %v, %v; want a labeled error with a fix", got, err)
+	}
+}
+
+func TestUnderSkipsAnUnreadableUnloadedPlist(t *testing.T) {
+	agents := t.TempDir()
+	plist(t, agents, "com.example.unloaded", "<key>WorkingDirectory</key><string>/workspace</string>")
+	run := func(name string, _ ...string) ([]byte, error) {
+		if name == "launchctl" {
+			return []byte("PID\tStatus\tLabel\n"), nil
+		}
+		if name == "plutil" {
+			return nil, errors.New("invalid plist")
+		}
+		return nil, errors.New("unexpected tool call")
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: run}).Under("/workspace")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Under = %v, %v; want no holders or error", got, err)
 	}
 }
 
@@ -77,13 +142,52 @@ func TestUnderHoldsALoadedJobThatRunsFromTheDirectory(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, joined)
 		}
 	}
-	for _, not := range []string{"com.example.env", "com.example.sibling", "com.example.unloaded"} {
-		if strings.Contains(joined, not) {
-			t.Errorf("%s must not hold the workspace:\n%s", not, joined)
+	for _, want := range []string{"com.example.env", "com.example.sibling", "com.example.unloaded"} {
+		if want == "com.example.env" {
+			if !strings.Contains(joined, want+" runs from it (EnvironmentVariables ") {
+				t.Errorf("missing path-valued plist string %s:\n%s", want, joined)
+			}
+			continue
+		}
+		if strings.Contains(joined, want) {
+			t.Errorf("%s must not hold the workspace:\n%s", want, joined)
 		}
 	}
-	if len(got) != 3 {
-		t.Errorf("got %d holders, want 3:\n%s", len(got), joined)
+	if len(got) != 4 {
+		t.Errorf("got %d holders, want 4:\n%s", len(got), joined)
+	}
+}
+
+func TestUnderHoldsJobsThatNameTheDirectoryInAnyStringValue(t *testing.T) {
+	agents, root := t.TempDir(), t.TempDir()
+	ws := filepath.Join(root, "svc")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ label, body, key string }{
+		{"shell", "<key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string><string>cd " + ws + " &amp;&amp; ./run</string></array>", "ProgramArguments"},
+		{"config", "<key>ProgramArguments</key><array><string>/bin/app</string><string>--config=" + filepath.Join(ws, "app.yaml") + "</string></array>", "ProgramArguments"},
+		{"stdout", "<key>StandardOutPath</key><string>" + filepath.Join(ws, "out.log") + "</string>", "StandardOutPath"},
+		{"stderr", "<key>StandardErrorPath</key><string>" + filepath.Join(ws, "err.log") + "</string>", "StandardErrorPath"},
+		{"watch", "<key>WatchPaths</key><array><string>" + filepath.Join(ws, "watch") + "</string></array>", "WatchPaths"},
+		{"queue", "<key>QueueDirectories</key><array><string>" + filepath.Join(ws, "queue") + "</string></array>", "QueueDirectories"},
+	} {
+		plist(t, agents, "com.example."+tc.label, tc.body)
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: fakeTools(
+		"com.example.shell", "com.example.config", "com.example.stdout", "com.example.stderr", "com.example.watch", "com.example.queue",
+	)}).Under(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(got, "\n")
+	for _, tc := range []struct{ label, key string }{
+		{"shell", "ProgramArguments"}, {"config", "ProgramArguments"}, {"stdout", "StandardOutPath"},
+		{"stderr", "StandardErrorPath"}, {"watch", "WatchPaths"}, {"queue", "QueueDirectories"},
+	} {
+		if !strings.Contains(joined, "com.example."+tc.label+" runs from it ("+tc.key+" ") {
+			t.Errorf("missing %s from %s in:\n%s", tc.key, tc.label, joined)
+		}
 	}
 }
 
@@ -250,5 +354,34 @@ func TestUnderFindsAJobLoadedFromAPlistElsewhere(t *testing.T) {
 	}
 	if len(asked) != 1 {
 		t.Errorf("asked launchctl print about %v; want only com.example.away", asked)
+	}
+}
+
+func TestUnderPrefersThePlistLaunchctlReportsOverAStaleCopy(t *testing.T) {
+	agents, source, root := t.TempDir(), t.TempDir(), t.TempDir()
+	ws := filepath.Join(root, "svc")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	label := "com.example.same"
+	plist(t, agents, label, "<key>Program</key><string>/usr/bin/false</string>")
+	loadedFrom := plist(t, source, label, "<key>Program</key><string>"+filepath.Join(ws, "run")+"</string>")
+	run := func(name string, args ...string) ([]byte, error) {
+		switch {
+		case name == "launchctl" && args[0] == "list":
+			return []byte("PID\tStatus\tLabel\n-\t0\t" + label + "\n"), nil
+		case name == "launchctl" && args[0] == "print":
+			return []byte("gui/501/" + label + " = {\n\tpath = " + loadedFrom + "\n}\n"), nil
+		case name == "plutil":
+			return os.ReadFile(args[len(args)-1])
+		}
+		return nil, errors.New("unexpected tool " + name)
+	}
+	got, err := (&Jobs{Dirs: []string{agents}, Run: run}).Under(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.Contains(got[0], loadedFrom) || strings.Contains(strings.Join(got, "\n"), agents) {
+		t.Fatalf("Under = %v; want only the job from %s", got, loadedFrom)
 	}
 }
