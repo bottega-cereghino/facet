@@ -33,7 +33,7 @@ func TestRemoveInCloneRefusesASwappedCloneOrWorkspace(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := removeInClone(ws, "c", "node_modules"); err == nil {
+			if _, err := removeInClone(ws, "c", "node_modules"); err == nil {
 				t.Error("a symlinked " + swap + " was followed")
 			}
 			if _, err := os.Stat(victim); err != nil {
