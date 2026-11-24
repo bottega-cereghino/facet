@@ -727,6 +727,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	err = r.env.run(ctx, ws, argv)
 	if err == nil {
 		r.logf("queue: %s#%d agent exited, bundle %d", iss.Repo, iss.Issue.Number, len(run))
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitOK, "exit 0")
 		r.deferAll(run, r.markDone)
 		return
 	}
@@ -737,6 +738,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		r.logf("queue: %s#%d agent exited: %v, bundle %d", iss.Repo, iss.Issue.Number, err, len(run))
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitFail, firstErrorLine(err.Error()))
 		r.deferAll(run, r.markDone)
 		return
 	}

@@ -17,6 +17,16 @@ const (
 	maxDecisionLineBytes      = 1024 * 1024
 )
 
+// Decisions the report counts. The others (start, skip, fix_start, held,
+// released) are spelled where they are written.
+const (
+	decisionExitOK   = "exit_ok"
+	decisionExitFail = "exit_fail"
+	decisionLanded   = "landed"
+	decisionBlocked  = "blocked"
+	decisionError    = "error"
+)
+
 // queueDecision is one JSONL record written to the shared dispatch decision log.
 // Every field is always serialized so lines match the shape written by gate scripts.
 type queueDecision struct {
