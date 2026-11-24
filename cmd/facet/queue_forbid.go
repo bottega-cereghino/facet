@@ -93,7 +93,7 @@ var tsExt = map[string]bool{".ts": true, ".tsx": true, ".mts": true, ".cts": tru
 var (
 	moduleLine  = regexp.MustCompile(`^\s*(?:import\b|export\s+(?:type\s+)?[{*])`)
 	stringLit   = regexp.MustCompile("\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`")
-	blockOpener = regexp.MustCompile(`^\s*(?:import|export)\b[^;]*\{[^}]*$`)
+	blockOpener = regexp.MustCompile(`^\s*(?:import\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?|export\s+(?:type\s+)?)\{[^}]*$`)
 )
 
 // defaultForbidHit is forbidHit for the default list. Casts are looked for

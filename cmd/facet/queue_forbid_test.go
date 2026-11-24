@@ -30,6 +30,10 @@ func TestForbidHitOnAddedLines(t *testing.T) {
 		return []ghx.DiffFile{{Name: name, Patch: "@@ -1 +1 @@\n-x\n+" + line + "\n"}}
 	}
 	multi := []ghx.DiffFile{{Name: "a.ts", Patch: "@@ -1 +1 @@\n-x\n+import {\n+  strings as stringsFor,\n+} from './s'\n+const y = z as Q\n"}}
+	// body opens a brace on an export line that is not an import or export list.
+	body := func(opener string) []ghx.DiffFile {
+		return []ghx.DiffFile{{Name: "a.ts", Patch: "@@ -1 +1 @@\n-x\n+" + opener + "\n+  const y = z as Q\n+}\n"}}
+	}
 	for _, tc := range []struct {
 		name    string
 		files   []ghx.DiffFile
@@ -43,6 +47,11 @@ func TestForbidHitOnAddedLines(t *testing.T) {
 		{"bang after a bracket or a paren", call, defaultForbid[0], "a.ts"},
 		{"import alias", one("a.ts", "import { strings as stringsFor } from './s'"), "", ""},
 		{"multi-line import alias, then a cast", multi, " as ", "a.ts"},
+		{"cast in an exported function", body("export function f(z: unknown) {"), " as ", "a.ts"},
+		{"cast in an exported class", body("export class A {"), " as ", "a.ts"},
+		{"cast in an exported object", body("export const o = {"), " as ", "a.ts"},
+		{"cast in an exported type", body("export type T = {"), " as ", "a.ts"},
+		{"multi-line type re-export", one("a.ts", "export type {"), "", ""},
 		{"re-export alias", one("a.ts", "export { a as b } from './a'"), "", ""},
 		{"python import as", one("a.py", "import numpy as np"), "", ""},
 		{"python with as", one("a.py", "with open(p) as f:"), "", ""},
