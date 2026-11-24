@@ -10,6 +10,7 @@ import (
 
 	"github.com/bottega-cereghino/facet/internal/config"
 	"github.com/bottega-cereghino/facet/internal/gitx"
+	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
@@ -112,10 +113,15 @@ func TestLsRootSizeSaysWhatReapWouldDo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedRoots, savedGit := roots, git
-	defer func() { roots, git = savedRoots, savedGit }()
+	savedRoots, savedGit, savedJobs := roots, git, jobs
+	defer func() { roots, git, jobs = savedRoots, savedGit, savedJobs }()
 	roots = config.Roots{Workspaces: root}
 	git = gitx.Git{}
+	// No loaded jobs: the test must not read this machine's launchd, where a
+	// job whose plist is gone makes reap hold every workspace.
+	jobs = &launchd.Jobs{Dirs: []string{t.TempDir()}, Run: func(string, ...string) ([]byte, error) {
+		return []byte("PID\tStatus\tLabel\n"), nil
+	}}
 
 	var out bytes.Buffer
 	dirs := []string{filepath.Join(root, "empty"), filepath.Join(root, "notes")}
