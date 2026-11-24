@@ -40,6 +40,13 @@ anything else would import. Giving it its own package would move the size proble
 rather than solve it. **Promote code to `internal/` when a second caller needs it,
 not in anticipation of one.**
 
+`internal/routing` owns the rules and data model that decide repository
+selection. It must not depend on UI, GitHub, storage or I/O packages. The
+`architecture` check enforces that direct-import boundary; the current imports
+of `os` and `internal/ghx` are recorded in `known-violations.json` and must be
+removed from that list as the imports go away. Go rejects import cycles while
+loading the package graph, and the same check makes that part of `make check`.
+
 ### Where shared helpers live
 
 When the same idea is written twice, it gets one definition and one owner. Where
@@ -189,6 +196,7 @@ cannot drift. Run it before you push; that is the whole contract.
 | `make fmt` | `gofmt -s -l` | free, and ends formatting arguments |
 | `make vet` | `go vet` | the standard correctness net |
 | `make lint` | golangci-lint, pinned | see `.golangci.yml` for the set |
+| `make architecture` | Go package graph and repository baselines | import cycles, the routing boundary and source-file count ratchets |
 | `make test` | `go test -race -shuffle=on` | the suite drives real git repositories and a real tmux server; `-shuffle` catches tests that secretly depend on each other |
 | `make tidy` | `go mod tidy -diff` | go.mod matches the imports |
 | `make vuln` | `govulncheck`, pinned | known vulnerabilities in what we actually call |

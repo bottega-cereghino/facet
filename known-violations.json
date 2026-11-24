@@ -1,0 +1,30 @@
+{
+  "core": "github.com/bottega-cereghino/facet/internal/routing",
+  "forbiddenCoreImports": [
+    "database/sql",
+    "io",
+    "io/fs",
+    "net/http",
+    "os",
+    "os/exec",
+    "syscall",
+    "golang.org/x/sys/unix",
+    "github.com/bottega-cereghino/facet/cmd/facet",
+    "github.com/bottega-cereghino/facet/internal/claudex",
+    "github.com/bottega-cereghino/facet/internal/config",
+    "github.com/bottega-cereghino/facet/internal/fslink",
+    "github.com/bottega-cereghino/facet/internal/ghx",
+    "github.com/bottega-cereghino/facet/internal/gitx",
+    "github.com/bottega-cereghino/facet/internal/knowledge",
+    "github.com/bottega-cereghino/facet/internal/launchd",
+    "github.com/bottega-cereghino/facet/internal/manifest",
+    "github.com/bottega-cereghino/facet/internal/mirror",
+    "github.com/bottega-cereghino/facet/internal/mux",
+    "github.com/bottega-cereghino/facet/internal/render",
+    "github.com/bottega-cereghino/facet/internal/workspace"
+  ],
+  "knownViolations": [
+    "github.com/bottega-cereghino/facet/internal/routing -> github.com/bottega-cereghino/facet/internal/ghx",
+    "github.com/bottega-cereghino/facet/internal/routing -> os"
+  ]
+}
