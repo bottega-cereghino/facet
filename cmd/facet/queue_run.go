@@ -29,7 +29,7 @@ type queueEnv struct {
 	// green queue pull request (fix.land) and serialize on shared files.
 	// Nil skips that step.
 	updateBranch func(repo string, number int) error
-	mergeMethod  func(repo string) (string, error)
+	mergeMethod  func(repo, branch string) (string, error)
 	mergePR      func(repo string, number int, method, head string) error
 	// reap removes the issue workspace after a queue pull request merges.
 	// Nil leaves reaping to the operator.
@@ -61,6 +61,9 @@ type queueEnv struct {
 	// diskFreeBytes. A test sets it so the floor does not depend on the machine.
 	diskFree func(path string) (int64, error)
 	run      func(ctx context.Context, dir string, argv []string) error
+	// pgidAlive reports whether any process in process group pgid is still
+	// alive. Nil uses processGroupAlive.
+	pgidAlive func(pgid int) bool
 	// lanes runs the lanes command and returns its standard output. Nil
 	// uses runLanes. A test sets it so the suite does not start a program.
 	lanes func(ctx context.Context, argv []string) ([]byte, error)
@@ -90,7 +93,7 @@ func realQueueEnv() queueEnv {
 			_, _, err := spawnRoute(repo)
 			return err
 		},
-		run: runArgv,
+		pgidAlive: processGroupAlive,
 	}
 }
 
@@ -101,9 +104,19 @@ func (e *queueEnv) fill() {
 	if e.out == nil {
 		e.out = os.Stdout
 	}
-	if e.run == nil {
-		e.run = runArgv
+	if e.pgidAlive == nil {
+		e.pgidAlive = processGroupAlive
 	}
+}
+
+// processGroupAlive reports whether any process in process group pgid is
+// still alive. EPERM means the group exists under another user.
+func processGroupAlive(pgid int) bool {
+	if pgid <= 0 {
+		return false
+	}
+	err := syscall.Kill(-pgid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 // runArgv starts argv[0] with the remaining arguments and waits for it.
@@ -119,6 +132,10 @@ func (e *queueEnv) fill() {
 // sends SIGTERM to the whole group, and SIGKILL follows if it has not exited
 // within queueStopGrace.
 func runArgv(ctx context.Context, dir string, argv []string) error {
+	return runArgvTracked(ctx, dir, argv, nil)
+}
+
+func runArgvTracked(ctx context.Context, dir string, argv []string, onStart func(pid int)) error {
 	if len(argv) == 0 || argv[0] == "" {
 		return fmt.Errorf("empty command\nfix: set the command in the queue config")
 	}
@@ -133,7 +150,30 @@ func runArgv(ctx context.Context, dir string, argv []string) error {
 	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var saved chan struct{}
+	if onStart != nil && cmd.Process != nil {
+		pid := cmd.Process.Pid
+		saved = make(chan struct{})
+		go func() {
+			defer close(saved)
+			onStart(pid)
+		}()
+	}
+	err := cmd.Wait()
+	if saved != nil {
+		<-saved
+	}
+	return err
+}
+
+func (r *queueRunner) runCmd(ctx context.Context, dir string, argv []string, onStart func(pid int)) error {
+	if r.env.run != nil {
+		return r.env.run(ctx, dir, argv)
+	}
+	return runArgvTracked(ctx, dir, argv, onStart)
 }
 
 // gateSkipExit is the gate's exit status for "not this run": a refusal about
@@ -209,8 +249,8 @@ type queueRunner struct {
 	// noted remembers a line already logged for a key, so a refusal is
 	// logged once per head rather than once per tick.
 	noted        map[string]string
-	mergeMethods map[string]string
-	// rules caches the required checks of a base branch for this process.
+	mergeMethods map[string]cachedMergeMethod
+	// rules caches the required checks of a base branch for ruleCacheTTL.
 	// A ruleset does not change between ticks, and reading it every tick
 	// would spend the shared GitHub limit.
 	rules map[string]checkRules
@@ -266,7 +306,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		issueRound:   map[string]string{},
 		waited:       map[string]string{},
 		noted:        map[string]string{},
-		mergeMethods: map[string]string{},
+		mergeMethods: map[string]cachedMergeMethod{},
 		rules:        map[string]checkRules{},
 		active:       map[string]heartbeatRun{},
 		dry:          dry,
@@ -274,18 +314,26 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 	if !dry && cfg.Decisions != "" {
 		r.lastHeld = lastHoldPath(cfg.Decisions)
 	}
-	if cfg.State != "" && (cfg.Fix != nil || cfg.Cap != nil) {
+	if cfg.State != "" {
 		st, err := loadQueueState(cfg.State)
 		if err != nil {
 			return nil, err
 		}
 		r.state = st
+		now := env.now()
+		for k, at := range st.Done {
+			if !now.Before(at.Add(startedKeep)) {
+				delete(st.Done, k)
+				continue
+			}
+			r.done[k] = true
+		}
 	}
 	return r, nil
 }
 
 func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
-	if cfg.State != "" && (cfg.Fix != nil || cfg.Cap != nil) {
+	if cfg.State != "" {
 		release, err := lockQueueState(cfg.State)
 		if err != nil {
 			return err
@@ -525,6 +573,10 @@ func (r *queueRunner) recordBlockedSkips(ranked []queuedIssue) {
 			skipped = append(skipped, skipEntry{iss: iss, why: "already started in this process"})
 			continue
 		}
+		if pgid, alive := r.activeAgentAliveLocked(k); alive {
+			skipped = append(skipped, skipEntry{iss: iss, why: fmt.Sprintf("agent still running (pgid %d)", pgid)})
+			continue
+		}
 		if r.cfg.PerRepo > 0 && r.repoRunning[iss.Repo] >= r.cfg.PerRepo {
 			skipped = append(skipped, skipEntry{
 				iss: iss,
@@ -618,6 +670,9 @@ func (r *queueRunner) blocked(iss queuedIssue, now time.Time) bool {
 	if r.done[k] || r.inflight[k] {
 		return true
 	}
+	if _, alive := r.activeAgentAliveLocked(k); alive {
+		return true
+	}
 	if r.repoRunning[iss.Repo] >= r.cfg.PerRepo {
 		return true
 	}
@@ -626,6 +681,66 @@ func (r *queueRunner) blocked(iss queuedIssue, now time.Time) bool {
 	}
 	until, ok := r.retryAt[k]
 	return ok && now.Before(until)
+}
+
+// activeAgentAliveLocked reports whether an agent started before a crash is
+// still alive in its own process group. The caller holds r.mu.
+func (r *queueRunner) activeAgentAliveLocked(k string) (int, bool) {
+	if r.state == nil {
+		return 0, false
+	}
+	pgid := r.state.Active[k]
+	if pgid <= 0 {
+		return 0, false
+	}
+	// An entry with no start time, or past activeKeep, is a process group
+	// ID that may belong to another process by now.
+	at, stamped := r.state.ActiveAt[k]
+	if stamped && r.env.now().Before(at.Add(activeKeep)) && r.env.pgidAlive(pgid) {
+		return pgid, true
+	}
+	delete(r.state.Active, k)
+	delete(r.state.ActiveAt, k)
+	return 0, false
+}
+
+func (r *queueRunner) recordActive(run []queuedIssue, pgid int) {
+	if r.state == nil || pgid <= 0 {
+		return
+	}
+	r.mu.Lock()
+	if r.state.Active == nil {
+		r.state.Active = map[string]int{}
+	}
+	if r.state.ActiveAt == nil {
+		r.state.ActiveAt = map[string]time.Time{}
+	}
+	now := r.env.now()
+	for _, iss := range run {
+		r.state.Active[iss.key()] = pgid
+		r.state.ActiveAt[iss.key()] = now
+	}
+	r.mu.Unlock()
+	r.saveState()
+}
+
+func (r *queueRunner) clearActive(run []queuedIssue) {
+	if r.state == nil {
+		return
+	}
+	r.mu.Lock()
+	changed := false
+	for _, iss := range run {
+		if _, ok := r.state.Active[iss.key()]; ok {
+			delete(r.state.Active, iss.key())
+			delete(r.state.ActiveAt, iss.key())
+			changed = true
+		}
+	}
+	r.mu.Unlock()
+	if changed {
+		r.saveState()
+	}
 }
 
 func (r *queueRunner) deferRepo(repo string) {
@@ -640,7 +755,7 @@ func (r *queueRunner) gate(ctx context.Context, run []queuedIssue, effort string
 	}
 	stop := r.pulseHeartbeat(ctx)
 	defer stop()
-	return r.env.run(ctx, "", gateArgv(r.cfg, run, effort))
+	return r.runCmd(ctx, "", gateArgv(r.cfg, run, effort), nil)
 }
 
 func (r *queueRunner) start(ctx context.Context, run []queuedIssue, rooms map[string]string) {
@@ -728,11 +843,14 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	}
 	r.logf("queue: %s#%d agent %s effort %s bundle %d in %s", iss.Repo, iss.Issue.Number, who, effort, len(run), ws)
 	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, "start", cmdSummary)
-	err = r.env.run(ctx, ws, argv)
+	defer r.clearActive(run)
+	err = r.runCmd(ctx, ws, argv, func(pid int) {
+		r.recordActive(run, pid)
+	})
 	if err == nil {
 		r.logf("queue: %s#%d agent exited, bundle %d", iss.Repo, iss.Issue.Number, len(run))
 		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitOK, "exit 0")
-		r.deferAll(run, r.markDone)
+		r.markRunDone(run)
 		return
 	}
 	// An ExitError means the process ran and finished, whatever its status.
@@ -743,7 +861,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	if errors.As(err, &exitErr) {
 		r.logf("queue: %s#%d agent exited: %v, bundle %d", iss.Repo, iss.Issue.Number, err, len(run))
 		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitFail, firstErrorLine(err.Error()))
-		r.deferAll(run, r.markDone)
+		r.markRunDone(run)
 		return
 	}
 	r.setLastError(err.Error())
@@ -766,11 +884,28 @@ func (r *queueRunner) deferRetry(iss queuedIssue) {
 	r.mu.Unlock()
 }
 
-func (r *queueRunner) markDone(iss queuedIssue) {
+func (r *queueRunner) markRunDone(run []queuedIssue) {
+	now := r.env.now()
 	r.mu.Lock()
-	r.done[iss.key()] = true
+	for _, iss := range run {
+		k := iss.key()
+		r.done[k] = true
+		if r.state != nil {
+			if r.state.Done == nil {
+				r.state.Done = map[string]time.Time{}
+			}
+			r.state.Done[k] = now
+			delete(r.state.Active, k)
+			delete(r.state.ActiveAt, k)
+		}
+	}
 	r.mu.Unlock()
+	r.saveState()
 }
+
+// activeKeep is how long a recorded agent process group counts as alive. An
+// agent runs for hours, not days; past this the ID may have been reused.
+const activeKeep = 24 * time.Hour
 
 func (r *queueRunner) pause(ctx context.Context) {
 	t := time.NewTimer(r.cfg.Wait)
