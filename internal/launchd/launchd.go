@@ -9,7 +9,9 @@
 // Only the jobs `launchctl list` shows are considered: the user's own domain.
 // Their plists are read from the LaunchAgents folders, and a loaded job whose
 // plist sits anywhere else (`launchctl load ~/elsewhere/job.plist`) is found
-// through `launchctl print`, which names the file it was loaded from.
+// through `launchctl print`, which names the file it was loaded from. When
+// that file cannot be read (a loaded job outlives its deleted plist), the job
+// is read from the `launchctl print` output itself.
 // A plist that is not loaded starts nothing, so it holds nothing. Like the
 // probes in package mux, a missing tool is not a failure: off macOS there is
 // nothing to report. A launchctl that is there but fails is: it cannot say no
@@ -135,15 +137,21 @@ func (j *Jobs) load() {
 		}
 		// launchctl's path is authoritative: a stale LaunchAgents copy with
 		// the same label must not hide the plist the loaded job came from.
-		f, err := j.plistOf(l)
+		printed, err := j.printJob(l)
 		if err != nil {
 			j.err = fmt.Errorf("launchd job %s: %w; unload it or fix its plist before reaping", l, err)
 			return
 		}
-		if f != "" {
+		if f := plistPath(printed); f != "" {
 			if _, _, err := j.read(f, map[string]bool{l: true}); err != nil {
-				j.err = fmt.Errorf("launchd job %s: cannot read loaded plist %s: %w; unload it or fix the plist before reaping", l, f, err)
-				return
+				// A loaded job outlives its deleted plist: it still runs,
+				// and launchctl print still describes it.
+				jb, ok := parsePrint(l, f+" (unreadable, read through launchctl print)", printed)
+				if !ok {
+					j.err = fmt.Errorf("launchd job %s: cannot read loaded plist %s: %w, and launchctl print names no program; unload it or fix the plist before reaping", l, f, err)
+					return
+				}
+				j.jobs = append(j.jobs, jb)
 			}
 			// A named plist that cannot be read is not evidence that a
 			// different plist defined the loaded job.
@@ -185,22 +193,6 @@ func (j *Jobs) readPlist(f string) (job, bool, error) {
 // workspace, and asking about each would cost a launchctl call apiece.
 func elsewhere(label string) bool {
 	return !strings.HasPrefix(label, "com.apple.") && !strings.HasPrefix(label, "application.")
-}
-
-// plistOf asks launchctl which file the loaded job label came from: the
-// "path = ..." line of `launchctl print gui/<uid>/<label>`. "" when it names
-// none (a job submitted without a plist).
-func (j *Jobs) plistOf(label string) (string, error) {
-	raw, err := j.Run("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), label))
-	if err != nil {
-		return "", fmt.Errorf("launchctl print failed: %w", err)
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if p, ok := strings.CutPrefix(line, "\tpath = "); ok && strings.HasSuffix(p, ".plist") {
-			return strings.TrimSpace(p), nil
-		}
-	}
-	return "", nil
 }
 
 // loadedLabels reads `launchctl list`: a header line, then PID, status and
