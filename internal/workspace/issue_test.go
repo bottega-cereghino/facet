@@ -241,6 +241,50 @@ func TestUnresolvableDefaultBranchIsSilentOnACleanWorkspace(t *testing.T) {
 	}
 }
 
+// refs/remotes/origin/HEAD names refs/remotes/origin/main, and that name is
+// itself a symbolic ref to a local branch. fetch --prune never deletes a
+// symref and does not overwrite one, so the chain survives the fetch reap
+// runs first. git symbolic-ref follows it out of refs/remotes, and the
+// fallback rev-parse --verify follows it back to the same branch: either
+// name makes the landing proof compare that branch with itself and call its
+// only commit landed (#408). Two symrefs, both hand-made.
+func TestReapHoldsABranchASymbolicDefaultRefNames(t *testing.T) {
+	ws, clone := issueWorkspace(t)
+	gitOut(t, clone, "switch", "-q", "-c", "wip")
+	commitFile(t, clone, "work.txt", "a day of work\n", "only here")
+	gitOut(t, clone, "switch", "-q", "main")
+	// A direct remote ref must still name the commits that really are pushed.
+	// Otherwise replacing origin/main makes every local commit look unpushed
+	// for a reason this test is not about. stable is that ref; the fetch
+	// inside Inspect writes it, and leaves the two symrefs alone.
+	gitOut(t, gitOut(t, clone, "remote", "get-url", "origin"), "branch", "stable", "main")
+	gitOut(t, clone, "symbolic-ref", "refs/remotes/origin/main", "refs/heads/wip")
+	gitOut(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	if def := remoteDefaultBranch(gitx.Git{}, clone); def != "" {
+		t.Fatalf("remoteDefaultBranch = %q, want \"\" -- a symref is not a default branch", def)
+	}
+
+	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOut(t, clone, "symbolic-ref", "--no-recurse", "refs/remotes/origin/main"); got != "refs/heads/wip" {
+		t.Fatalf("setup: the fetch replaced the symref, so the landing proof was not tested: %q", got)
+	}
+	if def := remoteDefaultBranch(gitx.Git{}, clone); def != "" {
+		t.Fatalf("after fetch, remoteDefaultBranch = %q, want \"\"", def)
+	}
+	if !hasBlocker(st, "repo has 1 unpushed commit") {
+		t.Fatalf("reap would delete wip, which the default-branch ref names: %v", st.Blockers())
+	}
+	if !hasBlocker(st, "could not resolve origin's default branch") {
+		t.Errorf("the refusal must name the symref as an unresolvable default branch; blockers = %v", st.Blockers())
+	}
+	if len(st.Clone) == 0 || st.Clone[0].SquashLanded != 0 {
+		t.Fatalf("the branch compared with itself must not count as landed: %+v", st.Clone)
+	}
+}
+
 func TestInspectCleanWorkspaceIsReapable(t *testing.T) {
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
@@ -1092,19 +1136,20 @@ func TestUnpushedMergeCommitStillBlocksReap(t *testing.T) {
 	}
 }
 
-// A fetch failure alone -- no network, unreachable origin -- must not turn
-// into a hard block on a clean clone; that would make reap useless offline.
-func TestFetchFailureIsStalenessDisclaimerNotBlocker(t *testing.T) {
+// A fetch failure -- no network, unreachable origin -- holds the workspace:
+// a branch deleted or force-pushed upstream since the last fetch would still
+// read as pushed against the stale remote-tracking refs (#491).
+func TestFetchFailureHoldsCleanClone(t *testing.T) {
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, fetchFailGit(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b := st.Blockers(); len(b) != 0 {
-		t.Errorf("a failed fetch on an otherwise clean clone must not block, got %v", b)
+	if !hasBlocker(st, "fetch failed, so the remote's state is unknown") {
+		t.Errorf("a failed fetch must hold the workspace, got Blockers() = %v", st.Blockers())
 	}
-	if n := st.Notes(); len(n) != 1 || !strings.Contains(n[0], "last fetch") {
-		t.Errorf("Notes() = %v; want one saying it was judged against the last fetch", n)
+	if n := st.Notes(); len(n) != 0 {
+		t.Errorf("Notes() = %v; want empty when the failed fetch is already a blocker", n)
 	}
 }
 

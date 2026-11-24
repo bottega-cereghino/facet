@@ -9,6 +9,7 @@
 package gitxtest
 
 import (
+	"sync"
 	"time"
 
 	"github.com/bottega-cereghino/facet/internal/gitx"
@@ -37,12 +38,17 @@ type Runner struct {
 	// invocation to have produced (a clone's HEAD, a stamp file).
 	OnCall func(dir string, args []string)
 
-	// Calls records every call's argv, in order.
+	// Calls records every call's argv, in order. A test reads it once the
+	// code under test has returned.
 	Calls [][]string
+
+	mu sync.Mutex // guards Calls: reap inspects workspaces in parallel
 }
 
 func (r *Runner) record(dir string, args []string) (failed bool, err error) {
+	r.mu.Lock()
 	r.Calls = append(r.Calls, args)
+	r.mu.Unlock()
 	if r.OnCall != nil {
 		r.OnCall(dir, args)
 	}

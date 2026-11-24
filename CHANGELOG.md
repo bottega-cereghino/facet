@@ -6,6 +6,49 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.16.0](https://github.com/bottega-cereghino/facet/compare/v0.15.0...v0.16.0) (2026-11-24)
+
+
+### Added
+
+* add safe unattended reap and prune modes ([#472](https://github.com/bottega-cereghino/facet/issues/472)) ([7325c51](https://github.com/bottega-cereghino/facet/commit/7325c517143154b0c59493b4bd06caa7d373ce99))
+
+
+### Fixed
+
+* **queue:** guard landing against a person's pull request and an unchecked merge ([#506](https://github.com/bottega-cereghino/facet/issues/506)) ([1eedc4d](https://github.com/bottega-cereghino/facet/commit/1eedc4da23c262cab33de160a1c6c881041082dd))
+
+## [0.15.0](https://github.com/bottega-cereghino/facet/compare/v0.14.0...v0.15.0) (2026-11-24)
+
+
+### Added
+
+* **queue:** a lane label is a preference; fall back to a plan with room ([#475](https://github.com/bottega-cereghino/facet/issues/475)) ([f87add7](https://github.com/bottega-cereghino/facet/commit/f87add7b354bf3f172e453cb17f7c686b956afe1))
+* **queue:** cap concurrent runs per repository ([#461](https://github.com/bottega-cereghino/facet/issues/461)) ([ae62f54](https://github.com/bottega-cereghino/facet/commit/ae62f54428dfc8efab772ad1ba9b682fd4aa8f1d))
+* **queue:** cap standards and CI work once a repository's check passes ([4b3f162](https://github.com/bottega-cereghino/facet/commit/4b3f162c09b0ba0977c588138a79ef643b06e536))
+* **queue:** cap standards and CI work to 1 in 3 runs once the check passes ([#489](https://github.com/bottega-cereghino/facet/issues/489)) ([4b3f162](https://github.com/bottega-cereghino/facet/commit/4b3f162c09b0ba0977c588138a79ef643b06e536))
+* **queue:** land one pull request at a time per repository on shared files ([#483](https://github.com/bottega-cereghino/facet/issues/483)) ([7e4670e](https://github.com/bottega-cereghino/facet/commit/7e4670e10e8a59f08d205a632bc2e799963aebe7))
+* **queue:** record dispatch decisions in queue-gate.jsonl ([#488](https://github.com/bottega-cereghino/facet/issues/488)) ([08c45eb](https://github.com/bottega-cereghino/facet/commit/08c45eb9df363e4298ed84a396624a0f1b0274df))
+* **queue:** reopen log on SIGHUP ([#468](https://github.com/bottega-cereghino/facet/issues/468)) ([0bd5231](https://github.com/bottega-cereghino/facet/commit/0bd52310cd068eb23a8754a1b0c4167e5b1c98a5))
+* **queue:** start no new work while disk is low ([#499](https://github.com/bottega-cereghino/facet/issues/499)) ([dfbba2f](https://github.com/bottega-cereghino/facet/commit/dfbba2f5008cb720c3005a28f5a3647989037d53))
+* **queue:** write heartbeat file and add facet queue status ([#495](https://github.com/bottega-cereghino/facet/issues/495)) ([15fdd9c](https://github.com/bottega-cereghino/facet/commit/15fdd9cdeef8657c10b8469b0002448b26152a22))
+
+
+### Fixed
+
+* allow justified zero-count test changes ([#462](https://github.com/bottega-cereghino/facet/issues/462)) ([01a52e2](https://github.com/bottega-cereghino/facet/commit/01a52e2f07358fd4063eb0168ddcf36d4564416d))
+* keep a workspace a launchd job runs through a symlink or another case ([#476](https://github.com/bottega-cereghino/facet/issues/476)) ([738606b](https://github.com/bottega-cereghino/facet/commit/738606b8b5b6d2aa696989c86614d5dcaef81a64))
+* **launchd:** hold on loaded job probe failures ([#493](https://github.com/bottega-cereghino/facet/issues/493)) ([dd38a1b](https://github.com/bottega-cereghino/facet/commit/dd38a1b2e962c453c3d6cc2f9a0f4645413030ca))
+* **launchd:** inspect every loaded plist path ([#477](https://github.com/bottega-cereghino/facet/issues/477)) ([a91f33a](https://github.com/bottega-cereghino/facet/commit/a91f33a9ca76020838f345ecbfba3c637addec26))
+* mark merged feature map entries shipped ([#460](https://github.com/bottega-cereghino/facet/issues/460)) ([d601a7c](https://github.com/bottega-cereghino/facet/commit/d601a7c50488d42eab512c8f4a0b2162f01c2b5d))
+* **queue:** refuse a suppressing fix and back off a refused merge ([#490](https://github.com/bottega-cereghino/facet/issues/490)) ([edab272](https://github.com/bottega-cereghino/facet/commit/edab272e5d268e707a1217b00480c8b49346d291))
+* **queue:** refuse saturated open pull request lists ([#465](https://github.com/bottega-cereghino/facet/issues/465)) ([d4f7ddf](https://github.com/bottega-cereghino/facet/commit/d4f7ddfc693da7fafe77a4b7e558c19cdba0e3ea))
+* **reap:** hold workspace when a remote fetch fails ([#496](https://github.com/bottega-cereghino/facet/issues/496)) ([644cd88](https://github.com/bottega-cereghino/facet/commit/644cd882cd5e91dd759210330601a24e321047cc))
+* refuse a bootstrap clone through a symlink outside the projects root ([#474](https://github.com/bottega-cereghino/facet/issues/474)) ([45e8a4c](https://github.com/bottega-cereghino/facet/commit/45e8a4ce269f9b1123206ef016e8ee0cd3d9ecaa))
+* refuse a symbolic ref as the landing proof's default branch ([#478](https://github.com/bottega-cereghino/facet/issues/478)) ([69e1080](https://github.com/bottega-cereghino/facet/commit/69e1080f5bf616421f1fe7263ea4e97ee92bf5f0))
+* **sync:** skip an extra remote that would land outside the workspace ([#494](https://github.com/bottega-cereghino/facet/issues/494)) ([9db329c](https://github.com/bottega-cereghino/facet/commit/9db329c352169ae6e5aa4a8ced4a06b17dcdfe9f))
+* **sync:** stage clones and worktrees in a temp dir before renaming into place ([#487](https://github.com/bottega-cereghino/facet/issues/487)) ([ad6c36d](https://github.com/bottega-cereghino/facet/commit/ad6c36dbe736048b11d07ccf7cf7529f569dc25b))
+
 ## [0.14.0](https://github.com/bottega-cereghino/facet/compare/v0.13.0...v0.14.0) (2026-11-23)
 
 

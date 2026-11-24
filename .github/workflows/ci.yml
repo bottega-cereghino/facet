@@ -26,6 +26,11 @@ env:
   # renovate: datasource=github-releases depName=koalaman/shellcheck extractVersion=^v(?<version>.+)$
   SHELLCHECK_VERSION: 0.11.0
   SHELLCHECK_SHA256: b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6
+  # shfmt, the same way: an exact release and the SHA-256 of its Linux amd64
+  # binary, the release page's asset digest.
+  # renovate: datasource=github-releases depName=mvdan/sh extractVersion=^v(?<version>.+)$
+  SHFMT_VERSION: 3.14.1
+  SHFMT_SHA256: 76e77641faa025814b77f153b29796b8e6fa2fca03e0c76a691608b86c7ea7bf
 
 # Third-party actions are pinned to full-length commit SHAs, per GitHub's
 # hardening guidance. A tag is mutable: `@v4` is a promise the upstream owner
@@ -45,7 +50,7 @@ jobs:
   linux:
     name: linux
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -76,6 +81,13 @@ jobs:
           echo "${SHELLCHECK_SHA256}  shellcheck.tar.gz" | sha256sum --check --strict
           tar -xzf shellcheck.tar.gz --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
       - run: make shellcheck SHELLCHECK="$RUNNER_TEMP/shellcheck"
+      - name: Install shfmt
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo shfmt "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+          echo "${SHFMT_SHA256}  shfmt" | sha256sum --check --strict
+          chmod +x shfmt
+      - run: make shfmt SHFMT="$RUNNER_TEMP/shfmt"
       # The organisation-name guard (internal/privacy) must not carry an
       # employer's internal names in this public repo, so its word list is a
       # secret (Settings -> Secrets and variables -> Actions, comma-separated)
@@ -125,7 +137,7 @@ jobs:
     needs: linux
     if: github.event_name != 'pull_request' || (github.event.pull_request.draft == false && github.event.pull_request.base.ref == 'main')
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -140,6 +152,9 @@ jobs:
         env:
           FACET_DENYLIST: ${{ secrets.FACET_DENYLIST }}
 
+  # A warning, not a gate: it is left out of `ci`'s needs (fleet standard
+  # ci-time), so a broken renovate.json shows red on the PR without blocking it.
+  #
   # renovate.json must pass Renovate's own validator. The image is the Renovate
   # release that holds it, pinned by tag and digest; Renovate moves it like any
   # other dependency. It comes from Docker Hub, not GHCR: the same image and
@@ -148,7 +163,7 @@ jobs:
   renovate:
     name: renovate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     container:
       image: renovate/renovate:44.155.1@sha256:f5796f26088c0f5debb07c16fa9e801145e4d3ba9717d9cc22ca8cd265e2a0eb
       # The checkout writes into the runner workspace, which the image user
@@ -163,11 +178,11 @@ jobs:
   # The one result. It runs even when a job above fails or is skipped, so one
   # name says whether a pull request is green. A skipped job passes here: macos
   # skips on drafts on purpose, and the ruleset still requires macos by name.
-  # Add every new job to `needs`.
+  # Add every new blocking job to `needs`; a warning-only job stays out.
   ci:
     name: ci
     if: always()
-    needs: [linux, macos, renovate]
+    needs: [linux, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

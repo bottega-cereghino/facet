@@ -27,10 +27,14 @@ GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 # prints its version.
 SHELLCHECK ?= shellcheck
 
-.PHONY: check build fmt fmt-fix vet lint shellcheck test tidy vuln health clean
+# shfmt: CI installs one exact release (SHFMT_VERSION in ci.yml) and passes its
+# path here; locally the shfmt on PATH runs (`brew install shfmt`).
+SHFMT ?= shfmt
+
+.PHONY: check build fmt fmt-fix vet lint shellcheck shfmt test tidy vuln health clean
 
 ## check: everything CI's first tier runs
-check: fmt vet lint shellcheck test tidy vuln
+check: fmt vet lint shellcheck shfmt test tidy vuln
 
 ## build: compile the binary
 build:
@@ -60,6 +64,11 @@ lint:
 shellcheck:
 	@$(SHELLCHECK) --version | sed -n 2p
 	$(SHELLCHECK) -x $$(git ls-files '*.sh')
+
+## shfmt: fail on shell scripts that are not formatted
+shfmt:
+	@$(SHFMT) --version
+	$(SHFMT) -d -i 2 -ci $$(git ls-files '*.sh')
 
 ## test: -race because the suite drives real git repositories and a real tmux
 ## server; -shuffle because tests that depend on each other's order are a lie.

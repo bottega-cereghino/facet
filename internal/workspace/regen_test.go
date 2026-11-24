@@ -79,7 +79,7 @@ func TestPruneDeletesWhatWasFoundAndNothingElse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Prune(st); err != nil {
+	if _, err := Prune(st); err != nil {
 		t.Fatal(err)
 	}
 	for _, gone := range []string{"node_modules", "api/.venv"} {
@@ -98,6 +98,63 @@ func TestPruneDeletesWhatWasFoundAndNothingElse(t *testing.T) {
 	}
 }
 
+// Prune returns only what it removed, so the log a caller prints from it is
+// true: a directory gone before Prune reached it, or one it failed to delete,
+// is not among them, and the others still are.
+func TestPruneReturnsOnlyWhatItRemoved(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root deletes inside a read-only directory: the failure cannot be planted")
+	}
+	ws, clone := prunableWorkspace(t)
+	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(foundRels(st), ","); got != "repo/api/.venv,repo/node_modules" {
+		t.Fatalf("found %q; the test needs the .venv and the node_modules", got)
+	}
+	// The .venv turns into a file after the listing; the node_modules
+	// cannot be deleted, since a directory in it is read-only.
+	venv := filepath.Join(clone, "api", ".venv")
+	if err := os.RemoveAll(venv); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(venv, []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stuck := filepath.Join(clone, "node_modules", "stuck")
+	writeMiB(t, filepath.Join(stuck, "f"))
+	if err := os.Chmod(stuck, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(stuck, 0o755) })
+	removed, err := Prune(st)
+	if err == nil {
+		t.Error("Prune returned no error although node_modules could not be deleted")
+	}
+	if len(removed) != 0 {
+		t.Errorf("Prune reported %v as removed; the .venv is a file now and node_modules failed", removed)
+	}
+	if _, err := os.Stat(venv); err != nil {
+		t.Errorf("the file that replaced the .venv is gone: %v", err)
+	}
+
+	// Now the .venv's whole directory is gone, and node_modules can go.
+	if err := os.RemoveAll(filepath.Join(clone, "api")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stuck, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	removed, err = Prune(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 1 || removed[0].Rel != "node_modules" {
+		t.Errorf("Prune reported %v as removed; want node_modules alone", removed)
+	}
+}
+
 // A workspace used recently is somebody's: its dependencies stay installed.
 func TestInspectPruneHoldsAWorkspaceUsedWithinTheIdleWindow(t *testing.T) {
 	ws, _ := prunableWorkspace(t)
@@ -109,7 +166,7 @@ func TestInspectPruneHoldsAWorkspaceUsedWithinTheIdleWindow(t *testing.T) {
 	if len(st.Held) != 1 || !strings.Contains(st.Held[0], "idle window of 14 days") {
 		t.Fatalf("held %v; want the idle window to hold a workspace used just now", st.Held)
 	}
-	if err := Prune(st); err == nil {
+	if _, err := Prune(st); err == nil {
 		t.Fatal("Prune deleted from a held workspace")
 	}
 
@@ -208,7 +265,7 @@ func TestPruneKeepsADirectoryHoldingANonGitRepository(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := Prune(st); err != nil {
+			if _, err := Prune(st); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(only); err != nil {
@@ -321,7 +378,7 @@ func TestPruneDoesNotFollowASwappedParent(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(clone, "api")); err != nil {
 		t.Fatal(err)
 	}
-	_ = Prune(st)
+	_, _ = Prune(st)
 	if _, err := os.Stat(filepath.Join(outside, ".venv", "precious")); err != nil {
 		t.Fatalf("prune followed a symlinked parent out of the clone: %v", err)
 	}
@@ -391,7 +448,7 @@ func TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds(t *testing.T) {
 			if len(st.Held) != 0 {
 				t.Fatalf("held %v; want nothing held", st.Held)
 			}
-			if err := Prune(st); err != nil {
+			if _, err := Prune(st); err != nil {
 				t.Fatal(err)
 			}
 			_, statErr := os.Stat(filepath.Join(clone, tc.parent, tc.dir, "inside", "file"))
@@ -485,7 +542,7 @@ func TestPruneKeepsADirectoryBesideAFileThatInstallsNothing(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := Prune(st); err != nil {
+			if _, err := Prune(st); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(handBuilt); err != nil {
@@ -547,7 +604,7 @@ func TestPruneDeletesADirectoryBesideAFileThatInstallsIt(t *testing.T) {
 			if got := strings.Join(foundRels(st), ","); got != "repo/"+tc.dir {
 				t.Fatalf("found %q, kept %v; want repo/%s", got, st.Kept, tc.dir)
 			}
-			if err := Prune(st); err != nil {
+			if _, err := Prune(st); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(filepath.Join(clone, tc.dir)); !os.IsNotExist(err) {

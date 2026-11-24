@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -36,28 +37,42 @@ func branchPR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool) {
 // say it was opened, for a clock that is behind GitHub's.
 const prClockSkew = time.Minute
 
-// queuePR is the queue's own pull request for iss. Once the state names
-// its number, only that pull request is. Before then it is the first pull
-// request from this repository (not a fork) on the spawn branch, opened
-// after the queue started the issue; its number is then recorded. A
-// person's pull request, a fork's, or one opened before the start, is never
-// the queue's, whatever its branch is called.
-func (r *queueRunner) queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool) {
+// queuePR is the queue's own pull request for iss: one its own run
+// opened, never a person's. It comes from this repository (not a fork), on
+// the spawn branch, opened after the start by the account the queue runs
+// as, and its description carries the start's trailer line (ownsPR). The
+// first such pull request's number is recorded, and from then on only that
+// pull request is the queue's, and only while it still passes ownsPR. An
+// error means the account could not be read: the caller must not take it
+// as "no pull request" and forget the start.
+func (r *queueRunner) queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bool, error) {
 	k := iss.key()
 	r.mu.Lock()
 	s := r.state.Started[k]
 	r.mu.Unlock()
 	if s.PR != 0 {
 		for _, pr := range prs {
-			if pr.Number == s.PR && !pr.IsCrossRepository {
-				return pr, true
+			if pr.Number != s.PR {
+				continue
 			}
+			ok, err := r.ownsPR(s, pr)
+			if err != nil || !ok {
+				return ghx.OpenPR{}, false, err
+			}
+			return pr, true, nil
 		}
-		return ghx.OpenPR{}, false
+		return ghx.OpenPR{}, false, nil
 	}
 	prefix := issueBranchName(iss.Issue.Number, "")
 	for _, pr := range prs {
-		if pr.IsCrossRepository || !strings.HasPrefix(pr.HeadRefName, prefix) || openedBefore(pr, s.At) {
+		if !strings.HasPrefix(pr.HeadRefName, prefix) || openedBefore(pr, s.At) {
+			continue
+		}
+		ok, err := r.ownsPR(s, pr)
+		if err != nil {
+			return ghx.OpenPR{}, false, err
+		}
+		if !ok {
 			continue
 		}
 		if !r.dry {
@@ -67,9 +82,9 @@ func (r *queueRunner) queuePR(iss queuedIssue, prs []ghx.OpenPR) (ghx.OpenPR, bo
 			r.mu.Unlock()
 			r.saveState()
 		}
-		return pr, true
+		return pr, true, nil
 	}
-	return ghx.OpenPR{}, false
+	return ghx.OpenPR{}, false, nil
 }
 
 func openedBefore(pr ghx.OpenPR, start time.Time) bool {
@@ -118,6 +133,7 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 	issues := orderQueued(r.startedQueued(), projects)
 	need := r.listingNeeds(issues)
 	failed := map[string]bool{}
+	mergedRepo := map[string]bool{}
 	var jobs []*fixJob
 	for _, iss := range issues {
 		if act, _ := r.canAct(iss); !act {
@@ -132,12 +148,18 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 			}
 			continue
 		}
-		pr, ok := r.queuePR(iss, got.prs)
+		pr, ok, err := r.queuePR(iss, got.prs)
+		if err != nil {
+			r.noteOnce(iss.key()+" owner", err.Error(), func() {
+				r.logf("queue: %s: %v; touching nothing of it this round", iss.key(), err)
+			})
+			continue
+		}
 		if !ok {
 			r.forgetStarted(iss)
 			continue
 		}
-		if job := r.judgeQueuePR(ctx, iss, pr, got.at); job != nil {
+		if job := r.judgeQueuePR(ctx, iss, pr, got, mergedRepo); job != nil {
 			jobs = append(jobs, job)
 		}
 	}
@@ -197,15 +219,15 @@ func (r *queueRunner) forgetIfGone(iss queuedIssue) {
 	if !ok {
 		return
 	}
-	if _, open := r.queuePR(iss, got.prs); !open {
+	if _, open, err := r.queuePR(iss, got.prs); err == nil && !open {
 		r.forgetStarted(iss)
 	}
 }
 
 // judgeQueuePR returns a fix job for pr, or nil when it is pending, green,
-// blocked, or just used its last try. listed is when pr was listed: a
+// blocked, or just used its last try. got.at is when pr was listed: a
 // listing from before a fix run settled says nothing about that run.
-func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, listed time.Time) *fixJob {
+func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, got prListing, mergedRepo map[string]bool) *fixJob {
 	verdict, reason := judgePR(pr)
 	k := iss.key()
 	r.mu.Lock()
@@ -215,7 +237,7 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 	if rec != nil {
 		runs, blocked = rec.Runs, rec.Blocked
 		// A fix run that just pushed may not have its checks listed yet.
-		settling = listed.Before(rec.Last.Add(r.cfg.Wait))
+		settling = got.at.Before(rec.Last.Add(r.cfg.Wait))
 	}
 	r.mu.Unlock()
 	// Blocked stays blocked: the issue is a person's now.
@@ -223,16 +245,53 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 		return nil
 	}
 	if verdict == prGreen {
-		// No checks at all cannot tell a green PR from one whose checks
-		// have not been listed yet, so that keeps the record.
-		if rec != nil && len(pr.Checks) > 0 {
-			r.clearFix(k, pr.Number)
-			runs = 0
-		}
-		if !r.cfg.Fix.Land || !r.land(iss, pr, listed) {
+		if why := r.landBlockReason(iss.Repo, pr); why != "" {
+			// A cancelled, skipped or missing required check is not a pass,
+			// and it is not a red result for a fix run either: the pull
+			// request stays as it is until the check really passed.
+			r.noteOnce(k+" land "+pr.HeadRefOid, why, func() {
+				r.logf("queue: %s PR #%d: not landing: %s", k, pr.Number, why)
+			})
 			return nil
 		}
-		reason = "conflicts with " + baseName(pr)
+		if !r.mayRetry(r.forbidHolds, k, pr.HeadRefOid) {
+			// The diff of this head could not be read; it is read again
+			// after its wait, not every tick.
+			return nil
+		}
+		pattern, file, bad, err := r.suppression(iss, pr)
+		if err == nil {
+			r.clearFailure(r.forbidHolds, k)
+		}
+		switch {
+		case err != nil:
+			// A diff that cannot be read is not a pass: landing it could
+			// merge a suppression the check did not see.
+			wait := r.noteFailure(r.forbidHolds, k, pr.HeadRefOid)
+			r.logf("queue: %s PR #%d: %v; not landing, reading it again after %s", k, pr.Number, err, wait)
+			return nil
+		case bad:
+			reason = fmt.Sprintf("the fix suppresses instead of fixing: %s in %s", pattern, file)
+			r.noteOnce(k+" suppress "+pr.HeadRefOid, reason, func() {
+				r.logf("queue: %s PR #%d: %s; not landing", k, pr.Number, reason)
+			})
+		default:
+			// No checks at all cannot tell a green PR from one whose checks
+			// have not been listed yet, so that keeps the record.
+			if rec != nil && len(pr.Checks) > 0 {
+				r.clearFix(k, pr.Number)
+				runs = 0
+			}
+			if !r.cfg.Fix.Land || !r.land(ctx, iss, pr, got, mergedRepo) {
+				return nil
+			}
+			reason = "conflicts with " + baseName(pr)
+		}
+	}
+	// A fix run and a block label act on the pull request and the issue:
+	// read the issue again first.
+	if r.touchStop(iss) != "" {
+		return nil
 	}
 	if runs >= r.cfg.Fix.Tries {
 		r.block(ctx, iss, pr, reason, runs)
@@ -267,7 +326,14 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 		return
 	}
 	delete(r.state.Fixes, k)
+	if s.PR != 0 {
+		delete(r.state.Merges, landKey(iss.Repo, s.PR))
+	}
 	if !recent {
+		// The pull request is gone. The cap still counts the run.
+		if r.cfg.Cap != nil {
+			r.state.noteStart(s)
+		}
 		delete(r.state.Started, k)
 	}
 	r.mu.Unlock()
@@ -369,6 +435,8 @@ func (r *queueRunner) fixGate(ctx context.Context, job *fixJob) error {
 	}
 	vars := r.fixVars(job, "")
 	delete(vars, "prompt")
+	stop := r.pulseHeartbeat(ctx)
+	defer stop()
 	return r.env.run(ctx, "", expandArgv(gate, vars))
 }
 
@@ -409,14 +477,22 @@ func (r *queueRunner) startFix(ctx context.Context, job *fixJob) {
 	r.mu.Lock()
 	r.running++
 	r.fixing[k] = true
+	now := r.env.now()
+	r.active[k] = heartbeatRun{Issue: k, Agent: "fix", Since: now.UTC()}
 	rec := r.state.Fixes[k]
 	if rec == nil || rec.PR != job.pr.Number {
 		rec = &fixRecord{PR: job.pr.Number}
 		r.state.Fixes[k] = rec
 	}
 	rec.Runs++
-	rec.Last = r.env.now()
+	rec.Last = now
+	// The first try's head stays. A later try is judged on the diff from
+	// that head, so a suppression the first try pushed is still visible.
+	if rec.Head == "" {
+		rec.Head = job.pr.HeadRefOid
+	}
 	r.mu.Unlock()
+	r.writeHeartbeat()
 	r.saveState()
 	r.wg.Add(1)
 	go func() {
@@ -426,7 +502,9 @@ func (r *queueRunner) startFix(ctx context.Context, job *fixJob) {
 			r.mu.Lock()
 			r.running--
 			delete(r.fixing, k)
+			delete(r.active, k)
 			r.mu.Unlock()
+			r.writeHeartbeat()
 		}()
 		started := r.runFix(ctx, job)
 		r.mu.Lock()
@@ -455,8 +533,11 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 		return false
 	}
 	vars := r.fixVars(job, ws)
+	argv := expandArgv(r.cfg.Fix.Command, vars)
 	r.logf("queue: fix %s PR #%d: %s, try %d of %d, in %s", k, job.pr.Number, job.reason, job.try, r.cfg.Fix.Tries, ws)
-	err = r.env.run(ctx, ws, expandArgv(r.cfg.Fix.Command, vars))
+	why := fmt.Sprintf("PR #%d (%s, try %d): %s", job.pr.Number, job.reason, job.try, commandSummary(r.cfg.Fix.Command, argv))
+	r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", "fix_start", why)
+	err = r.env.run(ctx, ws, argv)
 	var exitErr *exec.ExitError
 	switch {
 	case err != nil && ctx.Err() != nil:
@@ -476,17 +557,22 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 }
 
 // recordStarted remembers the issues of a run, so their pull requests are
-// the queue's own after a restart.
-func (r *queueRunner) recordStarted(run []queuedIssue) {
-	if r.cfg.Fix == nil || r.state == nil {
+// the queue's own after a restart, and so the cap window counts them.
+// marker is the run's trailer token, empty when the fix stage is off.
+func (r *queueRunner) recordStarted(run []queuedIssue, marker string) {
+	if r.state == nil {
 		return
 	}
 	r.mu.Lock()
 	for _, iss := range run {
-		r.state.Started[iss.key()] = startedIssue{
+		rec := startedIssue{
 			Repo: iss.Repo, Number: iss.Issue.Number, At: r.env.now(),
 			Title: iss.Issue.Title, URL: iss.Issue.URL, CreatedAt: iss.Issue.CreatedAt,
-			Labels: iss.Issue.LabelNames(),
+			Labels: iss.Issue.LabelNames(), Marker: marker,
+		}
+		r.state.Started[iss.key()] = rec
+		if r.cfg.Cap != nil {
+			r.state.noteStart(rec)
 		}
 	}
 	r.mu.Unlock()
@@ -502,6 +588,7 @@ func (r *queueRunner) saveState() {
 	err := r.state.save(r.cfg.State)
 	r.mu.Unlock()
 	if err != nil {
+		r.setLastError(err.Error())
 		r.logf("queue: %v", err)
 	}
 }

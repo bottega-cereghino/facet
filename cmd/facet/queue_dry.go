@@ -32,15 +32,24 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 		r.logf("dry-run: hold file %s exists; would start nothing", held)
 		return nil
 	}
-	started, stop := r.dryFixes(ctx)
+	// A disk refusal is printed here, once, and the listing below is what
+	// those starts would have been. Fixes and landings are still listed:
+	// they add no workspace.
+	disk := r.noteDisk()
+	started, stop := r.dryFixes(ctx, disk)
 	if stop {
 		return nil
+	}
+	r.refreshRooms(ctx)
+	startWord := "would start"
+	if disk.block {
+		startWord = "would have started"
 	}
 	for started < cfg.Max {
 		if ctx.Err() != nil {
 			return nil
 		}
-		run, err := r.candidate()
+		run, err := r.candidate(ctx)
 		if err != nil {
 			return err
 		}
@@ -80,26 +89,34 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 			r.logf("dry-run: would not start %s#%d: gate: %s", run[0].Repo, run[0].Issue.Number, err.Error())
 			return nil
 		}
-		who, _, err := r.cfg.commandFor(run[0].Issue.LabelNames())
+		a, from, err := r.cfg.resolveAgent(run[0].Issue.LabelNames(), r.rooms)
 		if err != nil {
 			r.logf("dry-run: would not start %s#%d: %v", run[0].Repo, run[0].Issue.Number, err)
 			return nil
 		}
+		who := a.Label
 		if who == "" {
 			who = "default"
 		}
-		r.logf("dry-run: would start %s#%d agent %s effort %s bundle %d", run[0].Repo, run[0].Issue.Number, who, effort, len(run))
+		if from != "" {
+			r.logf("dry-run: %s#%d lane %s has no room; fallback_from %s", run[0].Repo, run[0].Issue.Number, from, from)
+		}
+		r.logf("dry-run: %s %s#%d agent %s effort %s bundle %d", startWord, run[0].Repo, run[0].Issue.Number, who, effort, len(run))
 		for _, iss := range run {
 			r.logf("dry-run: %s#%d: %s", iss.Repo, iss.Issue.Number, iss.Issue.Title)
 		}
 		r.mu.Lock()
+		r.repoRunning[run[0].Repo]++
 		for _, iss := range run {
 			r.inflight[iss.key()] = true
 		}
 		r.mu.Unlock()
+		// Count the run in the cap window, as a real start would. A dry run
+		// still writes nothing: saveState leaves the file alone.
+		r.recordStarted(run, "")
 		started++
 	}
-	run, err := r.candidate()
+	run, err := r.candidate(ctx)
 	if err != nil {
 		return err
 	}
@@ -112,7 +129,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 // dryFixes prints the fix runs the next starts would take, up to max, and
 // the pull requests it would update or merge. stop means a gate refused
 // for the whole queue, so nothing more would start.
-func (r *queueRunner) dryFixes(ctx context.Context) (int, bool) {
+func (r *queueRunner) dryFixes(ctx context.Context, disk diskView) (int, bool) {
 	started := 0
 	for _, job := range r.scanQueuePRs(ctx) {
 		if started >= r.cfg.Max || ctx.Err() != nil {
@@ -120,6 +137,10 @@ func (r *queueRunner) dryFixes(ctx context.Context) (int, bool) {
 		}
 		k := job.iss.key()
 		if r.repoDeferred(job.iss.Repo) {
+			continue
+		}
+		if disk.block && !disk.have[k] {
+			r.logf("dry-run: would not fix %s PR #%d: it would spawn a workspace", k, job.pr.Number)
 			continue
 		}
 		if err := r.fixGate(ctx, job); err != nil {
