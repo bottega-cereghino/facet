@@ -316,7 +316,12 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 			return nil, err
 		}
 		r.state = st
-		for k := range st.Done {
+		now := env.now()
+		for k, at := range st.Done {
+			if !now.Before(at.Add(startedKeep)) {
+				delete(st.Done, k)
+				continue
+			}
 			r.done[k] = true
 		}
 	}
@@ -684,10 +689,14 @@ func (r *queueRunner) activeAgentAliveLocked(k string) (int, bool) {
 	if pgid <= 0 {
 		return 0, false
 	}
-	if r.env.pgidAlive(pgid) {
+	// An entry with no start time, or past activeKeep, is a process group
+	// ID that may belong to another process by now.
+	at, stamped := r.state.ActiveAt[k]
+	if stamped && r.env.now().Before(at.Add(activeKeep)) && r.env.pgidAlive(pgid) {
 		return pgid, true
 	}
 	delete(r.state.Active, k)
+	delete(r.state.ActiveAt, k)
 	return 0, false
 }
 
@@ -699,8 +708,13 @@ func (r *queueRunner) recordActive(run []queuedIssue, pgid int) {
 	if r.state.Active == nil {
 		r.state.Active = map[string]int{}
 	}
+	if r.state.ActiveAt == nil {
+		r.state.ActiveAt = map[string]time.Time{}
+	}
+	now := r.env.now()
 	for _, iss := range run {
 		r.state.Active[iss.key()] = pgid
+		r.state.ActiveAt[iss.key()] = now
 	}
 	r.mu.Unlock()
 	r.saveState()
@@ -715,6 +729,7 @@ func (r *queueRunner) clearActive(run []queuedIssue) {
 	for _, iss := range run {
 		if _, ok := r.state.Active[iss.key()]; ok {
 			delete(r.state.Active, iss.key())
+			delete(r.state.ActiveAt, iss.key())
 			changed = true
 		}
 	}
@@ -875,11 +890,16 @@ func (r *queueRunner) markRunDone(run []queuedIssue) {
 			}
 			r.state.Done[k] = now
 			delete(r.state.Active, k)
+			delete(r.state.ActiveAt, k)
 		}
 	}
 	r.mu.Unlock()
 	r.saveState()
 }
+
+// activeKeep is how long a recorded agent process group counts as alive. An
+// agent runs for hours, not days; past this the ID may have been reused.
+const activeKeep = 24 * time.Hour
 
 func (r *queueRunner) pause(ctx context.Context) {
 	t := time.NewTimer(r.cfg.Wait)

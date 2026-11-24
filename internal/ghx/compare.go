@@ -48,7 +48,6 @@ func (CLI) CompareFiles(repo, base, head string) ([]DiffFile, error) {
 func parseCompareFiles(body []byte) ([]DiffFile, error) {
 	dec := json.NewDecoder(strings.NewReader(string(body)))
 	var out []DiffFile
-	seen := map[string]bool{}
 	pages := 0
 	for dec.More() {
 		var cmp struct {
@@ -67,13 +66,12 @@ func parseCompareFiles(body []byte) ([]DiffFile, error) {
 			return nil, fmt.Errorf("diff truncated: reached GitHub's %d-file compare limit", CompareFileLimit)
 		}
 		for _, f := range cmp.Files {
-			if f.Filename == "" || seen[f.Filename] {
+			if f.Filename == "" {
 				continue
 			}
 			if f.Patch == nil && f.Changes > 0 && f.Status != "removed" {
 				return nil, fmt.Errorf("no patch for %s", f.Filename)
 			}
-			seen[f.Filename] = true
 			patch := ""
 			if f.Patch != nil {
 				patch = *f.Patch

@@ -635,6 +635,7 @@ func TestQueueDoesNotStartSecondAgentWhileCrashedProcessGroupIsAlive(t *testing.
 
 	st := newQueueState()
 	st.Active["acme/widgets#5"] = pgid
+	st.ActiveAt["acme/widgets#5"] = time.Now()
 	if err := st.save(cfg.State); err != nil {
 		t.Fatal(err)
 	}
@@ -971,4 +972,114 @@ func TestQueueDoesNotTouchARecordedPRFromAFork(t *testing.T) {
 	if got := countLines(log); got != 0 {
 		t.Fatalf("runs = %q", readLines(t, log))
 	}
+}
+
+// An agent that exited without a pull request is not started again, but only
+// for startedKeep: a done entry past it is dropped when the state loads.
+func TestQueueDoneEntriesExpire(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "log")
+	cfg := fixQueue(t, log)
+	st := newQueueState()
+	st.Done["acme/widgets#5"] = time.Now().Add(-startedKeep - time.Hour)
+	st.Done["acme/widgets#6"] = time.Now().Add(-time.Hour)
+	if err := st.save(cfg.State); err != nil {
+		t.Fatal(err)
+	}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{openIssue(5, "2026-01-01T00:00:00Z"), openIssue(6, "2026-01-02T00:00:00Z")}, nil
+		},
+		prs: staticPRs(),
+	})
+	waitFor(t, "the expired issue starts", func() bool { return len(readLines(t, log)) >= 1 })
+	s.stop(t)
+	for _, l := range readLines(t, log) {
+		if l == "start 6" {
+			t.Fatalf("started #6 again within startedKeep: %q", readLines(t, log))
+		}
+	}
+	if got, err := loadQueueState(cfg.State); err != nil || got.Done["acme/widgets#5"].Before(time.Now().Add(-time.Hour)) {
+		t.Fatalf("expired entry stayed with its old time: %v %v", got.Done, err)
+	}
+}
+
+// forgetStarted drops the done mark with the started record, so the state
+// file does not grow with every issue the queue has ever run.
+func TestForgetStartedDropsTheDoneMark(t *testing.T) {
+	cfg := fixQueue(t, "unused")
+	env := queueEnv{}
+	env.fill()
+	r, err := newQueueRunner(cfg, env, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss := queuedIssue{Repo: "acme/widgets", Issue: ghx.Issue{Number: 5}}
+	k := iss.key()
+	r.state.Started[k] = startedIssue{Repo: "acme/widgets", Number: 5, PR: 15, At: time.Now().Add(-time.Hour)}
+	r.state.Done[k] = time.Now().Add(-time.Hour)
+	r.done[k] = true
+	r.forgetStarted(iss)
+	if _, ok := r.state.Done[k]; ok || r.done[k] {
+		t.Fatalf("done mark kept: state %v, memory %v", r.state.Done, r.done[k])
+	}
+}
+
+// A recorded process group older than activeKeep may be a reused ID after a
+// reboot, so it does not block the issue even while a process holds it.
+func TestQueueIgnoresAnOldActiveProcessGroup(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "log")
+	cfg := fixQueue(t, log)
+	cmd := exec.Command("sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pgid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+	st := newQueueState()
+	st.Active["acme/widgets#5"] = pgid
+	st.ActiveAt["acme/widgets#5"] = time.Now().Add(-activeKeep - time.Hour)
+	if err := st.save(cfg.State); err != nil {
+		t.Fatal(err)
+	}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{openIssue(5, "2026-01-01T00:00:00Z")}, nil
+		},
+		prs: staticPRs(),
+	})
+	waitFor(t, "issue #5 starts despite the live old group", func() bool { return len(readLines(t, log)) >= 1 })
+	s.stop(t)
+}
+
+// An agent the queue starts is recorded with its process group and the time,
+// through the real process runner, and the record goes when the agent exits.
+func TestQueueRecordsTheActiveAgentWithItsStartTime(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	cfg := fixQueue(t, log)
+	cfg.Agents = []queueAgent{{Command: []string{blockScript(t), log, "start {number}"}}}
+	before := time.Now().Add(-time.Second)
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{openIssue(5, "2026-01-01T00:00:00Z")}, nil
+		},
+		prs: staticPRs(),
+	})
+	waitFor(t, "the active record", func() bool {
+		st, err := loadQueueState(cfg.State)
+		return err == nil && st.Active["acme/widgets#5"] > 0 && st.ActiveAt["acme/widgets#5"].After(before)
+	})
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the record cleared", func() bool {
+		st, err := loadQueueState(cfg.State)
+		_, at := st.ActiveAt["acme/widgets#5"]
+		return err == nil && st.Active["acme/widgets#5"] == 0 && !at
+	})
+	s.stop(t)
 }

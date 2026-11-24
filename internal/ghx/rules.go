@@ -39,8 +39,8 @@ func (CLI) RequiredChecks(repo, branch string) (names []string, known bool, err 
 	return combineRequired(rules, rulesAbsent, rulesErr, prot, protAbsent, protErr)
 }
 
-func apiGet(path string) (body []byte, absent bool, err error) {
-	body, err = run("api", path)
+func apiGet(path string, flags ...string) (body []byte, absent bool, err error) {
+	body, err = run(append(append([]string{"api"}, flags...), path)...)
 	if err == nil {
 		return body, false, nil
 	}

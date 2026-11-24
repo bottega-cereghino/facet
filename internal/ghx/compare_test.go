@@ -71,3 +71,22 @@ func TestCompareFilesRefusesTruncatedListing(t *testing.T) {
 		t.Fatalf("err = %v, want truncated error", err)
 	}
 }
+
+func TestCompareFilesKeepsEveryEntryOfARepeatedName(t *testing.T) {
+	fakeGh(t, `{"files":[`+
+		`{"filename":"a.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-a\n+b\n"},`+
+		`{"filename":"a.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-a\n+// @ts-ignore\n"}]}`, "", 0)
+	got, err := (CLI{}).CompareFiles("acme/widgets", "abc", "def")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !strings.Contains(got[1].Patch, "@ts-ignore") {
+		t.Fatalf("got %+v, want both entries of a.ts", got)
+	}
+	fakeGh(t, `{"files":[`+
+		`{"filename":"a.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-a\n+b\n"},`+
+		`{"filename":"a.ts","status":"modified","changes":4}]}`, "", 0)
+	if _, err := (CLI{}).CompareFiles("acme/widgets", "abc", "def"); err == nil || !strings.Contains(err.Error(), "no patch for a.ts") {
+		t.Fatalf("err = %v, want the second entry's missing patch refused", err)
+	}
+}

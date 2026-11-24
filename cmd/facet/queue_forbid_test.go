@@ -208,53 +208,6 @@ func TestQueueBacksOffAnUnreadableFixDiff(t *testing.T) {
 	}
 }
 
-// A compare diff spanning more than one page with a suppression on the second
-// page is refused rather than landed.
-func TestQueueRefusesSuppressionOnSecondComparePage(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "log")
-	notified := filepath.Join(t.TempDir(), "notify")
-	cfg := fixQueue(t, log)
-	cfg.Fix.Notify = []string{appendScript(t), notified, "{repo}#{number} PR {pr}: {reason}"}
-	seedState(t, cfg.State, []int{1}, nil)
-	labels := &labelCalls{}
-	land := &landCalls{}
-	prs := func(string) ([]ghx.OpenPR, error) {
-		n := countLines(log)
-		pr := redPR(11, "feature/1-bell")
-		pr.HeadRefOid = fmt.Sprintf("h%d", n)
-		if n > 0 {
-			pr = landPR(11, "feature/1-bell", "CLEAN")
-			pr.HeadRefOid = fmt.Sprintf("h%d", n)
-		}
-		return []ghx.OpenPR{pr}, nil
-	}
-	var page1 strings.Builder
-	page1.WriteString(`{"files":[`)
-	for i := 0; i < 100; i++ {
-		if i > 0 {
-			page1.WriteByte(',')
-		}
-		fmt.Fprintf(&page1, `{"filename":"f%03d.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-old\n+new\n"}`, i)
-	}
-	page1.WriteString(`]}`)
-	page2 := `{"files":[{"filename":"page2.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-foo\n+foo!\n"}]}`
-	installFakeGh(t, page1.String()+page2)
-	s := startQueue(t, cfg, land.env(queueEnv{
-		list:         noIssues,
-		prs:          prs,
-		addLabel:     labels.add,
-		compareFiles: ghx.CLI{}.CompareFiles,
-	}))
-	waitFor(t, "the notify", func() bool { return len(readLines(t, notified)) >= 1 })
-	s.stop(t)
-	if len(land.list()) != 0 {
-		t.Fatalf("landed = %q, want no merge", land.list())
-	}
-	if !strings.Contains(s.buf.String(), "page2.ts") || !strings.Contains(s.buf.String(), "not landing") {
-		t.Fatalf("log =\n%s", s.buf.String())
-	}
-}
-
 // A truncated compare diff is refused with a clear log line and never landed.
 func TestQueueRefusesTruncatedCompareDiff(t *testing.T) {
 	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))

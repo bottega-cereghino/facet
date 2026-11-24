@@ -335,6 +335,8 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 			r.state.noteStart(s)
 		}
 		delete(r.state.Started, k)
+		delete(r.state.Done, k)
+		delete(r.done, k)
 	}
 	r.mu.Unlock()
 	r.saveState()

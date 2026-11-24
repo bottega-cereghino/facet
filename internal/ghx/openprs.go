@@ -1,9 +1,11 @@
 package ghx
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strconv"
 	"strings"
@@ -145,7 +147,7 @@ func (CLI) MergeMethod(repo, branch string) (string, error) {
 		linearHistory bool
 	)
 	if branch = strings.TrimSpace(branch); branch != "" {
-		rulesBody, absent, err := apiGet(fmt.Sprintf("repos/%s/rules/branches/%s", repo, url.PathEscape(branch)))
+		rulesBody, absent, err := apiGet(fmt.Sprintf("repos/%s/rules/branches/%s?per_page=%d", repo, url.PathEscape(branch), restPerPage), "--paginate")
 		if err != nil {
 			return "", err
 		}
@@ -183,8 +185,21 @@ func parseRuleMergeMethods(body []byte) (allowed map[string]bool, restricted, li
 			AllowedMergeMethods []string `json:"allowed_merge_methods"`
 		} `json:"parameters"`
 	}
-	if err := json.Unmarshal(body, &rules); err != nil {
-		return nil, false, false, err
+	// --paginate prints one JSON array per page, back to back.
+	dec := json.NewDecoder(bytes.NewReader(body))
+	for {
+		var page []struct {
+			Type       string `json:"type"`
+			Parameters struct {
+				AllowedMergeMethods []string `json:"allowed_merge_methods"`
+			} `json:"parameters"`
+		}
+		if err := dec.Decode(&page); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, false, false, err
+		}
+		rules = append(rules, page...)
 	}
 	for _, rule := range rules {
 		switch rule.Type {

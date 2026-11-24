@@ -25,6 +25,9 @@ type queueState struct {
 	Merges  map[string]*mergeHold   `json:"merges,omitempty"`
 	Done    map[string]time.Time    `json:"done,omitempty"`
 	Active  map[string]int          `json:"active,omitempty"`
+	// ActiveAt is when each Active entry was recorded. A process group ID
+	// can be reused after a reboot, so an entry past activeKeep is ignored.
+	ActiveAt map[string]time.Time `json:"active_at,omitempty"`
 	// Starts is every issue the queue started, kept after Started drops a
 	// merged one, so the cap window still counts that run. Empty when the
 	// config has no cap.
@@ -79,11 +82,12 @@ type fixRecord struct {
 
 func newQueueState() *queueState {
 	return &queueState{
-		Started: map[string]startedIssue{},
-		Fixes:   map[string]*fixRecord{},
-		Merges:  map[string]*mergeHold{},
-		Done:    map[string]time.Time{},
-		Active:  map[string]int{},
+		Started:  map[string]startedIssue{},
+		Fixes:    map[string]*fixRecord{},
+		Merges:   map[string]*mergeHold{},
+		Done:     map[string]time.Time{},
+		Active:   map[string]int{},
+		ActiveAt: map[string]time.Time{},
 	}
 }
 
@@ -113,6 +117,9 @@ func loadQueueState(path string) (*queueState, error) {
 	}
 	if st.Done == nil {
 		st.Done = map[string]time.Time{}
+	}
+	if st.ActiveAt == nil {
+		st.ActiveAt = map[string]time.Time{}
 	}
 	if st.Active == nil {
 		st.Active = map[string]int{}

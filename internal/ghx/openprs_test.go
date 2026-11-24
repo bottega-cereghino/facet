@@ -257,3 +257,34 @@ func TestViewerFailsWithoutALogin(t *testing.T) {
 		t.Fatal("an empty login returned no error")
 	}
 }
+
+// gh --paginate prints one array per page; a restriction on a later page
+// still counts, and the request asks for every page.
+func TestMergeMethodReadsEveryRulesPage(t *testing.T) {
+	dir := t.TempDir()
+	q := "'" + dir + "'"
+	repo := `{"squashMergeAllowed": true, "mergeCommitAllowed": true, "rebaseMergeAllowed": true}`
+	rules := `[{"type":"creation"}][{"type":"pull_request","parameters":{"allowed_merge_methods":["rebase"]}}]`
+	for name, body := range map[string]string{"repo": repo, "rules": rules} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"repo) /bin/cat " + q + "/repo ;;\n" +
+		"api) for a in \"$@\"; do printf '%s\\n' \"$a\"; done > " + q + "/args; /bin/cat " + q + "/rules ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	got, err := (CLI{}).MergeMethod("acme/widgets", "main")
+	if err != nil || got != "rebase" {
+		t.Fatalf("MergeMethod = %q, %v; want rebase from the second page", got, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "args"))
+	if err != nil || !strings.Contains(string(raw), "--paginate") {
+		t.Fatalf("gh api args = %q, %v; want --paginate", raw, err)
+	}
+}
