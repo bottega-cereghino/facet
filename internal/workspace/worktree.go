@@ -263,6 +263,7 @@ func InspectWorktree(dir string, git gitx.Runner, pr PRLookup, mux LiveChecker) 
 			st.PR = found
 		} else {
 			st.PRUnknown = true
+			st.PRErr = err
 		}
 	} else if pr != nil && networkRemote(origin) && repo == "" && c.Branch != "" && c.Branch != "HEAD" {
 		// An origin on a host that is not plain github.com (an SSH host alias,

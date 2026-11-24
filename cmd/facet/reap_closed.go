@@ -42,6 +42,7 @@ func closedReason(st *workspace.IssueState) string {
 		case "OPEN":
 			return closedPROpen
 		default:
+			st.PRErr = fmt.Errorf("unexpected pull request state %q", st.PR.State)
 			return closedLookupFailed
 		}
 	}
@@ -50,11 +51,13 @@ func closedReason(st *workspace.IssueState) string {
 	}
 	head, err := git.Run(filepath.Join(st.Dir, st.Issue.Home), nil, "rev-parse", "--verify", "HEAD")
 	if err != nil {
+		st.PRErr = err
 		return closedLookupFailed
 	}
 	merged, err := gh.MergedPRForSHA(st.Issue.Repo, strings.TrimSpace(head))
 	switch {
 	case err != nil:
+		st.PRErr = err
 		return closedLookupFailed
 	case merged == nil:
 		return closedNoPR
@@ -89,7 +92,15 @@ func printLeftOut(out io.Writer, leftOut map[string][]*workspace.IssueState) {
 		sort.Slice(sts, func(i, j int) bool { return reapName(sts[i]) < reapName(sts[j]) })
 		_, _ = fmt.Fprintf(out, "  %s (%d)\n", k, len(sts))
 		for _, st := range sts {
-			_, _ = fmt.Fprintln(out, "    "+reapName(st))
+			line := "    " + reapName(st)
+			if k == closedLookupFailed && st.PRErr != nil {
+				line += ": " + oneLine(st.PRErr.Error())
+			}
+			_, _ = fmt.Fprintln(out, line)
 		}
 	}
 }
+
+// oneLine folds s onto one line, so an error with a body stays on its
+// workspace's line.
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
