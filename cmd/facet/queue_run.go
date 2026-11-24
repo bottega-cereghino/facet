@@ -265,6 +265,13 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 }
 
 func runQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
+	if cfg.State != "" && (cfg.Fix != nil || cfg.Cap != nil) {
+		release, err := lockQueueState(cfg.State)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	r, err := newQueueRunner(cfg, env, false)
 	if err != nil {
 		return err

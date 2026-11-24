@@ -557,3 +557,29 @@ func TestQueueFixConfig(t *testing.T) {
 		}
 	}
 }
+
+// Two queues on one state file would start the same issue twice and lose
+// each other's records. The second one refuses, with the fix, and starts
+// nothing; once the first has stopped, a new one runs.
+func TestQueueRefusesAStateFileAnotherQueueHolds(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	release, err := lockQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := &countCalls{}
+	env := queueEnv{list: func(repo, _ string) ([]ghx.Issue, error) { listed.add(repo); return nil, nil }, out: &bytes.Buffer{}}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = runQueue(ctx, cfg, env)
+	if err == nil || !strings.Contains(err.Error(), "is in use") || !strings.Contains(err.Error(), "fix:") {
+		t.Fatalf("err = %v, want a refusal with the fix", err)
+	}
+	if listed.get("acme/widgets") != 0 {
+		t.Fatal("the second queue listed issues")
+	}
+	release()
+	s := startQueue(t, cfg, env)
+	waitFor(t, "a round", func() bool { return listed.get("acme/widgets") >= 1 })
+	s.stop(t)
+}

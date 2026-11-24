@@ -466,7 +466,7 @@ never passed through a shell.
 | `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}`. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
 | `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
-| `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. |
+| `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. While the queue runs it holds an exclusive lock on the file beside it named `<state>.lock`, and a second queue on the same state file refuses to start, with the fix. |
 | `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
 | `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`, `disk`, `disk_clear`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
@@ -857,6 +857,7 @@ writes no state. It runs the gate as for a start.
 `TestQueueClearsTheRecordOfAPRThatTurnedGreen`,
 `TestQueueDoesNotCountAFixStoppedWithTheQueue`,
 `TestQueueStateSurvivesARestart`, `TestQueueStateIsSyncedBeforeTheRenameAndAfter`,
+`TestQueueRefusesAStateFileAnotherQueueHolds`,
 `TestQueueStartsNoFixWhenThePRListingFails`,
 `TestQueueListsARepositoryOnlyWhenItsIssuesCanAct`,
 `TestQueueReusesTheListingForAnIssueThatWaitsToLand`,
