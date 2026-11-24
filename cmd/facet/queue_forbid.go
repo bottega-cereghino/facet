@@ -33,12 +33,51 @@ func (r *queueRunner) suppression(iss queuedIssue, pr ghx.OpenPR) (pattern, file
 	if err != nil {
 		return "", "", false, fmt.Errorf("read the diff %s pushed from %s to %s: %w", iss.key(), base, pr.HeadRefOid, err)
 	}
+	// A merge from the base branch brings lines the run did not write. Judge
+	// only the lines that are also in the pull request's own diff.
+	if pr.BaseRefName == "" {
+		return "", "", false, fmt.Errorf("read the diff of %s against its base: the pull request names no base branch", iss.key())
+	}
+	prFiles, err := r.env.compareFiles(iss.Repo, pr.BaseRefName, pr.HeadRefOid)
+	if err != nil {
+		return "", "", false, fmt.Errorf("read the diff of %s against %s: %w", iss.key(), pr.BaseRefName, err)
+	}
+	files = onlyInBoth(files, prFiles)
 	if r.cfg.Fix.forbidCustom {
 		pattern, file, bad = forbidHit(files, r.cfg.Fix.forbidPatterns())
 	} else {
 		pattern, file, bad = defaultForbidHit(files, r.cfg.Fix.forbidPatterns())
 	}
 	return pattern, file, bad, nil
+}
+
+// onlyInBoth drops from run every added line that the pull request's diff
+// (pr) does not add in the same file. Removed and context lines stay, so a
+// raised number still pairs with the line it replaced.
+func onlyInBoth(run, pr []ghx.DiffFile) []ghx.DiffFile {
+	added := map[string]map[string]bool{}
+	for _, f := range pr {
+		set := added[f.Name]
+		if set == nil {
+			set = map[string]bool{}
+			added[f.Name] = set
+		}
+		for _, l := range addedLines(f.Patch) {
+			set[l] = true
+		}
+	}
+	out := make([]ghx.DiffFile, 0, len(run))
+	for _, f := range run {
+		var keep []string
+		for _, line := range strings.Split(f.Patch, "\n") {
+			if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") && !added[f.Name][line[1:]] {
+				continue
+			}
+			keep = append(keep, line)
+		}
+		out = append(out, ghx.DiffFile{Name: f.Name, Patch: strings.Join(keep, "\n")})
+	}
+	return out
 }
 
 func (r *queueRunner) fixBase(key string) string {
