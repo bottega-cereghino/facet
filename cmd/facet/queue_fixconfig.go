@@ -27,6 +27,10 @@ const defaultFixPrompt = "Never take a shortcut. Take the long road, or stop, sa
 // defaultForbid is the pattern list used when fix.forbid is omitted. Each
 // entry is a regular expression matched against lines a fix run added.
 // An empty fix.forbid turns the check off; it does not mean this list.
+// The first defaultCastPatterns entries are casts: they apply only to
+// TypeScript files, outside strings, comments and import or export lines.
+// The rest are comment directives and apply to any code file. A fix.forbid
+// that is set is used as written, with none of this scoping.
 var defaultForbid = []string{
 	`(?:[[:alpha:]_][[:alnum:]_]*|\]|\))!(?:[^\w=]|$)`,
 	` as `,
@@ -38,6 +42,9 @@ var defaultForbid = []string{
 	`\bnolint\b`,
 	`\bnoqa\b`,
 }
+
+// defaultCastPatterns is how many leading defaultForbid entries are casts.
+const defaultCastPatterns = 3
 
 // queueFix is the validated fix block: how the queue repairs its own red or
 // conflicting pull requests before it starts new work.
@@ -58,6 +65,10 @@ type queueFix struct {
 	// forbidOff is set when fix.forbid is an empty list, which turns the
 	// suppression check off. Omitted fix.forbid leaves it false.
 	forbidOff bool
+	// forbidCustom is set when fix.forbid lists patterns: they match every
+	// added line of every file, as written. False means defaultForbid, with
+	// its scoping.
+	forbidCustom bool
 }
 
 // queueFixFile is the JSON shape of fix, before defaults.
@@ -123,6 +134,7 @@ func normalizeFix(configPath, state string, raw *queueFixFile) (*queueFix, strin
 		patterns = nil
 	default:
 		patterns = *raw.Forbid
+		fix.forbidCustom = true
 	}
 	if !fix.forbidOff {
 		compiled, err := compileForbid(patterns)

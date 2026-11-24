@@ -26,6 +26,10 @@ func TestForbidHitOnAddedLines(t *testing.T) {
 	baseUp := []ghx.DiffFile{{Name: "config/size-limit.json", Patch: "@@ -1 +1 @@\n-{\"max\": 3}\n+{\"max\": 4}\n"}}
 	baseDown := []ghx.DiffFile{{Name: "config/size-limit.json", Patch: "@@ -1 +1 @@\n-{\"max\": 4}\n+{\"max\": 3}\n"}}
 	otherUp := []ghx.DiffFile{{Name: "unlimited.go", Patch: "@@ -1 +1 @@\n-n := 3\n+n := 4\n"}}
+	one := func(name, line string) []ghx.DiffFile {
+		return []ghx.DiffFile{{Name: name, Patch: "@@ -1 +1 @@\n-x\n+" + line + "\n"}}
+	}
+	multi := []ghx.DiffFile{{Name: "a.ts", Patch: "@@ -1 +1 @@\n-x\n+import {\n+  strings as stringsFor,\n+} from './s'\n+const y = z as Q\n"}}
 	for _, tc := range []struct {
 		name    string
 		files   []ghx.DiffFile
@@ -37,12 +41,26 @@ func TestForbidHitOnAddedLines(t *testing.T) {
 		{"a removed bang is not added", kept, "", ""},
 		{"inequality is not a non-null assertion", neq, "", ""},
 		{"bang after a bracket or a paren", call, defaultForbid[0], "a.ts"},
+		{"import alias", one("a.ts", "import { strings as stringsFor } from './s'"), "", ""},
+		{"multi-line import alias, then a cast", multi, " as ", "a.ts"},
+		{"re-export alias", one("a.ts", "export { a as b } from './a'"), "", ""},
+		{"python import as", one("a.py", "import numpy as np"), "", ""},
+		{"python with as", one("a.py", "with open(p) as f:"), "", ""},
+		{"such as in markdown", one("README.md", "Files such as this one"), "", ""},
+		{"as in a comment", one("a.ts", "// a cast such as x as T is banned"), "", ""},
+		{"as in a string", one("a.ts", "const m = 'cast as T'"), "", ""},
+		{"cast in a tsx file", one("a.tsx", "const v = x as Bar"), " as ", "a.tsx"},
+		{"as any", one("a.ts", "const v = x as any"), " as ", "a.ts"},
+		{"nolint in go", one("a.go", "// nolint"), `\bnolint\b`, "a.go"},
+		{"ts-ignore in ts", one("a.ts", "// @ts-ignore"), "@ts-ignore", "a.ts"},
+		{"bang in go is not a cast", one("a.go", "x := f()!"), "", ""},
+		{"nolint in markdown is prose", one("a.md", "use nolint here"), "", ""},
 		{"a baseline number raised", baseUp, "higher number", "config/size-limit.json"},
 		{"a baseline number lowered", baseDown, "", ""},
 		{"a higher number in another file", otherUp, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pattern, file, bad := forbidHit(tc.files, patterns)
+			pattern, file, bad := defaultForbidHit(tc.files, patterns)
 			if tc.pattern == "" {
 				if bad {
 					t.Fatalf("forbidHit = %q in %s", pattern, file)
@@ -53,6 +71,18 @@ func TestForbidHitOnAddedLines(t *testing.T) {
 				t.Fatalf("forbidHit = %q in %s, bad %v", pattern, file, bad)
 			}
 		})
+	}
+}
+
+// A configured fix.forbid is used as written, on every file.
+func TestForbidHitAsWritten(t *testing.T) {
+	patterns, err := compileForbid([]string{" as "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []ghx.DiffFile{{Name: "README.md", Patch: "@@ -1 +1 @@\n-x\n+such as this\n"}}
+	if p, f, bad := forbidHit(files, patterns); !bad || p != " as " || f != "README.md" {
+		t.Fatalf("forbidHit = %q in %s, bad %v", p, f, bad)
 	}
 }
 
@@ -205,5 +235,18 @@ func TestQueueBacksOffAnUnreadableFixDiff(t *testing.T) {
 	if strings.Count(out, "no patch for a.ts; not landing, reading it again after") != 2 ||
 		!strings.Contains(out, "reading it again after "+(2*cfg.Wait).String()) {
 		t.Fatalf("log =\n%s", out)
+	}
+}
+
+func TestForbidCustomFlag(t *testing.T) {
+	base := `"repos": ["acme/widgets"], "agents": [{"command": ["agent", "{prompt}"]}]`
+	for forbid, want := range map[string]bool{``: false, `"forbid": [" as "], `: true} {
+		cfg, err := loadTempConfig(t, `{"state": "s", "fix": {`+forbid+`"command": ["fixer", "{prompt}"]}, `+base+`}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Fix.forbidCustom != want {
+			t.Fatalf("forbid %q: forbidCustom = %v, want %v", forbid, cfg.Fix.forbidCustom, want)
+		}
 	}
 }

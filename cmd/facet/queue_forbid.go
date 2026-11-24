@@ -33,7 +33,11 @@ func (r *queueRunner) suppression(iss queuedIssue, pr ghx.OpenPR) (pattern, file
 	if err != nil {
 		return "", "", false, fmt.Errorf("read the diff %s pushed from %s to %s: %w", iss.key(), base, pr.HeadRefOid, err)
 	}
-	pattern, file, bad = forbidHit(files, r.cfg.Fix.forbidPatterns())
+	if r.cfg.Fix.forbidCustom {
+		pattern, file, bad = forbidHit(files, r.cfg.Fix.forbidPatterns())
+	} else {
+		pattern, file, bad = defaultForbidHit(files, r.cfg.Fix.forbidPatterns())
+	}
 	return pattern, file, bad, nil
 }
 
@@ -77,6 +81,80 @@ func forbidHit(files []ghx.DiffFile, patterns []*regexp.Regexp) (pattern, file s
 		}
 	}
 	return "", "", false
+}
+
+// proseExt are files the default check does not read: a word in prose is
+// not a suppression.
+var proseExt = map[string]bool{".md": true, ".mdx": true, ".markdown": true, ".txt": true, ".rst": true, ".adoc": true}
+
+// tsExt are the files whose lines can hold a type assertion.
+var tsExt = map[string]bool{".ts": true, ".tsx": true, ".mts": true, ".cts": true}
+
+var (
+	moduleLine  = regexp.MustCompile(`^\s*(?:import\b|export\s+(?:type\s+)?[{*])`)
+	stringLit   = regexp.MustCompile("\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`")
+	blockOpener = regexp.MustCompile(`^\s*(?:import|export)\b[^;]*\{[^}]*$`)
+)
+
+// defaultForbidHit is forbidHit for the default list. Casts are looked for
+// only in TypeScript files, in code: not in strings or comments, and not on
+// import or export lines (including the lines of a multi-line import list).
+// Directive patterns match any code file. Prose files are not read for
+// patterns. A raised baseline number is still caught in any file.
+func defaultForbidHit(files []ghx.DiffFile, patterns []*regexp.Regexp) (pattern, file string, bad bool) {
+	casts, directives := patterns, []*regexp.Regexp(nil)
+	if len(patterns) > defaultCastPatterns {
+		casts, directives = patterns[:defaultCastPatterns], patterns[defaultCastPatterns:]
+	}
+	for _, f := range files {
+		ext := strings.ToLower(path.Ext(f.Name))
+		if !proseExt[ext] {
+			inList := false
+			for _, line := range addedLines(f.Patch) {
+				if p := lineHit(line, directives); p != "" {
+					return p, f.Name, true
+				}
+				code, skip := castCode(line, &inList)
+				if tsExt[ext] && !skip {
+					if p := lineHit(code, casts); p != "" {
+						return p, f.Name, true
+					}
+				}
+			}
+		}
+		if baselineFile.MatchString(path.Base(f.Name)) && higherNumber(f.Patch) {
+			return "higher number", f.Name, true
+		}
+	}
+	return "", "", false
+}
+
+// castCode returns the line without strings and trailing // comments, and
+// whether the line holds no code a cast can sit in: a comment line, or part
+// of an import or export list. inList carries a multi-line list across lines.
+func castCode(line string, inList *bool) (string, bool) {
+	trim := strings.TrimSpace(line)
+	if *inList {
+		if strings.Contains(line, "}") {
+			*inList = false
+		}
+		return "", true
+	}
+	if strings.HasPrefix(trim, "//") || strings.HasPrefix(trim, "/*") || strings.HasPrefix(trim, "*") {
+		return "", true
+	}
+	if blockOpener.MatchString(line) {
+		*inList = true
+		return "", true
+	}
+	if moduleLine.MatchString(line) {
+		return "", true
+	}
+	code := stringLit.ReplaceAllString(line, `""`)
+	if i := strings.Index(code, "//"); i >= 0 {
+		code = code[:i]
+	}
+	return code, false
 }
 
 func lineHit(line string, patterns []*regexp.Regexp) string {
