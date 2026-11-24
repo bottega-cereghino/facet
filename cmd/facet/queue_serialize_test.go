@@ -36,9 +36,15 @@ func TestMatchGlob(t *testing.T) {
 		{"**/*.lock", "app/Cargo.lock", true},
 		{"**/*.lock", "lock.txt", false},
 		{"package-lock.json", "package-lock.json", true},
-		{"package-lock.json", "sub/package-lock.json", false},
+		{"package-lock.json", "web/package-lock.json", true},
+		{"/package-lock.json", "package-lock.json", true},
+		{"/package-lock.json", "sub/package-lock.json", false},
+		{"*.lock", "uv.lock", true},
+		{"*.lock", "web/yarn.lock", true},
 		{"go.sum", "go.sum", true},
-		{"go.sum", "sub/go.sum", false},
+		{"go.sum", "sub/go.sum", true},
+		{"/go.sum", "go.sum", true},
+		{"/go.sum", "sub/go.sum", false},
 		{"a/**/b", "a/b", true},
 		{"a/**/b", "a/x/b", true},
 		{"a/**/b", "a/x/y/b", true},
@@ -72,6 +78,10 @@ func TestQueueSerializeConfigValidation(t *testing.T) {
 		`,"serialize":{"paths":[]}`,
 		`,"serialize":{"paths":["   "]}`,
 		`,"serialize":{"paths":["[unclosed"]}`,
+		`,"serialize":{"paths":["docs/"]}`,
+		`,"serialize":{"paths":["/"]}`,
+		`,"serialize":{"paths":["a//b"]}`,
+		`,"serialize":{"paths":[".."]}`,
 	} {
 		if _, err := writeCfg(bad); err == nil || !strings.Contains(err.Error(), "fix:") {
 			t.Errorf("bad %s: err = %v, want error with fix:", bad, err)
@@ -420,5 +430,121 @@ func TestQueueCachesPRFilesAndLogsWaitOncePerListing(t *testing.T) {
 	}
 	if count := strings.Count(s.buf.String(), "waits for #11, shared file config.json"); count != 1 {
 		t.Fatalf("wait logged %d times, want 1:\n%s", count, s.buf.String())
+	}
+}
+
+func TestQueueSerializeSkipsUnlandableOlderPR(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, statePath string, pr11 *ghx.OpenPR)
+	}{
+		{
+			name: "blocked older PR",
+			setup: func(t *testing.T, statePath string, _ *ghx.OpenPR) {
+				st, err := loadQueueState(statePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				st.Fixes["acme/widgets#1"] = &fixRecord{PR: 11, Runs: 2, Blocked: true}
+				if err := st.save(statePath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "stopped after five refused merges",
+			setup: func(t *testing.T, statePath string, pr11 *ghx.OpenPR) {
+				st, err := loadQueueState(statePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				st.Merges["acme/widgets#11"] = &mergeHold{
+					Head:    pr11.HeadRefOid,
+					Checks:  checksFingerprint(pr11.Checks),
+					Count:   maxMergeRefusals,
+					Stopped: true,
+				}
+				if err := st.save(statePath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "draft older PR",
+			setup: func(_ *testing.T, _ string, pr11 *ghx.OpenPR) {
+				pr11.IsDraft = true
+				pr11.MergeStateStatus = "DRAFT"
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+			cfg.Serialize = &queueSerialize{Paths: []string{"package-lock.json"}}
+			seedState(t, cfg.State, []int{1, 2}, nil)
+
+			pr11 := landPR(11, "feature/1-bell", "CLEAN")
+			pr11.CreatedAt = recentRFC3339(2 * time.Hour)
+			pr12 := landPR(12, "feature/2-horn", "CLEAN")
+			pr12.CreatedAt = recentRFC3339(time.Hour)
+			tc.setup(t, cfg.State, &pr11)
+
+			var merged12 atomic.Bool
+			land := &landCalls{
+				merge: func(n int) error {
+					if n == 12 {
+						merged12.Store(true)
+					}
+					return nil
+				},
+				files: func(string, int) ([]string, error) {
+					return []string{"web/package-lock.json"}, nil
+				},
+			}
+			prs := func(string) ([]ghx.OpenPR, error) {
+				if merged12.Load() {
+					return []ghx.OpenPR{pr11}, nil
+				}
+				return []ghx.OpenPR{pr11, pr12}, nil
+			}
+			s := startQueue(t, cfg, land.env(queueEnv{list: noIssues, prs: prs}))
+			waitFor(t, "younger PR #12 merged", func() bool { return merged12.Load() })
+			s.stop(t)
+			if got := strings.Join(land.list(), "|"); got != "merge acme/widgets#12 squash head12" {
+				t.Fatalf("landed = %q, want only #12", got)
+			}
+			if strings.Contains(s.buf.String(), "waits for #11") {
+				t.Fatalf("younger PR waited for unlandable #11:\n%s", s.buf.String())
+			}
+		})
+	}
+}
+
+func TestQueueSerializesNestedLockfile(t *testing.T) {
+	cfg := fixQueue(t, "unused")
+	cfg.Serialize = &queueSerialize{Paths: []string{"*.lock", "package-lock.json"}}
+	seedState(t, cfg.State, []int{1, 2}, nil)
+
+	pr11 := landPR(11, "feature/1-bell", "CLEAN")
+	pr11.CreatedAt = recentRFC3339(2 * time.Hour)
+	pr11.Checks[0].Status = "IN_PROGRESS"
+	pr12 := landPR(12, "feature/2-horn", "CLEAN")
+	pr12.CreatedAt = recentRFC3339(time.Hour)
+
+	land := &landCalls{
+		files: func(string, int) ([]string, error) {
+			return []string{"web/package-lock.json"}, nil
+		},
+	}
+	var buf bytes.Buffer
+	err := testDryQueue(context.Background(), cfg, land.env(queueEnv{
+		list: noIssues,
+		prs:  staticPRs(pr11, pr12),
+		out:  &buf,
+	}))
+	if err != nil {
+		t.Fatalf("dryQueue err = %v", err)
+	}
+	if !strings.Contains(buf.String(), "acme/widgets#2 PR #12 waits for #11, shared file web/package-lock.json") {
+		t.Fatalf("expected nested lockfile wait:\n%s", buf.String())
 	}
 }

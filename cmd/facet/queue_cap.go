@@ -208,7 +208,7 @@ func (r *queueRunner) capApplies(ctx context.Context, repo string) (bool, error)
 	}
 	r.mu.Unlock()
 
-	err := r.env.run(ctx, "", expandArgv(c.Passes, map[string]string{"repo": repo}))
+	err := r.runCmd(ctx, "", expandArgv(c.Passes, map[string]string{"repo": repo}), nil)
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
