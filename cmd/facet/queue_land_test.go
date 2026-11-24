@@ -771,3 +771,59 @@ func TestUpdateBackoffDoublesAndResetsOnANewHead(t *testing.T) {
 		t.Fatalf("second wait = %s", wait)
 	}
 }
+
+// A draft is not landed, and neither is a pull request with no checks,
+// however clean GitHub says its merge is.
+func TestQueueLandsNeitherADraftNorAPRWithNoChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pr   func() ghx.OpenPR
+	}{
+		{"draft", func() ghx.OpenPR { pr := landPR(11, "feature/1-bell", "CLEAN"); pr.IsDraft = true; return pr }},
+		{"no checks", func() ghx.OpenPR { pr := landPR(11, "feature/1-bell", "CLEAN"); pr.Checks = nil; return pr }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+			seedState(t, cfg.State, []int{1}, nil)
+			land := &landCalls{}
+			ticks := &countCalls{}
+			s := startQueue(t, cfg, land.env(queueEnv{
+				list: func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+				prs:  staticPRs(tc.pr()),
+			}))
+			waitFor(t, "five rounds", func() bool { return ticks.get("acme/widgets") >= 5 })
+			s.stop(t)
+			if got := land.list(); len(got) != 0 {
+				t.Fatalf("landed = %q", got)
+			}
+		})
+	}
+}
+
+// A recorded pull request that now comes from a fork is not the queue's:
+// it is neither fixed nor landed.
+func TestQueueDoesNotTouchARecordedPRFromAFork(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "log")
+	cfg := fixQueue(t, log)
+	seedState(t, cfg.State, []int{1, 2}, nil)
+	recordPR(t, cfg.State, 1, 11)
+	recordPR(t, cfg.State, 2, 12)
+	red := redPR(11, "feature/1-bell")
+	red.IsCrossRepository = true
+	green := landPR(12, "feature/2-horn", "CLEAN")
+	green.IsCrossRepository = true
+	land := &landCalls{}
+	ticks := &countCalls{}
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+		prs:  staticPRs(red, green),
+	}))
+	waitFor(t, "five rounds", func() bool { return ticks.get("acme/widgets") >= 5 })
+	s.stop(t)
+	if got := land.list(); len(got) != 0 {
+		t.Fatalf("landed = %q", got)
+	}
+	if got := countLines(log); got != 0 {
+		t.Fatalf("runs = %q", readLines(t, log))
+	}
+}
