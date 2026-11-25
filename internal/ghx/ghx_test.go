@@ -1,9 +1,71 @@
 package ghx
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// fakeDevelopGh puts a gh on PATH whose `issue develop` fails with developErr
+// and whose `api` call (the ref read) exits refExit. It records every call.
+func fakeDevelopGh(t *testing.T, developErr string, refExit string) func() string {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\n" +
+		"echo \"$*\" >> '" + log + "'\n" +
+		"case \"$1\" in\n" +
+		"issue) echo '" + developErr + "' >&2; exit 1;;\n" +
+		"api) echo 'Not Found (HTTP 404)' >&2; exit " + refExit + ";;\n" +
+		"esac\nexit 2\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	return func() string {
+		raw, _ := os.ReadFile(log)
+		return string(raw)
+	}
+}
+
+// An unlinked branch of that name makes gh answer "empty branch name". With the
+// ref on the remote the spawn continues on that branch, after one ref read.
+func TestDevelopBranchReusesAnUnlinkedBranchThatIsOnTheRemote(t *testing.T) {
+	calls := fakeDevelopGh(t, "API returned empty branch name", "0")
+	got, err := (CLI{}).DevelopBranch("acme/lab", 5, "", "feature/5-fix")
+	if err != nil || got != "feature/5-fix" {
+		t.Fatalf("DevelopBranch = %q, %v; want the branch and no error", got, err)
+	}
+	if want := "api repos/acme/lab/git/ref/heads/feature/5-fix"; !strings.Contains(calls(), want) {
+		t.Errorf("no ref read %q in the calls:\n%s", want, calls())
+	}
+}
+
+// Without the ref the answer stays a failure, and it names the fix.
+func TestDevelopBranchFailsOnEmptyBranchNameWithNoRef(t *testing.T) {
+	fakeDevelopGh(t, "API returned empty branch name", "1")
+	got, err := (CLI{}).DevelopBranch("acme/lab", 5, "", "feature/5-fix")
+	if err == nil {
+		t.Fatalf("DevelopBranch = %q, nil; a missing ref was read as success", got)
+	}
+	for _, want := range []string{"empty branch name", "feature/5-fix", "push it or pick another name"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error lacks %q: %v", want, err)
+		}
+	}
+}
+
+// Any other failure is returned as it was, with no ref read.
+func TestDevelopBranchOtherFailuresStayFailures(t *testing.T) {
+	calls := fakeDevelopGh(t, "HTTP 500", "0")
+	if _, err := (CLI{}).DevelopBranch("acme/lab", 5, "", "feature/5-fix"); err == nil {
+		t.Fatal("an unrelated gh failure was read as success")
+	}
+	if strings.Contains(calls(), "api ") {
+		t.Errorf("a ref was read for an unrelated failure:\n%s", calls())
+	}
+}
 
 // A failed GraphQL call names its request without printing the whole query
 // ahead of the reason (facet#143); every other argument is kept as given.
