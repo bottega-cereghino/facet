@@ -6,6 +6,22 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.18.0](https://github.com/bottega-cereghino/facet/compare/v0.17.0...v0.18.0) (2026-11-25)
+
+
+### Added
+
+* **queue:** reap workspaces after merge ([#513](https://github.com/bottega-cereghino/facet/issues/513)) ([88ea359](https://github.com/bottega-cereghino/facet/commit/88ea359231ee00e08b88edf1ba5ed32b7f1d80b4))
+* **queue:** set FACET_QUEUE_RUN in each agent run and fix run ([#544](https://github.com/bottega-cereghino/facet/issues/544)) ([d387bc9](https://github.com/bottega-cereghino/facet/commit/d387bc9e1fa0371bd17f8d436734b79c04a97c4d)), refs [#541](https://github.com/bottega-cereghino/facet/issues/541)
+
+
+### Fixed
+
+* **queue:** harden landing compare diff, serialization, merge rules, and restart state ([#508](https://github.com/bottega-cereghino/facet/issues/508)) ([de310ed](https://github.com/bottega-cereghino/facet/commit/de310ed445cb3cc875de40349406f82bdb3e464c))
+* **queue:** judge only the lines a fix run added to the pull request ([#537](https://github.com/bottega-cereghino/facet/issues/537)) ([ca10ef8](https://github.com/bottega-cereghino/facet/commit/ca10ef8fb966f1f93853910c56ef15d88fe155cc))
+* **queue:** land and fix pull requests opened by a configured GitHub App ([#543](https://github.com/bottega-cereghino/facet/issues/543)) ([3dc1c27](https://github.com/bottega-cereghino/facet/commit/3dc1c27f0ced725fc8321ef9fd6c8fe1c5f361dc)), refs [#542](https://github.com/bottega-cereghino/facet/issues/542)
+* **reap:** --closed says why a pull request lookup failed, and an unknown commit is no pull request ([#538](https://github.com/bottega-cereghino/facet/issues/538)) ([d34a473](https://github.com/bottega-cereghino/facet/commit/d34a4734687aa4164a31d716935fb6a6f60aa770))
+
 ## [0.17.0](https://github.com/bottega-cereghino/facet/compare/v0.16.0...v0.17.0) (2026-11-24)
 
 

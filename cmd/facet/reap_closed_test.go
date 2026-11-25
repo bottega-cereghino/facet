@@ -88,7 +88,7 @@ func TestReapClosedReapsOnlyMergedOrClosedPullRequests(t *testing.T) {
 		"left out by --closed (4), by reason:",
 		"  no pull request (1)\n    " + filepath.Base(noPR) + "\n",
 		"  not an issue workspace (1)\n    " + filepath.Base(nonIssue) + "\n",
-		"  pull request lookup failed (1)\n    " + filepath.Base(failed) + "\n",
+		"  pull request lookup failed (1)\n    " + filepath.Base(failed) + ": HTTP 502\n",
 		"  pull request open (1)\n    " + filepath.Base(open) + "\n",
 		"2 reapable",
 	}
@@ -177,8 +177,8 @@ func TestReapClosedFindsAMergeByTheHomeCommit(t *testing.T) {
 	if !exists(t, failed) {
 		t.Fatalf("a failed lookup was read as merged:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "pull request lookup failed (1)") {
-		t.Errorf("output lacks the reason:\n%s", out.String())
+	if !strings.Contains(out.String(), "pull request lookup failed (1)\n    iss-10-failed: HTTP 403\n") {
+		t.Errorf("output lacks the reason and its error:\n%s", out.String())
 	}
 }
 
