@@ -343,3 +343,96 @@ func TestOnlyInBothJudgesTheRunsOwnLines(t *testing.T) {
 		})
 	}
 }
+
+// installRoutedGh puts a gh on PATH that answers with the file of the first
+// route whose key is in its arguments; a key with a "!" prefix in its value
+// answers on stderr and exits 1.
+func installRoutedGh(t *testing.T, routes [][2]string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\nargs=\"$*\"\n"
+	for i, r := range routes {
+		out := filepath.Join(dir, fmt.Sprintf("r%d", i))
+		body, tail := r[1], "; exit 0"
+		if strings.HasPrefix(body, "!") {
+			body, tail = body[1:], " >&2; exit 1"
+		}
+		if err := os.WriteFile(out, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		script += fmt.Sprintf("case \"$args\" in *'%s'*) /bin/cat '%s'%s;; esac\n", r[0], out, tail)
+	}
+	script += "echo unrouted >&2; exit 2\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// A file too large for GitHub's patch is read from its two blobs and judged
+// like any other: a clean one lands, a suppression is refused, and one that
+// cannot be read blocks the issue and notifies once.
+func TestQueueJudgesAFileWithNoPatch(t *testing.T) {
+	const refusal = "the fix suppresses instead of fixing"
+	compare := `{"files":[{"filename":"a.ts","status":"modified","changes":9}]}`
+	for _, tc := range []struct {
+		name   string
+		routes [][2]string
+		lands  bool
+		note   string
+	}{
+		{"clean lands", [][2]string{{"ref=h1", "keep\nnew\n"}, {"ref=", "keep\nold\n"}, {"compare/", compare}}, true, ""},
+		{"a forbidden line is refused", [][2]string{{"ref=h1", "keep\nconst x = y as T\n"}, {"ref=", "keep\nold\n"}, {"compare/", compare}}, false, refusal},
+		{"unreadable blocks", [][2]string{{"contents/", "!gh: Not Found (HTTP 404)"}, {"compare/", compare}}, false, "read the diff and merge by hand"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "log")
+			notified := filepath.Join(t.TempDir(), "notify")
+			cfg := fixQueue(t, log)
+			cfg.Fix.Notify = []string{appendScript(t), notified, "{repo}#{number} PR {pr}: {reason}"}
+			seedState(t, cfg.State, []int{1}, nil)
+			installRoutedGh(t, tc.routes)
+			labels := &labelCalls{}
+			land := &landCalls{}
+			prs := func(string) ([]ghx.OpenPR, error) {
+				n := countLines(log)
+				pr := redPR(11, "feature/1-bell")
+				if n > 0 {
+					pr = landPR(11, "feature/1-bell", "CLEAN")
+				}
+				pr.HeadRefOid = fmt.Sprintf("h%d", n)
+				return []ghx.OpenPR{pr}, nil
+			}
+			s := startQueue(t, cfg, land.env(queueEnv{
+				list:         noIssues,
+				prs:          prs,
+				addLabel:     labels.add,
+				compareFiles: ghx.CLI{}.CompareFiles,
+			}))
+			switch {
+			case tc.lands:
+				waitFor(t, "the merge", func() bool { return len(land.list()) >= 1 })
+			case tc.note == refusal:
+				waitFor(t, "the refusal", func() bool { return strings.Contains(s.buf.String(), refusal+": ") })
+			default:
+				waitFor(t, "the notify", func() bool { return len(readLines(t, notified)) >= 1 })
+			}
+			s.stop(t)
+			if tc.lands != (len(land.list()) > 0) {
+				t.Fatalf("landed %q, want lands %v\n%s", land.list(), tc.lands, s.buf.String())
+			}
+			if tc.lands || tc.note == refusal {
+				return
+			}
+			if got := readLines(t, notified); len(got) != 1 || !strings.Contains(got[0], tc.note) {
+				t.Fatalf("notify = %q, want one line with %q", got, tc.note)
+			}
+			if len(labels.list()) == 0 || labels.list()[0] != "acme/widgets#1 blocked" {
+				t.Fatalf("labels = %q", labels.list())
+			}
+			if strings.Contains(s.buf.String(), "reading it again") {
+				t.Fatalf("the queue kept retrying:\n%s", s.buf.String())
+			}
+		})
+	}
+}

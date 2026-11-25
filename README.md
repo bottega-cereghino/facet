@@ -866,7 +866,11 @@ is a failed try. So is a fix whose own commits suppress a finding instead of
 fixing it: after the run, and before anything of that pull request is
 landed, the queue reads the diff from the head the first fix run started
 at. An added line that matches `fix.forbid`, or a higher number in a file
-named like a baseline, ratchet or limit, is refused. A diff that cannot be read (a changed file with no patch, say) is not a
+named like a baseline, ratchet or limit, is refused. A file GitHub sends without a patch (a large one) is read at both
+commits and diffed locally, so every added line is judged. If such a file
+cannot be read, the queue stops retrying, adds the `fix.blockLabel` label,
+runs `fix.notify` once and says to read the diff and merge by hand. Any other
+diff that cannot be read is not a
 pass and is not landed: the queue reads it again after `wait`, then twice
 that, doubling up to an hour, and logs each read that fails. The refusal is a failed
 try. Nothing of that pull request is landed, and the next try is told the
