@@ -1002,6 +1002,12 @@ func TestQueueDoneEntriesExpire(t *testing.T) {
 		prs: staticPRs(),
 	})
 	waitFor(t, "the expired issue starts", func() bool { return len(readLines(t, log)) >= 1 })
+	// The log line comes before the state save; wait for the save so stop
+	// does not race it.
+	waitFor(t, "the state file marks #5 again", func() bool {
+		got, err := loadQueueState(cfg.State)
+		return err == nil && !got.Done["acme/widgets#5"].Before(time.Now().Add(-time.Hour))
+	})
 	s.stop(t)
 	for _, l := range readLines(t, log) {
 		if l == "start 6" {
