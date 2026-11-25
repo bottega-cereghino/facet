@@ -41,8 +41,17 @@ func prepareWorkspace(repo string, number int) (string, error) {
 	return prepareWorkspaceSpawn(roots.Workspaces, repo, number, func() error {
 		// Yes skips the confirmation: a queue has no one to answer the prompt.
 		// The list already required the issue to be open.
-		return runSpawn(spawnOpts{Number: number, Repo: repo, Yes: true})
+		return runSpawn(queueSpawnOpts(repo, number))
 	})
+}
+
+// queueSpawnOpts is how the queue spawns a workspace. Every repository is a
+// clone that shares no file with its source: a worktree would make
+// each commit, ref update and hook of the agent write into another checkout's
+// .git, and a sandbox that confines the agent to its workspace would have to
+// open that directory.
+func queueSpawnOpts(repo string, number int) spawnOpts {
+	return spawnOpts{Number: number, Repo: repo, Yes: true, NoWorktree: true, NoHardlinks: true}
 }
 
 // prepareWorkspaceSpawn uses spawn only when findIssueWorkspace reports none.
