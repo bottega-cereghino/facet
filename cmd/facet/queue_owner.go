@@ -68,17 +68,31 @@ func promptWithMarker(prompt, marker string) string {
 // alone is never enough. An error means the account cannot be read, and
 // the caller must not treat that as "not the queue's" and forget the start.
 func (r *queueRunner) ownsPR(s startedIssue, pr ghx.OpenPR) (bool, error) {
-	if pr.IsCrossRepository || !hasMarker(pr.Body, s.Marker) {
+	if !hasMarker(pr.Body, s.Marker) {
 		return false, nil
 	}
+	why, err := r.ownershipFailure(pr)
+	return why == "" && err == nil, err
+}
+
+// ownershipFailure is which condition of ownsPR, other than the trailer
+// line, pr fails: "" when it passes. An error means the account cannot be
+// read.
+func (r *queueRunner) ownershipFailure(pr ghx.OpenPR) (string, error) {
+	if pr.IsCrossRepository {
+		return ignoredFork, nil
+	}
 	if r.cfg.Fix != nil && authorIsApp(pr.Author.Login, r.cfg.Fix.Apps) {
-		return true, nil
+		return "", nil
 	}
 	login, err := r.viewerLogin()
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	return strings.EqualFold(pr.Author.Login, login), nil
+	if strings.EqualFold(pr.Author.Login, login) {
+		return "", nil
+	}
+	return ignoredAuthor, nil
 }
 
 // authorIsApp reports whether login is one of apps, given by slug. gh's

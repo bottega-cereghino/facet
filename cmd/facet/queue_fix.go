@@ -148,6 +148,7 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 			}
 			continue
 		}
+		r.noteIgnoredPRs(iss, got.prs)
 		pr, ok, err := r.queuePR(iss, got.prs)
 		if err != nil {
 			r.noteOnce(iss.key()+" owner", err.Error(), func() {
@@ -163,6 +164,7 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 			jobs = append(jobs, job)
 		}
 	}
+	r.relistIgnored()
 	return jobs
 }
 
