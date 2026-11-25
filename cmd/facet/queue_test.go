@@ -1292,7 +1292,7 @@ func TestQueueDoesNotHandTheSameIssueOutTwice(t *testing.T) {
 	}
 }
 
-func TestQueueDoesNotRetryAnAgentThatExitsNonZero(t *testing.T) {
+func TestQueueRetriesAnAgentThatExitsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	cfg := oneAgentConfig([]string{"acme/widgets"})
 	cfg.Agents = []queueAgent{{Command: []string{writeExe(t, "fail", "#!/bin/sh\nexit 1\n"), "{prompt}"}}}
@@ -1306,11 +1306,10 @@ func TestQueueDoesNotRetryAnAgentThatExitsNonZero(t *testing.T) {
 			return os.MkdirTemp(dir, "ws")
 		},
 	})
-	waitFor(t, "the agent", func() bool { return spawned.Load() >= 1 })
-	time.Sleep(200 * time.Millisecond)
+	waitFor(t, "a second try", func() bool { return spawned.Load() >= 2 })
 	s.stop(t)
-	if spawned.Load() != 1 {
-		t.Fatalf("spawned %d time(s), want 1", spawned.Load())
+	if spawned.Load() < 2 {
+		t.Fatalf("spawned %d time(s), want at least 2", spawned.Load())
 	}
 }
 
