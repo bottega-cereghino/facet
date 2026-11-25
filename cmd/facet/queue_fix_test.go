@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -291,6 +292,36 @@ func TestQueueFixesARedQueuePRBeforeANewIssue(t *testing.T) {
 	got := readLines(t, log)
 	if got[0] != "fix 1 PR 11 try 1: red: ci is FAILURE" {
 		t.Fatalf("runs = %q, want the fix first", got)
+	}
+}
+
+// Every agent run and fix run has FACET_QUEUE_RUN=1 in its environment, so
+// a watcher the agent starts ends with the run; it is set whatever the
+// queue itself inherited. The gate is no run and does not get it.
+func TestQueueSetsFacetQueueRunInEveryRun(t *testing.T) {
+	t.Setenv("FACET_QUEUE_RUN", "")
+	if err := os.Unsetenv("FACET_QUEUE_RUN"); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(t.TempDir(), "log")
+	cfg := fixQueue(t, log)
+	env := writeExe(t, "env", "#!/bin/sh\nprintf '%s %s\\n' \"$2\" \"${FACET_QUEUE_RUN-unset}\" >> \"$1\"\n")
+	cfg.Agents[0].Command[0] = env
+	cfg.Fix.Command[0] = env
+	cfg.Gate = []string{env, log, "gate"}
+	seedState(t, cfg.State, []int{1}, nil)
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{openIssue(5, "2025-01-01T00:00:00Z")}, nil
+		},
+		prs:      staticPRs(redPR(11, "feature/1-bell")),
+		addLabel: (&labelCalls{}).add,
+	})
+	waitFor(t, "the new issue", func() bool { return slices.Contains(readLines(t, log), "start 5 1") })
+	s.stop(t)
+	got := readLines(t, log)
+	if !slices.Contains(got, "fix 1 PR 11 try 1: red: ci is FAILURE 1") || !slices.Contains(got, "gate unset") {
+		t.Fatalf("runs = %q, want the fix and the start with 1, the gate unset", got)
 	}
 }
 

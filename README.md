@@ -545,7 +545,10 @@ and is the whole label. Each start is logged with the bundle size.
 The agent starts in the workspace directory, in a process group of its
 own, so a signal it sends its own group does not stop the queue. When the
 queue stops, it sends the agent's group SIGTERM, and SIGKILL after 10
-seconds. The `CLAUDE.md` there is the one
+seconds. The agent, and a fix run (below), has `FACET_QUEUE_RUN=1` in its
+environment, whatever the queue inherited, so a tool it starts can tell it
+runs inside a queue run and end with it rather than outlive it. The gate and
+the other commands the queue runs do not get it. The `CLAUDE.md` there is the one
 `facet spawn` wrote, with the issue text quoted. The queue does not reap
 workspaces. When it stops, the directories stay, and the next time it takes
 that issue it uses the workspace already on disk instead of spawning another.
@@ -906,6 +909,7 @@ the fix record …`). It adds no label, updates and merges nothing, and
 writes no state. It runs the gate as for a start.
 
 `TestQueueFixesARedQueuePRBeforeANewIssue`,
+`TestQueueSetsFacetQueueRunInEveryRun`,
 `TestQueueFixesAConflictingQueuePR`, `TestQueueDoesNotJudgeAPendingQueuePR`,
 `TestQueueNeverTouchesAPROfAnIssueItDidNotStart`,
 `TestQueueNeverAdoptsAPersonsPROnTheIssueBranch`,
