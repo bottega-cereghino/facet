@@ -560,6 +560,10 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 	case err == nil:
 		r.logf("queue: fix %s PR #%d exited", k, job.pr.Number)
 		r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", decisionExitOK, "exit 0")
+	case agentNotRun(err):
+		r.logf("queue: fix %s PR #%d not run (exit %d); no try used, tried again after %s", k, job.pr.Number, agentNotRunExit, r.cfg.Wait)
+		r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", "skip", fmt.Sprintf("fix not run (exit %d)", agentNotRunExit))
+		return false
 	case errors.As(err, &exitErr):
 		r.logf("queue: fix %s PR #%d exited: %v", k, job.pr.Number, err)
 		r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", decisionExitFail, firstErrorLine(err.Error()))

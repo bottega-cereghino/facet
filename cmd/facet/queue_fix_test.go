@@ -438,6 +438,32 @@ func TestQueueBlocksAfterTheLastFailedTry(t *testing.T) {
 	}
 }
 
+func TestQueueFixRunThatRanNothingUsesNoTry(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	cfg := fixQueue(t, log)
+	cfg.Fix.Command = []string{writeExe(t, "tempfail", "#!/bin/sh\nprintf 'x\\n' >> \"$1\"\nexit 75\n"), log, "{pr}"}
+	seedState(t, cfg.State, []int{1}, nil)
+	labels := &labelCalls{}
+	s := startQueue(t, cfg, queueEnv{
+		list:     func(string, string) ([]ghx.Issue, error) { return nil, nil },
+		prs:      staticPRs(redPR(11, "feature/1-bell")),
+		addLabel: labels.add,
+	})
+	waitFor(t, "four fix runs", func() bool { return len(readLines(t, log)) >= 4 })
+	s.stop(t)
+	if got := labels.list(); len(got) != 0 {
+		t.Fatalf("labels = %q, want none", got)
+	}
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := st.Fixes["acme/widgets#1"]; rec != nil && (rec.Blocked || rec.Runs > 0) {
+		t.Fatalf("record = %+v, want no try used", rec)
+	}
+}
+
 func TestQueueKeepsFixTriesAcrossAGreenStreak(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "log")
 	cfg := fixQueue(t, log)
