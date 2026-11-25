@@ -123,7 +123,7 @@ func TestQueueMergesAGreenUpToDatePR(t *testing.T) {
 		return []ghx.OpenPR{landPR(11, "feature/1-bell", "CLEAN")}, nil
 	}
 	env := land.env(queueEnv{list: noIssues, prs: prs})
-	env.reap = func(repo string, number int) error {
+	env.reap = func(repo string, number int, head string) error {
 		if repo != "acme/widgets" || number != 1 {
 			t.Errorf("reap(%q, %d)", repo, number)
 		}

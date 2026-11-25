@@ -34,8 +34,9 @@ type queueEnv struct {
 	mergeMethod  func(repo, branch string) (string, error)
 	mergePR      func(repo string, number int, method, head string) error
 	// reap removes the issue workspace after a queue pull request merges.
+	// mergedHead is the head commit the pull request had when it merged.
 	// Nil leaves reaping to the operator.
-	reap       func(repo string, number int) error
+	reap       func(repo string, number int, mergedHead string) error
 	behindBase func(repo, base, head string) (bool, error)
 	prFiles    func(repo string, number int) ([]string, error)
 	// compareFiles is the net diff from base to head, one entry per file.
