@@ -213,7 +213,7 @@ func (r *queueRunner) mergePR(ctx context.Context, iss queuedIssue, pr ghx.OpenP
 		return false
 	}
 	key := landKey(iss.Repo, pr.Number)
-	method, err := r.mergeMethodFor(iss.Repo)
+	method, err := r.mergeMethodFor(iss.Repo, pr.BaseRefName)
 	if err != nil {
 		if !r.actedOnListing(key, listed) {
 			r.markLanded(key, listed)
@@ -383,7 +383,7 @@ func (r *queueRunner) stopMerging(ctx context.Context, iss queuedIssue, pr ghx.O
 		return
 	}
 	vars := map[string]string{"repo": iss.Repo, "number": strconv.Itoa(iss.Issue.Number), "pr": strconv.Itoa(pr.Number), "reason": reason}
-	if err := r.env.run(ctx, "", expandArgv(fix.Notify, vars)); err != nil {
+	if err := r.runCmd(ctx, "", expandArgv(fix.Notify, vars), nil); err != nil {
 		r.logf("queue: %s#%d notify: %v", iss.Repo, iss.Issue.Number, err)
 	}
 }
@@ -399,10 +399,22 @@ func checksFingerprint(checks []ghx.CheckRun) string {
 	return b.String()
 }
 
-// checkRules is one base branch's required checks, remembered for the process.
+// ruleCacheTTL is how long required checks and merge methods stay cached
+// before the queue re-reads them from GitHub.
+const ruleCacheTTL = time.Hour
+
+// checkRules is one base branch's required checks, cached for ruleCacheTTL.
 type checkRules struct {
 	names []string
 	known bool
+	at    time.Time
+}
+
+// cachedMergeMethod is one base branch's allowed merge method, cached for
+// ruleCacheTTL.
+type cachedMergeMethod struct {
+	method string
+	at     time.Time
 }
 
 // landBlockReason is why pr is not green enough to land. Empty means it is.
@@ -424,8 +436,9 @@ func (r *queueRunner) requiredNames(repo, branch string) ([]string, bool) {
 		return nil, false
 	}
 	key := repo + "\n" + branch
+	now := r.env.now()
 	r.mu.Lock()
-	if got, ok := r.rules[key]; ok {
+	if got, ok := r.rules[key]; ok && now.Sub(got.at) < ruleCacheTTL {
 		r.mu.Unlock()
 		return got.names, got.known
 	}
@@ -436,7 +449,7 @@ func (r *queueRunner) requiredNames(repo, branch string) ([]string, bool) {
 		names, known = nil, false
 	}
 	r.mu.Lock()
-	r.rules[key] = checkRules{names: names, known: known}
+	r.rules[key] = checkRules{names: names, known: known, at: now}
 	r.mu.Unlock()
 	return names, known
 }
@@ -485,20 +498,24 @@ func landableChecks(pr ghx.OpenPR, required []string, known bool) (bool, string)
 	return true, ""
 }
 
-// mergeMethodFor reads the repository's merge method once per process.
-func (r *queueRunner) mergeMethodFor(repo string) (string, error) {
+// mergeMethodFor reads the allowed merge method for repo and branch, cached
+// for ruleCacheTTL.
+func (r *queueRunner) mergeMethodFor(repo, branch string) (string, error) {
+	branch = strings.TrimSpace(branch)
+	key := repo + "\n" + branch
+	now := r.env.now()
 	r.mu.Lock()
-	m, ok := r.mergeMethods[repo]
+	got, ok := r.mergeMethods[key]
 	r.mu.Unlock()
-	if ok {
-		return m, nil
+	if ok && now.Sub(got.at) < ruleCacheTTL {
+		return got.method, nil
 	}
-	m, err := r.env.mergeMethod(repo)
+	m, err := r.env.mergeMethod(repo, branch)
 	if err != nil {
 		return "", err
 	}
 	r.mu.Lock()
-	r.mergeMethods[repo] = m
+	r.mergeMethods[key] = cachedMergeMethod{method: m, at: now}
 	r.mu.Unlock()
 	return m, nil
 }

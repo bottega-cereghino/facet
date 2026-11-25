@@ -108,7 +108,7 @@ func (l *landCalls) env(e queueEnv) queueEnv {
 		}
 		return nil
 	}
-	e.mergeMethod = func(string) (string, error) { return "squash", nil }
+	e.mergeMethod = func(string, string) (string, error) { return "squash", nil }
 	e.mergePR = func(repo string, n int, method, head string) error {
 		l.record(fmt.Sprintf("merge %s#%d %s %s", repo, n, method, head))
 		if l.merge != nil {
@@ -407,21 +407,78 @@ func TestQueueBlocksAfterTheLastFailedTry(t *testing.T) {
 	}
 }
 
-func TestQueueClearsTheRecordOfAPRThatTurnedGreen(t *testing.T) {
-	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
-	seedState(t, cfg.State, []int{1}, map[int]int{1: 1})
+func TestQueueKeepsFixTriesAcrossAGreenStreak(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "log")
+	cfg := fixQueue(t, log)
+	cfg.Fix.Land = false
+	seedState(t, cfg.State, []int{1}, nil)
+	labels := &labelCalls{}
+	var (
+		mu    sync.Mutex
+		phase int // 0: red, 1: green, 2: red again
+	)
+	prs := func(string) ([]ghx.OpenPR, error) {
+		mu.Lock()
+		p := phase
+		mu.Unlock()
+		if p == 1 {
+			return []ghx.OpenPR{greenPR(11, "feature/1-bell")}, nil
+		}
+		return []ghx.OpenPR{redPR(11, "feature/1-bell")}, nil
+	}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var nowMu sync.Mutex
+	now := start
+	advance := func(d time.Duration) {
+		nowMu.Lock()
+		now = now.Add(d)
+		nowMu.Unlock()
+	}
 	s := startQueue(t, cfg, queueEnv{
-		list: func(string, string) ([]ghx.Issue, error) { return nil, nil },
-		prs:  staticPRs(greenPR(11, "feature/1-bell")),
+		list:     func(string, string) ([]ghx.Issue, error) { return nil, nil },
+		prs:      prs,
+		addLabel: labels.add,
+		now: func() time.Time {
+			nowMu.Lock()
+			defer nowMu.Unlock()
+			return now
+		},
 	})
-	waitFor(t, "the clear", func() bool {
+	waitFor(t, "first fix try", func() bool { return len(readLines(t, log)) >= 1 })
+	mu.Lock()
+	phase = 1
+	mu.Unlock()
+	advance(prListTTL + time.Second)
+	time.Sleep(150 * time.Millisecond)
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := st.Fixes["acme/widgets#1"]; rec == nil || rec.Runs != 1 {
+		t.Fatalf("after green, fix record = %+v; want Runs=1 kept", rec)
+	}
+	mu.Lock()
+	phase = 2
+	mu.Unlock()
+	advance(prListTTL + time.Second)
+	waitFor(t, "second fix try", func() bool {
+		if len(readLines(t, log)) < 2 {
+			return false
+		}
 		st, err := loadQueueState(cfg.State)
-		return err == nil && len(st.Fixes) == 0
+		return err == nil && st.Fixes["acme/widgets#1"] != nil && st.Fixes["acme/widgets#1"].Runs == 2 && st.Active["acme/widgets#1"] == 0
+	})
+	advance(prListTTL + time.Second)
+	waitFor(t, "blocked after 2 total tries", func() bool {
+		advance(cfg.Wait)
+		return len(labels.list()) >= 1
 	})
 	s.stop(t)
-	st, err := loadQueueState(cfg.State)
-	if err != nil || len(st.Started) != 1 || !strings.Contains(s.buf.String(), "PR #11 is green; clearing") {
-		t.Fatalf("state = %+v, %v\n%s", st, err, s.buf.String())
+	if got := readLines(t, log); len(got) != 2 {
+		t.Fatalf("runs = %q, want exactly 2 total tries across red-green-red", got)
+	}
+	if labels.list()[0] != "acme/widgets#1 blocked" {
+		t.Fatalf("labels = %q", labels.list())
 	}
 }
 

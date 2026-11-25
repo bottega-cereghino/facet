@@ -14,11 +14,20 @@ import (
 // runs it made per issue. It is what lets a restarted queue tell its own
 // pull requests from a person's, and keep counting tries. Merges is the
 // backoff after a merge GitHub refused, keyed by repo#pr, so a restart
-// does not try again before the wait is up.
+// does not try again before the wait is up. Done is the issues whose agent
+// exited, so a restart does not start an issue again when its agent exited
+// without opening a pull request. Active maps an issue key to the process
+// group ID of the agent running it, so a restart after a crash does not
+// start a second agent while the first is still alive.
 type queueState struct {
 	Started map[string]startedIssue `json:"started"`
 	Fixes   map[string]*fixRecord   `json:"fixes"`
 	Merges  map[string]*mergeHold   `json:"merges,omitempty"`
+	Done    map[string]time.Time    `json:"done,omitempty"`
+	Active  map[string]int          `json:"active,omitempty"`
+	// ActiveAt is when each Active entry was recorded. A process group ID
+	// can be reused after a reboot, so an entry past activeKeep is ignored.
+	ActiveAt map[string]time.Time `json:"active_at,omitempty"`
 	// Starts is every issue the queue started, kept after Started drops a
 	// merged one, so the cap window still counts that run. Empty when the
 	// config has no cap.
@@ -73,9 +82,12 @@ type fixRecord struct {
 
 func newQueueState() *queueState {
 	return &queueState{
-		Started: map[string]startedIssue{},
-		Fixes:   map[string]*fixRecord{},
-		Merges:  map[string]*mergeHold{},
+		Started:  map[string]startedIssue{},
+		Fixes:    map[string]*fixRecord{},
+		Merges:   map[string]*mergeHold{},
+		Done:     map[string]time.Time{},
+		Active:   map[string]int{},
+		ActiveAt: map[string]time.Time{},
 	}
 }
 
@@ -102,6 +114,15 @@ func loadQueueState(path string) (*queueState, error) {
 	}
 	if st.Merges == nil {
 		st.Merges = map[string]*mergeHold{}
+	}
+	if st.Done == nil {
+		st.Done = map[string]time.Time{}
+	}
+	if st.ActiveAt == nil {
+		st.ActiveAt = map[string]time.Time{}
+	}
+	if st.Active == nil {
+		st.Active = map[string]int{}
 	}
 	return st, nil
 }

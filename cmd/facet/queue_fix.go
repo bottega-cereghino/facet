@@ -190,6 +190,9 @@ func (r *queueRunner) canAct(iss queuedIssue) (bool, time.Time) {
 	if r.inflight[k] || r.fixing[k] {
 		return false, time.Time{}
 	}
+	if _, alive := r.activeAgentAliveLocked(k); alive {
+		return false, time.Time{}
+	}
 	for _, until := range []time.Time{r.repoWait[iss.Repo], r.fixRetry[k], r.labelRetry[k]} {
 		if now.Before(until) {
 			return false, time.Time{}
@@ -276,12 +279,9 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 				r.logf("queue: %s PR #%d: %s; not landing", k, pr.Number, reason)
 			})
 		default:
-			// No checks at all cannot tell a green PR from one whose checks
-			// have not been listed yet, so that keeps the record.
-			if rec != nil && len(pr.Checks) > 0 {
-				r.clearFix(k, pr.Number)
-				runs = 0
-			}
+			// Keep the fix record across a green: tries are bounded per pull
+			// request, not per red streak. mergePR and forgetStarted drop it
+			// once the pull request is merged or closed.
 			if !r.cfg.Fix.Land || !r.land(ctx, iss, pr, got, mergedRepo) {
 				return nil
 			}
@@ -335,6 +335,8 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 			r.state.noteStart(s)
 		}
 		delete(r.state.Started, k)
+		delete(r.state.Done, k)
+		delete(r.done, k)
 	}
 	r.mu.Unlock()
 	r.saveState()
@@ -343,20 +345,6 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 // startedKeep is how long a started issue with no open pull request stays
 // in the state. Its agent may still be about to open one.
 const startedKeep = 24 * time.Hour
-
-// clearFix drops the fix record of a pull request that turned green. A dry
-// run says it would.
-func (r *queueRunner) clearFix(k string, pr int) {
-	if r.dry {
-		r.logf("dry-run: would clear the fix record of %s: PR #%d is green", k, pr)
-		return
-	}
-	r.mu.Lock()
-	delete(r.state.Fixes, k)
-	r.mu.Unlock()
-	r.logf("queue: %s PR #%d is green; clearing its fix record", k, pr)
-	r.saveState()
-}
 
 // block labels the issue and stops fixing it. A label that cannot be added
 // is tried again after wait, not every tick, so the issue is not left
@@ -395,7 +383,7 @@ func (r *queueRunner) block(ctx context.Context, iss queuedIssue, pr ghx.OpenPR,
 		return
 	}
 	vars := map[string]string{"repo": iss.Repo, "number": strconv.Itoa(iss.Issue.Number), "pr": strconv.Itoa(pr.Number), "reason": reason}
-	if err := r.env.run(ctx, "", expandArgv(fix.Notify, vars)); err != nil {
+	if err := r.runCmd(ctx, "", expandArgv(fix.Notify, vars), nil); err != nil {
 		r.logf("queue: %s#%d notify: %v", iss.Repo, iss.Issue.Number, err)
 	}
 }
@@ -438,7 +426,7 @@ func (r *queueRunner) fixGate(ctx context.Context, job *fixJob) error {
 	delete(vars, "prompt")
 	stop := r.pulseHeartbeat(ctx)
 	defer stop()
-	return r.env.run(ctx, "", expandArgv(gate, vars))
+	return r.runCmd(ctx, "", expandArgv(gate, vars), nil)
 }
 
 // tryFix gates and starts one fix run. It answers like tick.
@@ -538,7 +526,10 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 	r.logf("queue: fix %s PR #%d: %s, try %d of %d, in %s", k, job.pr.Number, job.reason, job.try, r.cfg.Fix.Tries, ws)
 	why := fmt.Sprintf("PR #%d (%s, try %d): %s", job.pr.Number, job.reason, job.try, commandSummary(r.cfg.Fix.Command, argv))
 	r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", "fix_start", why)
-	err = r.env.run(ctx, ws, argv)
+	defer r.clearActive([]queuedIssue{job.iss})
+	err = r.runCmd(ctx, ws, argv, func(pid int) {
+		r.recordActive([]queuedIssue{job.iss}, pid)
+	})
 	var exitErr *exec.ExitError
 	switch {
 	case err != nil && ctx.Err() != nil:

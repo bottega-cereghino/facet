@@ -78,6 +78,7 @@ func inspect(ws string, m *manifest.Manifest, git gitx.Runner, pr PRLookup, mux 
 			st.PR = found
 		} else {
 			st.PRUnknown = true
+			st.PRErr = err
 		}
 	}
 	if mux != nil {

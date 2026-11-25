@@ -59,6 +59,33 @@ func TestViewPRRefusesWhenTheRepositoryCannotBeResolved(t *testing.T) {
 	}
 }
 
+// GitHub answers a commit it does not have with HTTP 422 "No commit found for
+// SHA" (seen with gh api against a public repository). A commit the forge does
+// not know is in no pull request: nil, nil.
+func TestMergedPRForSHAReadsAnUnknownCommitAsNoPullRequest(t *testing.T) {
+	fakeGh(t, `{"message":"No commit found for SHA: deadbeef","status":"422"}`, "gh: No commit found for SHA: deadbeef (HTTP 422)\n", 1)
+	pr, err := CLI{}.MergedPRForSHA("acme/lab", "deadbeef")
+	if err != nil || pr != nil {
+		t.Fatalf("MergedPRForSHA = %+v, %v; want nil, nil", pr, err)
+	}
+}
+
+// Every other failure is still an error, so the workspace stays held.
+func TestMergedPRForSHAKeepsOtherFailuresAsErrors(t *testing.T) {
+	for _, stderr := range []string{
+		"gh: API rate limit exceeded (HTTP 403)\n",
+		"gh: Not Found (HTTP 404)\n",
+		"gh: Validation Failed (HTTP 422)\n",
+		"gh: No commit found for SHA: deadbeef (HTTP 500)\n",
+	} {
+		fakeGh(t, "", stderr, 1)
+		pr, err := CLI{}.MergedPRForSHA("acme/lab", "deadbeef")
+		if err == nil {
+			t.Errorf("%q: MergedPRForSHA = %+v, nil; a failure was read as no pull request", stderr, pr)
+		}
+	}
+}
+
 func TestViewPRParsesAFoundPR(t *testing.T) {
 	fakeGh(t, `{"number":7,"state":"OPEN","mergedAt":"","url":"https://github.com/acme/lab/pull/7"}`, "", 0)
 	pr, err := CLI{}.ViewPR("acme/lab", "feature/5-fix")

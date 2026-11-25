@@ -247,6 +247,62 @@ func TestQueueBacksOffAnUnreadableFixDiff(t *testing.T) {
 	}
 }
 
+// A truncated compare diff is refused with a clear log line and never landed.
+func TestQueueRefusesTruncatedCompareDiff(t *testing.T) {
+	cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+	seedState(t, cfg.State, []int{1}, nil)
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	st.Fixes["acme/widgets#1"] = &fixRecord{PR: 11, Runs: 1, Last: start.Add(-time.Hour), Head: "h0"}
+	if err := st.save(cfg.State); err != nil {
+		t.Fatal(err)
+	}
+	var body strings.Builder
+	body.WriteString(`{"files":[`)
+	for i := 0; i < ghx.CompareFileLimit; i++ {
+		if i > 0 {
+			body.WriteByte(',')
+		}
+		fmt.Fprintf(&body, `{"filename":"f%03d.ts","status":"modified","changes":1,"patch":"@@ -1 +1 @@\n-old\n+new\n"}`, i)
+	}
+	body.WriteString(`]}`)
+	installFakeGh(t, body.String())
+	ticks := &countCalls{}
+	land := &landCalls{}
+	s := startQueue(t, cfg, land.env(queueEnv{
+		list:         func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+		prs:          staticPRs(landPR(11, "feature/1-bell", "CLEAN")),
+		compareFiles: ghx.CLI{}.CompareFiles,
+		now:          func() time.Time { return start },
+	}))
+	waitFor(t, "three rounds", func() bool { return ticks.get("acme/widgets") >= 3 })
+	s.stop(t)
+	if len(land.list()) != 0 {
+		t.Fatalf("landed = %q, want no merge", land.list())
+	}
+	out := s.buf.String()
+	if !strings.Contains(out, "truncated") || !strings.Contains(out, "not landing") {
+		t.Fatalf("log =\n%s", out)
+	}
+}
+
+func installFakeGh(t *testing.T, stdout string) {
+	t.Helper()
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "stdout")
+	if err := os.WriteFile(outPath, []byte(stdout), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n/bin/cat '" + outPath + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func TestForbidCustomFlag(t *testing.T) {
 	base := `"repos": ["acme/widgets"], "agents": [{"command": ["agent", "{prompt}"]}]`
 	for forbid, want := range map[string]bool{``: false, `"forbid": [" as "], `: true} {
@@ -257,5 +313,33 @@ func TestForbidCustomFlag(t *testing.T) {
 		if cfg.Fix.forbidCustom != want {
 			t.Fatalf("forbid %q: forbidCustom = %v, want %v", forbid, cfg.Fix.forbidCustom, want)
 		}
+	}
+}
+
+// A line a merge brought in from the base branch is in the run's compare but
+// not in the pull request's diff, so it is not judged. A line the run wrote,
+// in a merge commit's conflict resolution too, is in both and is judged.
+func TestOnlyInBothJudgesTheRunsOwnLines(t *testing.T) {
+	patterns, err := compileForbid(defaultForbid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := "@@ -1 +1,2 @@\n x\n+// nolint\n"
+	for _, tc := range []struct {
+		name string
+		pr   []ghx.DiffFile
+		bad  bool
+	}{
+		{"a line merged in from the base", []ghx.DiffFile{{Name: "a.go", Patch: "@@ -1 +1 @@\n-x\n+y\n"}}, false},
+		{"a merged file the pull request does not touch", nil, false},
+		{"a line the run wrote", []ghx.DiffFile{{Name: "a.go", Patch: own}}, true},
+		{"the same line in another file", []ghx.DiffFile{{Name: "b.go", Patch: own}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := onlyInBoth([]ghx.DiffFile{{Name: "a.go", Patch: own}}, tc.pr)
+			if _, _, bad := defaultForbidHit(files, patterns); bad != tc.bad {
+				t.Fatalf("bad = %v, want %v", bad, tc.bad)
+			}
+		})
 	}
 }
