@@ -124,8 +124,8 @@ func TestQueueMergesAGreenUpToDatePR(t *testing.T) {
 	}
 	env := land.env(queueEnv{list: noIssues, prs: prs})
 	env.reap = func(repo string, number int, head string) error {
-		if repo != "acme/widgets" || number != 1 {
-			t.Errorf("reap(%q, %d)", repo, number)
+		if repo != "acme/widgets" || number != 1 || head != "head11" {
+			t.Errorf("reap(%q, %d, %q)", repo, number, head)
 		}
 		reaped.Store(true)
 		return nil
