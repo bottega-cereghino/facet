@@ -568,6 +568,16 @@ reaches its 1000-result limit, the queue starts nothing and waits.
 At most 1000 open issues per repository are considered. When a repository
 returns exactly that many, the queue says so: any beyond the cap are unseen.
 
+The queue lists issues through the REST API, not GraphQL, one conditional
+request per page: an unchanged list answers 304 and costs no rate limit. A
+repository that cannot be listed is logged and skipped for that tick, and the
+others are still ranked. So the queue may start a newer issue while an older
+one in the unlisted repository waits; the log names that repository. When no
+repository can be listed, the queue starts nothing. A repository that fails
+for an hour sets `last_error`. On a GitHub rate-limit answer (429, or 403 with
+no budget left) the queue makes no listing call until the reset time, and
+the heartbeat's `list_paused_until` says when.
+
 The stop is the hold file, or an interrupt. Remove the file and start
 `facet queue` again to resume.
 

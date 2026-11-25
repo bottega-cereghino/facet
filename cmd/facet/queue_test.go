@@ -600,31 +600,6 @@ func TestQueueStopsWhenTheHoldFileExists(t *testing.T) {
 	}
 }
 
-func TestQueueDoesNotStartWhenARepositoryCannotBeListed(t *testing.T) {
-	var spawned atomic.Int32
-	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
-	s := startQueue(t, cfg, queueEnv{
-		list: func(repo, _ string) ([]ghx.Issue, error) {
-			if repo == "acme/other" {
-				return nil, errors.New("temporary failure")
-			}
-			return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
-		},
-		spawn: func(string, int) (string, error) {
-			spawned.Add(1)
-			return "", errors.New("spawned")
-		},
-	})
-	time.Sleep(150 * time.Millisecond)
-	s.stop(t)
-	if spawned.Load() != 0 {
-		t.Fatalf("spawned %d time(s) while a repository could not be listed", spawned.Load())
-	}
-	if !strings.Contains(s.buf.String(), "cannot be listed") {
-		t.Fatalf("output = %q", s.buf.String())
-	}
-}
-
 func TestParsePriorities(t *testing.T) {
 	got, err := parsePriorities("p.txt", []byte("# highest first\n\nWidgets\nother  # lower\n"))
 	if err != nil {
