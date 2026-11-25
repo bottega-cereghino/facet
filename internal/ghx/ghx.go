@@ -193,13 +193,25 @@ func commandLine(args []string) string {
 
 // DevelopBranch creates an issue-linked branch and returns its name. If the
 // branch already exists, gh reports it and we treat that as success.
+//
+// gh answers "API returned empty branch name" when a branch of that name
+// exists on the remote but is not linked to the issue. That is success too,
+// when one ref read shows the branch is there: the spawn continues on it. With
+// no such ref it stays a failure, and the error says how to fix it.
 func (CLI) DevelopBranch(repo string, number int, base, name string) (string, error) {
 	args := []string{"issue", "develop", fmt.Sprint(number), "--repo", repo, "--name", name}
 	if base != "" {
 		args = append(args, "--base", base)
 	}
 	if _, err := run(args...); err != nil {
-		if !strings.Contains(err.Error(), "already exists") {
+		switch {
+		case strings.Contains(err.Error(), "already exists"):
+		case strings.Contains(err.Error(), "empty branch name"):
+			if _, refErr := run("api", "repos/"+repo+"/git/ref/heads/"+name); refErr != nil {
+				return "", fmt.Errorf("%w; branch %q is not on %s (%w): push it or pick another name, then spawn again",
+					err, name, repo, refErr)
+			}
+		default:
 			return "", err
 		}
 	}
