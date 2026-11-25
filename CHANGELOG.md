@@ -6,6 +6,13 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.18.1](https://github.com/bottega-cereghino/facet/compare/v0.18.0...v0.18.1) (2026-11-25)
+
+
+### Fixed
+
+* **queue:** merge in a repository whose plan has no rulesets ([#548](https://github.com/bottega-cereghino/facet/issues/548)) ([dcacabf](https://github.com/bottega-cereghino/facet/commit/dcacabfcad23a5950936841706bbdf22395d3bc6)), refs [#547](https://github.com/bottega-cereghino/facet/issues/547)
+
 ## [0.18.0](https://github.com/bottega-cereghino/facet/compare/v0.17.0...v0.18.0) (2026-11-25)
 
 
