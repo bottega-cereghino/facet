@@ -1313,6 +1313,38 @@ func TestQueueRetriesAnAgentThatExitsNonZero(t *testing.T) {
 	}
 }
 
+func TestQueueAgentThatRanNothingIsNeverBlocked(t *testing.T) {
+	dir := t.TempDir()
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.Fix = &queueFix{Command: []string{"fix"}, Prompt: defaultFixPrompt, Tries: 2, BlockLabel: "blocked"}
+	cfg.State = filepath.Join(dir, "state.json")
+	cfg.Agents = []queueAgent{{Command: []string{writeExe(t, "tempfail", "#!/bin/sh\nexit 75\n"), "{prompt}"}}}
+	var spawned atomic.Int32
+	labels := &labelCalls{}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{openIssue(10, "2026-01-01T00:00:00Z")}, nil
+		},
+		spawn: func(string, int) (string, error) {
+			spawned.Add(1)
+			return os.MkdirTemp(dir, "ws")
+		},
+		addLabel: labels.add,
+	})
+	waitFor(t, "more than three starts", func() bool { return spawned.Load() >= 5 })
+	s.stop(t)
+	if got := labels.list(); len(got) != 0 {
+		t.Fatalf("labels = %q, want none", got)
+	}
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Done) != 0 {
+		t.Fatalf("done = %+v, want empty", st.Done)
+	}
+}
+
 func TestQueueRetriesWhenTheAgentCannotStart(t *testing.T) {
 	dir := t.TempDir()
 	cfg := oneAgentConfig([]string{"acme/widgets"})

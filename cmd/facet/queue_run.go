@@ -220,6 +220,16 @@ func gateSkipsRepo(err error) bool {
 	return gateExit(err) == gateSkipRepoExit
 }
 
+// agentNotRunExit is the agent's exit status for "I ran nothing" (EX_TEMPFAIL:
+// every lane busy, out of quota or capped). It is no failed try.
+const agentNotRunExit = 75
+
+// agentNotRun reports that the agent exited with agentNotRunExit.
+func agentNotRun(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == agentNotRunExit
+}
+
 func gateExit(err error) int {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -984,10 +994,16 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	// else means the command never started (the binary is missing, or it
 	// cannot be executed).
 	var exitErr *exec.ExitError
+	if agentNotRun(err) {
+		r.logf("queue: %s#%d agent not run (exit %d), bundle %d; no try counted, tried again after %s", iss.Repo, iss.Issue.Number, agentNotRunExit, len(run), r.cfg.Wait)
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, "skip", fmt.Sprintf("agent not run (exit %d)", agentNotRunExit))
+		r.deferAll(run, r.deferRetry)
+		return
+	}
 	if errors.As(err, &exitErr) {
 		r.logf("queue: %s#%d agent exited: %v, bundle %d", iss.Repo, iss.Issue.Number, err, len(run))
 		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitFail, firstErrorLine(err.Error()))
-		r.failRun(ctx, run, firstErrorLine(err.Error()))
+		r.failRun(ctx, run, "the agent failed: "+firstErrorLine(err.Error()))
 		return
 	}
 	r.setLastError(err.Error())
