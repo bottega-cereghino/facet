@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 	"github.com/bottega-cereghino/facet/internal/manifest"
 )
 
@@ -153,4 +157,30 @@ func readIssueManifest(dir string) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("read %s: %w\nfix: repair or move that workspace before the queue starts, so an existing one is not missed", manifest.Path(dir), err)
 	}
 	return m, nil
+}
+
+// spawnErrorMayPass reports whether a spawn failure can pass by itself: a
+// rate limit or a network fault. Such a failure is tried again after wait and
+// is not counted. Any other failure counts like a failed agent run, so the
+// third one blocks the issue and notifies.
+func spawnErrorMayPass(err error) bool {
+	var limit *ghx.RateLimitError
+	if errors.As(err, &limit) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, s := range []string{
+		"rate limit", "dial tcp", "i/o timeout", "connection refused", "connection reset",
+		"no such host", "tls handshake", "network is unreachable", "could not resolve host",
+		"http 502", "http 503", "http 504", "bad gateway", "service unavailable", "gateway timeout",
+	} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
