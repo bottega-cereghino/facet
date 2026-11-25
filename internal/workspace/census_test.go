@@ -49,6 +49,7 @@ func censusNames(held []string, path string) bool {
 // A clean clone of pushed work holds nothing in the census, and neither do
 // facet's own files or what something rebuilds.
 func TestCensusAccountsForPushedWork(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	excludeIn(t, clone, "node_modules/")
 	mkdirs(t, filepath.Join(clone, "node_modules", "dep"))
@@ -63,6 +64,7 @@ func TestCensusAccountsForPushedWork(t *testing.T) {
 // an untracked file, a commit no remote has, a file in a .git of another
 // case, a fifo.
 func TestCensusHoldsWhatNoRemoteHas(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	writeTestFile(t, filepath.Join(clone, "draft.txt"), "untracked\n")
 	commitFile(t, clone, "local.txt", "committed, never pushed\n", "local")
@@ -85,6 +87,7 @@ func TestCensusHoldsWhatNoRemoteHas(t *testing.T) {
 // goes (#402). A copy that differs from what checkout would write, here one
 // bare LF that clean conversion folds into the same blob, holds.
 func TestCensusAccountsForWhatCheckoutWritesFromAPushedBlob(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	writeTestFile(t, filepath.Join(clone, ".gitattributes"), "*.bat text eol=crlf\n")
 	writeTestFile(t, filepath.Join(clone, "gradlew.bat"), "@echo off\r\nrem start\r\n")
@@ -111,6 +114,7 @@ func TestCensusAccountsForWhatCheckoutWritesFromAPushedBlob(t *testing.T) {
 // inside a clone. A file only the census sees (one in a .Git of another case)
 // holds in each.
 func TestCensusLooksInsideRepositoriesAtRebuiltNames(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"repo", "dist", "target", "node_modules"} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
@@ -160,6 +164,7 @@ func TestCensusLooksInsideRepositoriesAtRebuiltNames(t *testing.T) {
 // same file left as its pointer (a checkout that skipped the smudge) is the
 // pushed blob itself and goes.
 func TestCensusHoldsLFSContentOnlyItsPointerAccountsFor(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	content := "a render, made today, uploaded nowhere\n"
 	pointer := fmt.Sprintf("version https://git-lfs.github.com/spec/v1\noid sha256:%x\nsize %d\n",
@@ -186,6 +191,7 @@ func TestCensusHoldsLFSContentOnlyItsPointerAccountsFor(t *testing.T) {
 // A loose file the enclosing repository committed but never pushed has no
 // other copy off this disk, so it holds; pushed, it does not.
 func TestCensusHoldsALooseFileCommittedButNotPushed(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enc := enclosingRepoIn(t, root)
@@ -205,6 +211,7 @@ func TestCensusHoldsALooseFileCommittedButNotPushed(t *testing.T) {
 // A file of a repository no check judges holds, and so does its git
 // directory: the census skips only a judged repository's.
 func TestCensusHoldsAnUnjudgedRepository(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	inner := filepath.Join(clone, "vendor-tool")
 	gitOut(t, "", "init", "-q", "--template=", inner)
@@ -222,6 +229,7 @@ func TestCensusHoldsAnUnjudgedRepository(t *testing.T) {
 // keyword expanded, so it does not hold; a note written into the keyword,
 // even one that keeps the size, does (#385).
 func TestCensusReadsTheIdentKeywordExactly(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	writeTestFile(t, filepath.Join(clone, ".gitattributes"), "*.txt ident\n")
 	gitOut(t, clone, "add", ".gitattributes")
@@ -252,6 +260,7 @@ func TestCensusReadsTheIdentKeywordExactly(t *testing.T) {
 // A plain worktree reaped by path is censused too, against its checkout's
 // remotes.
 func TestCensusOfAPlainWorktree(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")
 	st, err := InspectWorktree(wt, gitx.Git{}, nil, nil)
@@ -272,6 +281,7 @@ func TestCensusOfAPlainWorktree(t *testing.T) {
 
 // The list is capped, the count is not, and the blocker says both.
 func TestCensusCapsItsList(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	for i := range maxUnaccounted + 3 {
 		writeTestFile(t, filepath.Join(clone, "n"+string(rune('a'+i))), "x\n")
@@ -291,6 +301,7 @@ func TestCensusCapsItsList(t *testing.T) {
 // facet's own names are let go only as regular files: a directory at one,
 // even a repository with commits, is read like any loose entry (#401).
 func TestReapReadsWhatIsAtAnOwnFilesName(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{".seat", ".scope", ".DS_Store", syncLockName} {
 		t.Run(name, func(t *testing.T) {
 			ws, _ := issueWorkspace(t)

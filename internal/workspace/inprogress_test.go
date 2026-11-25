@@ -12,6 +12,7 @@ import (
 // on pushed commits; the edits it autostashed are named only by a file in
 // rebase-merge (#379).
 func TestReapHoldsARebaseInProgress(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	commitFile(t, clone, "second.txt", "second\n", "second")
 	gitOut(t, clone, "push", "-q", "origin", "HEAD:refs/heads/second")
@@ -43,6 +44,7 @@ func TestReapHoldsARebaseInProgress(t *testing.T) {
 
 // A clean clone has nothing in progress.
 func TestOpsInProgressNoneInACleanClone(t *testing.T) {
+	t.Parallel()
 	_, clone := issueWorkspace(t)
 	ops, err := opsInProgress(gitx.Git{}, clone)
 	if err != nil || len(ops) != 0 {

@@ -13,6 +13,9 @@ import (
 // node_modules, cloned from the store, read as hundreds of megabytes that
 // deleting it would never give back.
 func TestFreedBytesLeavesOutExtentsAnAPFSCloneShares(t *testing.T) {
+	// Serial, not t.Parallel: the test reads the disk blocks of a file it just
+	// wrote, and the filesystem allocates them late when other tests write at
+	// the same time (measured: 0 bytes counted, with the suite parallel).
 	base := t.TempDir()
 	ws := filepath.Join(base, "ws")
 	writeMiB(t, filepath.Join(base, "store", "pkg"))

@@ -8,6 +8,7 @@ import (
 // HoldKinds names each kind of hold once, in a fixed order, from the state
 // Blockers reads; nothing held means no kinds.
 func TestHoldKinds(t *testing.T) {
+	t.Parallel()
 	if k := (&IssueState{}).HoldKinds(); len(k) != 0 {
 		t.Errorf("an empty state has kinds %v", k)
 	}

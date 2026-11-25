@@ -48,6 +48,7 @@ func writeTestFile(t *testing.T, path, contents string) {
 // A workspace `facet new` made is reapable once its clones hold nothing to
 // lose -- the same rule as an issue workspace (facet#135).
 func TestInspectLongLivedCleanWorkspaceIsReapable(t *testing.T) {
+	t.Parallel()
 	ws, _ := longLivedWorkspace(t, t.TempDir())
 	st, err := Inspect(ws, gitx.Git{}, nil, nil)
 	if err != nil {
@@ -63,6 +64,7 @@ func TestInspectLongLivedCleanWorkspaceIsReapable(t *testing.T) {
 
 // Every clone check still applies: here, a commit that was never pushed.
 func TestInspectLongLivedWorkspaceBlocksOnUnpushedWork(t *testing.T) {
+	t.Parallel()
 	ws, clone := longLivedWorkspace(t, t.TempDir())
 	mustGit(t, clone, "config", "user.email", "t@example.com")
 	mustGit(t, clone, "config", "user.name", "t")
@@ -82,6 +84,7 @@ func TestInspectLongLivedWorkspaceBlocksOnUnpushedWork(t *testing.T) {
 // A long-lived workspace can hold files of its own beside its clones -- notes,
 // a CLAUDE.md. Outside any repository, the workspace is their only copy.
 func TestLooseFileOutsideARepositoryBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, _ := longLivedWorkspace(t, t.TempDir())
 	writeTestFile(t, filepath.Join(ws, "notes.md"), "the only copy\n")
 
@@ -97,6 +100,7 @@ func TestLooseFileOutsideARepositoryBlocksReap(t *testing.T) {
 // facet's own files are not loose: the manifest and .scope describe the
 // workspace, and deleting the workspace is deleting them.
 func TestFacetsOwnFilesAreNotLoose(t *testing.T) {
+	t.Parallel()
 	ws, _ := longLivedWorkspace(t, t.TempDir())
 	writeTestFile(t, filepath.Join(ws, ".scope"), "o/repo#1\n")
 	// A sync that crashed leaves its lock behind.
@@ -115,6 +119,7 @@ func TestFacetsOwnFilesAreNotLoose(t *testing.T) {
 // loose file committed and pushed there has another copy, so it does not hold
 // the reap; one modified since, or never added, does.
 func TestLooseFilesInAnEnclosingRepository(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enclosing := filepath.Join(root, "Workspaces")
@@ -157,6 +162,7 @@ func TestLooseFilesInAnEnclosingRepository(t *testing.T) {
 // deletes, so it is no other copy. Here two branches no remote has would go
 // with it (#312).
 func TestReapHoldsAWorkspaceThatIsItsOwnRepository(t *testing.T) {
+	t.Parallel()
 	ws, _ := longLivedWorkspace(t, t.TempDir())
 	gitOut(t, ws, "init", "-q", "-b", "notes")
 	commitFile(t, ws, ".gitignore", "repo/\n", "ignore the clone")
@@ -184,6 +190,7 @@ func TestReapHoldsAWorkspaceThatIsItsOwnRepository(t *testing.T) {
 // cannot read it at all, where git would look past it to the repository
 // above (#312).
 func TestReapHoldsARepositoryAtTheWorkspaceRoot(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(t *testing.T, root, ws string){
 		"a note committed there": func(t *testing.T, _, ws string) {
 			gitOut(t, ws, "init", "-q", "-b", "main")
@@ -229,6 +236,7 @@ func TestReapHoldsARepositoryAtTheWorkspaceRoot(t *testing.T) {
 // it is neither loose nor inspected, and reaping removes the link and leaves
 // its target intact.
 func TestReapRemovesALinkAndLeavesItsTarget(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	target := filepath.Join(root, "Projects", "shared")
@@ -269,6 +277,7 @@ func TestReapRemovesALinkAndLeavesItsTarget(t *testing.T) {
 // InspectIssue keeps its meaning for the commands that only make sense for an
 // issue workspace (`facet issues`, `facet attach`).
 func TestInspectIssueStillRefusesALongLivedWorkspace(t *testing.T) {
+	t.Parallel()
 	ws, _ := longLivedWorkspace(t, t.TempDir())
 	if _, err := InspectIssue(ws, gitx.Git{}, nil, nil); err == nil {
 		t.Fatal("InspectIssue accepted a workspace with no issue")
@@ -300,6 +309,7 @@ func (f recordingCommitPR) MergedPRForSHA(repo, sha string) (*ghx.PRForCommit, e
 // its own, so the squash-merge landing proof still runs: a branch squash-merged
 // and deleted upstream does not hold the workspace as "unpushed".
 func TestLongLivedSquashLandedCloneReapsClean(t *testing.T) {
+	t.Parallel()
 	ws, _, _, pr := squashLandedWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -324,6 +334,7 @@ func TestLongLivedSquashLandedCloneReapsClean(t *testing.T) {
 }
 
 func TestGithubRepo(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"git@github.com:o/repo.git":       "o/repo",
 		"git@github.com:o/repo":           "o/repo",
@@ -347,6 +358,7 @@ func TestGithubRepo(t *testing.T) {
 // more than an ignored file: prune keeps such a directory, and reap holds on
 // it. In a worktree clone too, since the ignored directory goes with it.
 func TestReapHoldsARepositoryInAnIgnoredDirectory(t *testing.T) {
+	t.Parallel()
 	for _, worktree := range []bool{false, true} {
 		t.Run(map[bool]string{false: "own clone", true: "worktree clone"}[worktree], func(t *testing.T) {
 			roots, ws, _, checkout := worktreeSetup(t)
@@ -396,6 +408,7 @@ func TestReapHoldsARepositoryInAnIgnoredDirectory(t *testing.T) {
 // `git add -A`, is recorded as a gitlink: the sha of its HEAD and none of its
 // commits. Status then read clean, and reap deleted the only copy (#319).
 func TestReapHoldsAHandCloneTheEnclosingRepoHasAsAGitlink(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enc := enclosingRepoIn(t, root)
@@ -418,6 +431,7 @@ func TestReapHoldsAHandCloneTheEnclosingRepoHasAsAGitlink(t *testing.T) {
 // repository beside the clones holds now; the status that judges the other
 // names ignores no submodule either (#319).
 func TestReapHoldsAGitlinkedHandCloneThatMovedOn(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enc := enclosingRepoIn(t, root)
@@ -445,6 +459,7 @@ func TestReapHoldsAGitlinkedHandCloneThatMovedOn(t *testing.T) {
 // ignores was walked past: only a .git counted. A bare backup the clone pushes
 // to also made its commits read as pushed, so reap deleted both copies (#336).
 func TestReapHoldsAnyRepositoryInAnIgnoredDirectory(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		build func(t *testing.T, clone, dir string)
@@ -496,6 +511,7 @@ func mkdirs(t *testing.T, dir string) {
 // file as the pathspec notes.md, so its later edits were deleted unseen
 // (#320). TestUnderNameFoldsCase holds the matching on every disk.
 func TestReapHoldsAnEditedNoteRenamedInCaseOnly(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	writeTestFile(t, filepath.Join(root, "Probe"), "")

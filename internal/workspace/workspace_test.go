@@ -62,6 +62,7 @@ func setup(t *testing.T) (config.Roots, string, string) {
 }
 
 func TestSyncCreatesMissingClone(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	m := &manifest.Manifest{Name: "w", Clones: map[string]string{"repo": origin}}
 	if err := m.Write(ws); err != nil {
@@ -78,6 +79,7 @@ func TestSyncCreatesMissingClone(t *testing.T) {
 // The central guarantee: a clone that already exists is never pulled, reset or
 // cleaned, because it may hold the only copy of unpushed work.
 func TestSyncNeverTouchesExistingClone(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	m := &manifest.Manifest{Name: "w", Clones: map[string]string{"repo": origin}}
 	if err := m.Write(ws); err != nil {
@@ -119,6 +121,7 @@ func TestSyncNeverTouchesExistingClone(t *testing.T) {
 }
 
 func TestSyncAddsExtraRemoteButNeverRewritesIt(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	upstream := originRepo(t, filepath.Join(t.TempDir(), "upstream"))
 	m := &manifest.Manifest{
@@ -153,6 +156,7 @@ func TestSyncAddsExtraRemoteButNeverRewritesIt(t *testing.T) {
 }
 
 func TestSyncLinkAndPrune(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	// A link points at a project under ProjectsRoot.
 	project := filepath.Join(roots.Projects, "proj")
@@ -205,6 +209,7 @@ func TestSyncLinkAndPrune(t *testing.T) {
 }
 
 func TestDirsSkipsIssueWorkspaces(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, name := range []string{"topical", "iss-repo-1-x", "no-manifest"} {
 		dir := filepath.Join(root, name)
@@ -258,6 +263,7 @@ func (h hookSource) Resolve(url string) (string, string, error) {
 // clone must not be followed: git must not clone into the symlink's target,
 // and the temporary staging directory must be cleaned up.
 func TestSyncCloneDoesNotFollowASymlinkSwappedInBeforeTheClone(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	m := &manifest.Manifest{Name: "w", Clones: map[string]string{"repo": origin}}
 	if err := m.Write(ws); err != nil {
@@ -309,6 +315,7 @@ func (h hookGit) Run(dir string, env []string, args ...string) (string, error) {
 // worktree add must not be followed, and the checkout must not keep a dangling
 // worktree entry for the discarded staging directory.
 func TestSyncWorktreeDoesNotFollowASymlinkSwappedInBeforeAdd(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	outside := t.TempDir()
 	clonePath := filepath.Join(ws, "repo")
@@ -348,6 +355,7 @@ func TestSyncWorktreeDoesNotFollowASymlinkSwappedInBeforeAdd(t *testing.T) {
 // Even if a symlink appears right before os.Rename, renaming a directory onto a
 // symlink fails without following or replacing it, and placeStaged refuses it.
 func TestPlaceStagedRefusesSymlinkDestination(t *testing.T) {
+	t.Parallel()
 	ws := t.TempDir()
 	outside := t.TempDir()
 	stage := filepath.Join(ws, "stage")

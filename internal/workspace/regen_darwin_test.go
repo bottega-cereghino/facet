@@ -13,6 +13,7 @@ import (
 // A node_modules that pnpm cloned from its store frees nothing when deleted,
 // and deleting it would only cost a reinstall, so prune does not name it.
 func TestInspectPruneLeavesOutADirectoryClonedFromAStore(t *testing.T) {
+	t.Parallel()
 	ws, clone := prunableWorkspace(t)
 	store := filepath.Join(t.TempDir(), "store")
 	writeMiB(t, filepath.Join(store, "pkg"))

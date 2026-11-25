@@ -480,7 +480,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		}
 		if gateSkips(err) {
 			r.logf("queue: %s#%d gate skips it: %s; trying the next run, this one again after %s", run[0].Repo, run[0].Issue.Number, err.Error(), r.cfg.Wait)
-			r.deferAll(run, r.deferRetry)
+			r.deferGateSkipped(run, err)
 			return false, nil
 		}
 		r.setLastError(err.Error())
@@ -993,6 +993,20 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 func (r *queueRunner) deferAll(run []queuedIssue, fn func(queuedIssue)) {
 	for _, iss := range run {
 		fn(iss)
+	}
+}
+
+// deferGateSkipped handles a gate skip (exit 3). The gate judged run[0], so
+// only that issue waits. The others in the bundle are left out of this run,
+// not deferred: they form a run again on the next tick without it. Each
+// issue gets a skip row in the decision log.
+func (r *queueRunner) deferGateSkipped(run []queuedIssue, err error) {
+	first := run[0]
+	r.deferRetry(first)
+	r.recordDecision(first.Repo, strconv.Itoa(first.Issue.Number), r.laneFor(first), "skip", "gate skips it: "+firstErrorLine(err.Error()))
+	for _, iss := range run[1:] {
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), r.laneFor(iss), "skip",
+			fmt.Sprintf("left out of the run while the gate skips %s#%d", first.Repo, first.Issue.Number))
 	}
 }
 
