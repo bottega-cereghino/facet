@@ -563,9 +563,12 @@ The queue does not reap
 workspaces. When it stops, the directories stay, and the next time it takes
 that issue it uses the workspace already on disk instead of spawning another.
 
-An issue this process has already handed to an agent is not handed out again,
-including one whose agent exited with a non-zero status. A spawn that failed,
-and a command that never started, are retried after `wait`. Remove the queue
+An issue whose agent exited with status zero is not handed out again. An agent
+that exits non-zero has failed a try: the issue is started again after `wait`.
+After 3 failed tries in this process the queue adds `fix.blockLabel` and runs
+`fix.notify`, as for a refused fix; only a zero exit is written to the state's
+`done` record. A spawn that failed, and a command that never started, are also
+retried after `wait`. Remove the queue
 label when the work is done; the next run of `facet queue` starts an agent
 for whatever still carries it.
 

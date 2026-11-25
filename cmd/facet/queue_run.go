@@ -239,6 +239,7 @@ type queueRunner struct {
 	running     int
 	repoRunning map[string]int
 	done        map[string]bool
+	failTries   map[string]int
 	retryAt     map[string]time.Time
 	repoWait    map[string]time.Time
 	wake        chan struct{}
@@ -322,6 +323,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		inflight:      map[string]bool{},
 		repoRunning:   map[string]int{},
 		done:          map[string]bool{},
+		failTries:     map[string]int{},
 		retryAt:       map[string]time.Time{},
 		repoWait:      map[string]time.Time{},
 		wake:          make(chan struct{}, 1),
@@ -968,18 +970,23 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	if err == nil {
 		r.logf("queue: %s#%d agent exited, bundle %d", iss.Repo, iss.Issue.Number, len(run))
 		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitOK, "exit 0")
+		r.mu.Lock()
+		for _, iss := range run {
+			delete(r.failTries, iss.key())
+		}
+		r.mu.Unlock()
 		r.markRunDone(run)
 		return
 	}
-	// An ExitError means the process ran and finished, whatever its status.
-	// This process does not run that issue again. Anything else means the
-	// command never started (the binary is missing, or it cannot be executed),
-	// which is not the agent finishing the issue.
+	// An ExitError means the process ran and failed. That is a failed try: the
+	// issue is started again after wait, and blocked after three. Anything
+	// else means the command never started (the binary is missing, or it
+	// cannot be executed).
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		r.logf("queue: %s#%d agent exited: %v, bundle %d", iss.Repo, iss.Issue.Number, err, len(run))
 		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitFail, firstErrorLine(err.Error()))
-		r.markRunDone(run)
+		r.failRun(ctx, run, firstErrorLine(err.Error()))
 		return
 	}
 	r.setLastError(err.Error())
