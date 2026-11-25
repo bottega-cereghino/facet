@@ -193,6 +193,9 @@ type CloneOptions struct {
 	// SetOriginTo, when non-empty, repoints origin after cloning. Used when the
 	// clone source is a local mirror but pushes must reach the forge.
 	SetOriginTo string
+	// NoHardlinks copies the objects of a local source instead of hardlinking
+	// them, so the clone shares no file with it.
+	NoHardlinks bool
 }
 
 // Clone clones src into dst, then checks out HEAD.
@@ -213,7 +216,12 @@ func Clone(r Runner, src, dst string, opt CloneOptions) error {
 	if opt.SkipLFS {
 		env = append(env, "GIT_LFS_SKIP_SMUDGE=1")
 	}
-	if _, err := r.Run("", env, "clone", "--no-checkout", "--", src, dst); err != nil {
+	args := []string{"clone", "--no-checkout"}
+	if opt.NoHardlinks {
+		args = append(args, "--no-hardlinks")
+	}
+	args = append(args, "--", src, dst)
+	if _, err := r.Run("", env, args...); err != nil {
 		return err
 	}
 	if opt.SetOriginTo != "" {

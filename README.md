@@ -549,7 +549,17 @@ seconds. The agent, and a fix run (below), has `FACET_QUEUE_RUN=1` in its
 environment, whatever the queue inherited, so a tool it starts can tell it
 runs inside a queue run and end with it rather than outlive it. The gate and
 the other commands the queue runs do not get it. The `CLAUDE.md` there is the one
-`facet spawn` wrote, with the issue text quoted. The queue does not reap
+`facet spawn` wrote, with the issue text quoted.
+
+The queue spawns its workspaces as clones, never as worktrees: as with
+`facet spawn --no-worktree`, and each clone is also made with
+`git clone --no-hardlinks`, so it shares no file with the mirror or with any
+checkout under the projects root. A worktree would make every commit, ref
+update and hook the agent runs write into that other checkout's `.git`, and a
+sandbox that confines the agent to its workspace would have to open that
+directory. `facet spawn` by hand still makes worktrees. `origin` of each clone
+is the repository's remote, so `reap` judges unpushed work as for any clone.
+The queue does not reap
 workspaces. When it stops, the directories stay, and the next time it takes
 that issue it uses the workspace already on disk instead of spawning another.
 

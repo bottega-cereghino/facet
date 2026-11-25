@@ -147,7 +147,7 @@ func runSpawn(o spawnOpts) error {
 	}
 	rep.Created("%s: %s", scope.ScopeFile, scope.Join(scopeRefs))
 
-	if err := workspace.Sync(roots, ws, git, rep, workspace.SyncOptions{Source: sourceFor(true, rep), Worktrees: !o.NoWorktree}); err != nil {
+	if err := workspace.Sync(roots, ws, git, rep, workspace.SyncOptions{Source: sourceFor(true, rep), Worktrees: !o.NoWorktree, NoHardlinks: o.NoHardlinks}); err != nil {
 		return err
 	}
 
