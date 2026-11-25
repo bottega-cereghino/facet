@@ -344,6 +344,12 @@ failed". A lookup that fails holds the workspace; it is never read as closed.
 `--closed` never adds a workspace `--reapable` alone would keep, and works with
 `--dry-run` and `-y`.
 
+`facet reap <name> --merged-head <sha>` names the commit a merged pull request
+had as its head. A branch tip equal to it counts as landed, even when GitHub
+cannot say so; any commit beyond it, and any uncommitted work, still holds the
+workspace. The queue passes it after it merges a pull request. When that reap
+is refused, the queue's log line carries reap's own reason.
+
 `reap` also takes a plain git worktree: one made with `git worktree add`, by
 hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
 `facet reap <path>` refuses while it has uncommitted or untracked files,
