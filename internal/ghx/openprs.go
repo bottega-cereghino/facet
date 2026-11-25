@@ -125,7 +125,8 @@ func (CLI) UpdatePRBranch(repo string, number int) error {
 // merge or rebase, in that order of preference when more than one is. It
 // intersects the repository settings with any branch ruleset restrictions
 // (allowed_merge_methods and required_linear_history). When branch is empty,
-// only the repository settings are read.
+// or the rules are absent (see absentSource), only the repository settings
+// are read.
 func (CLI) MergeMethod(repo, branch string) (string, error) {
 	if _, _, err := splitRepo("MergeMethod", repo); err != nil {
 		return "", err

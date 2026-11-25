@@ -161,7 +161,7 @@ func TestMergeMethodRespectsBranchRuleset(t *testing.T) {
 		}
 	})
 	t.Run("absent ruleset (404) uses repo settings", func(t *testing.T) {
-		install(t, allRepo, "HTTP 404: Not Found", 1)
+		install(t, allRepo, "gh: Not Found (HTTP 404)", 1)
 		got, err := (CLI{}).MergeMethod("acme/widgets", "main")
 		if err != nil || got != "squash" {
 			t.Fatalf("MergeMethod = %q, %v; want squash", got, err)

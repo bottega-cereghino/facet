@@ -860,7 +860,13 @@ not a pass, required or not, and neither is a skipped or missing required
 check. The queue reads the required names from the base branch's rules and
 from classic branch protection. A branch with neither requires nothing, and
 every check is still held to that rule; when they cannot be read, no check is
-taken as required and the same rule applies. Required checks and branch rules are GitHub's to enforce: a
+taken as required and the same rule applies. A source GitHub answers with a
+404, or with the 403 "Upgrade to GitHub Pro or make this repository public to
+enable this feature." (a private repository on a plan without rulesets or
+branch protection), is not there: the merge method then comes from the
+repository's settings alone. Any other failure, another 403 included, is an
+error: nothing is merged while the branch's rules cannot be read for the merge
+method. Required checks and branch rules are GitHub's to enforce: a
 merge GitHub refuses is never forced (no `--admin`). It is retried after
 `wait`, then after twice that, doubling up to an hour, and the refusal is
 logged once per step rather than once per tick. The count and the wait are
