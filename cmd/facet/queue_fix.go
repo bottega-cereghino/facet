@@ -527,7 +527,7 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 	why := fmt.Sprintf("PR #%d (%s, try %d): %s", job.pr.Number, job.reason, job.try, commandSummary(r.cfg.Fix.Command, argv))
 	r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", "fix_start", why)
 	defer r.clearActive([]queuedIssue{job.iss})
-	err = r.runCmd(ctx, ws, argv, func(pid int) {
+	err = r.runAgent(ctx, ws, argv, func(pid int) {
 		r.recordActive([]queuedIssue{job.iss}, pid)
 	})
 	var exitErr *exec.ExitError
