@@ -947,5 +947,6 @@ func (r *queueRunner) poke() {
 func (r *queueRunner) logf(format string, args ...any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, _ = fmt.Fprintf(r.env.out, format+"\n", args...)
+	stamp := r.env.now().UTC().Format(time.RFC3339)
+	_, _ = fmt.Fprintf(r.env.out, "%s "+format+"\n", append([]any{stamp}, args...)...)
 }

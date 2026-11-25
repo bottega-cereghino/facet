@@ -87,6 +87,7 @@ func productStarts(repo string, at time.Time) []startedIssue {
 func dryStartIDs(log string) []string {
 	var out []string
 	for _, line := range strings.Split(log, "\n") {
+		_, line, _ = strings.Cut(line, " ") // drop the time stamp
 		if strings.HasPrefix(line, "dry-run: would start ") {
 			out = append(out, strings.Fields(line)[3])
 		}

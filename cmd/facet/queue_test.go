@@ -1280,6 +1280,7 @@ func TestQueueDryRunGivesAFreeSlotToTheNextProjectDown(t *testing.T) {
 	}
 	var starts []string
 	for _, line := range strings.Split(buf.String(), "\n") {
+		_, line, _ = strings.Cut(line, " ") // drop the time stamp
 		if strings.HasPrefix(line, "dry-run: would start ") {
 			starts = append(starts, strings.Fields(line)[3])
 		}
