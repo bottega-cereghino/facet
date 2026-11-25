@@ -269,6 +269,10 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 			r.clearFailure(r.forbidHolds, k)
 		}
 		switch {
+		case errors.As(err, new(*ghx.UnreadableError)):
+			// Reading it again will not help: a person reads the diff.
+			r.blockUnreadable(ctx, iss, pr, runs, err)
+			return nil
 		case err != nil:
 			// A diff that cannot be read is not a pass: landing it could
 			// merge a suppression the check did not see.
@@ -300,6 +304,20 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 		return nil
 	}
 	return &fixJob{iss: iss, pr: pr, reason: reason, try: runs + 1}
+}
+
+// blockUnreadable stops the retries of a green pull request whose diff has a
+// file that cannot be read, labels the issue and notifies once.
+func (r *queueRunner) blockUnreadable(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, runs int, err error) {
+	if r.touchStop(iss) != "" {
+		return
+	}
+	var u *ghx.UnreadableError
+	file := ""
+	if errors.As(err, &u) {
+		file = u.File
+	}
+	r.block(ctx, iss, pr, fmt.Sprintf("green, but the queue cannot read the diff of %s: read the diff and merge by hand", file), runs)
 }
 
 func baseName(pr ghx.OpenPR) string {
