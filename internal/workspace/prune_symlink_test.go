@@ -9,6 +9,7 @@ import (
 // A workspace or clone swapped for a symlink after the listing must not be
 // followed.
 func TestRemoveInCloneRefusesASwappedCloneOrWorkspace(t *testing.T) {
+	t.Parallel()
 	for _, swap := range []string{"clone", "workspace"} {
 		t.Run(swap, func(t *testing.T) {
 			outside := t.TempDir()

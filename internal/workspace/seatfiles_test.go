@@ -23,6 +23,7 @@ import (
 // Sync does not write these files today. This exists so that it cannot start:
 // the change that added them would pass every other test in this package.
 func TestSyncLeavesTheSeatFilesAlone(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	m := &manifest.Manifest{Name: "w", Clones: map[string]string{"repo": origin}}
 	if err := m.Write(ws); err != nil {
@@ -64,6 +65,7 @@ func TestSyncLeavesTheSeatFilesAlone(t *testing.T) {
 // to remove links the manifest no longer names; an unversioned file at the
 // workspace root is not a link and is not its business.
 func TestSyncPruneLeavesTheSeatFilesAlone(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	m := &manifest.Manifest{Name: "w", Clones: map[string]string{"repo": origin}}
 	if err := m.Write(ws); err != nil {

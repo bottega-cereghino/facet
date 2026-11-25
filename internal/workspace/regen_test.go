@@ -56,6 +56,7 @@ func foundRels(s *PruneState) []string {
 // free of tracked files, and outside nested checkouts. Anything else in the
 // tree might be the only copy of something.
 func TestInspectPruneFindsOnlyIgnoredRegenerableDirectories(t *testing.T) {
+	t.Parallel()
 	ws, _ := prunableWorkspace(t)
 	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
 	if err != nil {
@@ -74,6 +75,7 @@ func TestInspectPruneFindsOnlyIgnoredRegenerableDirectories(t *testing.T) {
 }
 
 func TestPruneDeletesWhatWasFoundAndNothingElse(t *testing.T) {
+	t.Parallel()
 	ws, clone := prunableWorkspace(t)
 	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
 	if err != nil {
@@ -102,6 +104,7 @@ func TestPruneDeletesWhatWasFoundAndNothingElse(t *testing.T) {
 // true: a directory gone before Prune reached it, or one it failed to delete,
 // is not among them, and the others still are.
 func TestPruneReturnsOnlyWhatItRemoved(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root deletes inside a read-only directory: the failure cannot be planted")
 	}
@@ -157,6 +160,7 @@ func TestPruneReturnsOnlyWhatItRemoved(t *testing.T) {
 
 // A workspace used recently is somebody's: its dependencies stay installed.
 func TestInspectPruneHoldsAWorkspaceUsedWithinTheIdleWindow(t *testing.T) {
+	t.Parallel()
 	ws, _ := prunableWorkspace(t)
 	now := time.Now()
 	st, err := InspectPrune(ws, gitx.Git{}, nil, now, 14*24*time.Hour)
@@ -180,6 +184,7 @@ func TestInspectPruneHoldsAWorkspaceUsedWithinTheIdleWindow(t *testing.T) {
 }
 
 func TestInspectPruneHoldsAWorkspaceSomethingRunsFrom(t *testing.T) {
+	t.Parallel()
 	ws, _ := prunableWorkspace(t)
 	st, err := InspectPrune(ws, gitx.Git{}, fakeLiveRoots{roots: []string{"pid 42 (node)"}}, time.Now(), 0)
 	if err != nil {
@@ -192,6 +197,7 @@ func TestInspectPruneHoldsAWorkspaceSomethingRunsFrom(t *testing.T) {
 
 // "Could not list what git ignores" must never read as "nothing is tracked".
 func TestInspectPruneHoldsWhenIgnoredFilesCannotBeListed(t *testing.T) {
+	t.Parallel()
 	ws, _ := prunableWorkspace(t)
 	g := &gitxtest.Runner{
 		Real: gitx.Git{},
@@ -210,6 +216,7 @@ func TestInspectPruneHoldsWhenIgnoredFilesCannotBeListed(t *testing.T) {
 // `pip install -e git+...` checks a repository out inside the .venv, and it may
 // hold commits: a directory with a .git anywhere below it is kept.
 func TestInspectPruneKeepsADirectoryHoldingARepository(t *testing.T) {
+	t.Parallel()
 	ws, clone := prunableWorkspace(t)
 	src := filepath.Join(clone, "api", ".venv", "src", "mylib")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -235,6 +242,7 @@ func TestInspectPruneKeepsADirectoryHoldingARepository(t *testing.T) {
 // has no checkout around it. Each may hold commits or changes that exist
 // nowhere else, so the directory stays.
 func TestPruneKeepsADirectoryHoldingANonGitRepository(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, rel string // rel is the repository's only copy, inside the .venv
 		bare      bool   // rel is made by git init --bare instead of written
@@ -282,6 +290,7 @@ func TestPruneKeepsADirectoryHoldingANonGitRepository(t *testing.T) {
 // A wholly ignored name holding a file someone force-added is not wholly
 // ignored, so git lists its files one by one and prune leaves it.
 func TestInspectPruneLeavesAnIgnoredDirectoryHoldingATrackedFile(t *testing.T) {
+	t.Parallel()
 	ws, clone := prunableWorkspace(t)
 	mustGit(t, clone, "add", "-f", "node_modules/pkg/index.js")
 	mustGit(t, clone, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "vendored")
@@ -297,6 +306,7 @@ func TestInspectPruneLeavesAnIgnoredDirectoryHoldingATrackedFile(t *testing.T) {
 }
 
 func TestInspectPruneNeverNamesTerraform(t *testing.T) {
+	t.Parallel()
 	ws, clone := prunableWorkspace(t)
 	if err := os.MkdirAll(filepath.Join(clone, "infra"), 0o755); err != nil {
 		t.Fatal(err)
@@ -317,6 +327,7 @@ func TestInspectPruneNeverNamesTerraform(t *testing.T) {
 // A worktree clone keeps its index and HEAD outside <clone>/.git. Its use must
 // still be seen, or a workspace used a minute ago reads as idle.
 func TestInspectPruneSeesTheUseOfAWorktreeClone(t *testing.T) {
+	t.Parallel()
 	ws, clone := prunableWorkspace(t)
 	wt := filepath.Join(ws, "wt")
 	mustGit(t, clone, "worktree", "add", "-q", "--detach", wt)
@@ -345,6 +356,7 @@ func TestInspectPruneSeesTheUseOfAWorktreeClone(t *testing.T) {
 
 // A probe that errors is not "nothing runs here".
 func TestInspectPruneHoldsWhenWhatRunsCannotBeListed(t *testing.T) {
+	t.Parallel()
 	ws, _ := prunableWorkspace(t)
 	st, err := InspectPrune(ws, gitx.Git{}, failingLiveRoots{}, time.Now(), 0)
 	if err != nil {
@@ -365,6 +377,7 @@ func (failingLiveRoots) LiveRoots(string) ([]string, error) {
 // No step of the deleted path may be a symlink: a parent swapped for one after the
 // listing cannot point it outside the clone.
 func TestPruneDoesNotFollowASwappedParent(t *testing.T) {
+	t.Parallel()
 	ws, clone := prunableWorkspace(t)
 	st, err := InspectPrune(ws, gitx.Git{}, nil, time.Now(), 0)
 	if err != nil {
@@ -425,6 +438,7 @@ func rebuildBody(name string) string {
 // directory back, so it is kept and the listing says why. A file that is there
 // but untracked, or tracked in another directory, rebuilds nothing here.
 func TestPruneKeepsADirectoryNothingTrackedBesideItRebuilds(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, dir, parent, tracked, untracked string
 		pruned                                bool
@@ -501,6 +515,7 @@ func installClone(t *testing.T, dir string, files, edits map[string]string) (ws,
 // nothing from it, so a .venv or node_modules filled by hand beside one is
 // gone for good once deleted. It is kept, and the listing says why.
 func TestPruneKeepsADirectoryBesideAFileThatInstallsNothing(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, dir    string
 		files, edits map[string]string
@@ -560,6 +575,7 @@ func TestPruneKeepsADirectoryBesideAFileThatInstallsNothing(t *testing.T) {
 // only what the tool computes again, and that configuration is where ruff,
 // mypy and pytest write it.
 func TestPruneDeletesADirectoryBesideAFileThatInstallsIt(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, dir string
 		files     map[string]string
@@ -620,6 +636,7 @@ func TestPruneDeletesADirectoryBesideAFileThatInstallsIt(t *testing.T) {
 // directory, which was all prune dated: a directory installed into or edited
 // yesterday read as idle (#304).
 func TestPruneSeesAnInstallOrEditInsideTheDirectory(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ dir, from, inner string }{
 		{".venv", "pyproject.toml", "lib/python3.12/site-packages/newpkg/__init__.py"},
 		{"node_modules", "package.json", "left-pad/index.js"},

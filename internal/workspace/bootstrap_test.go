@@ -14,6 +14,7 @@ import (
 // even when escape, committed in a checkout under the projects root, is a
 // symlink to somewhere else. Bootstrap must refuse that clone.
 func TestSyncBootstrapRefusesACloneThroughASymlinkOutOfTheProjectsRoot(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	outside := filepath.Join(filepath.Dir(roots.Projects), "outside")
 	if err := os.MkdirAll(outside, 0o777); err != nil {
@@ -62,6 +63,7 @@ func TestSyncBootstrapRefusesACloneThroughASymlinkOutOfTheProjectsRoot(t *testin
 // write, including one whose parent directory does not exist yet and one
 // reached through a symlink that stays inside the root.
 func TestSyncBootstrapClonesUnderTheProjectsRoot(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	kept := filepath.Join(roots.Projects, "real")
 	if err := os.MkdirAll(kept, 0o777); err != nil {

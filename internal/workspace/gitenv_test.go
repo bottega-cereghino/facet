@@ -33,6 +33,7 @@ func requireHeld(t *testing.T, st *IssueState, why string) {
 // checkout), and a probe that inherits it reads the checkout's refs and index:
 // the clone's own unpushed branch is invisible.
 func TestReapIgnoresAnInheritedGitDir(t *testing.T) {
+	// Serial, not t.Parallel: t.Setenv changes the environment of the whole process.
 	roots, ws, _, checkout := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{}); err != nil {
 		t.Fatal(err)
@@ -55,6 +56,7 @@ func TestReapIgnoresAnInheritedGitDir(t *testing.T) {
 // GIT_DIR and GIT_WORK_TREE together (a hook, a dotfiles shell) make every
 // clone read as that other repository, clean.
 func TestReapIgnoresAnInheritedGitDirAndWorkTree(t *testing.T) {
+	// Serial, not t.Parallel: t.Setenv changes the environment of the whole process.
 	root := t.TempDir()
 	ws, clone := longLivedWorkspace(t, root)
 	commitFile(t, clone, "new.txt", "only copy\n", "local only")
@@ -79,6 +81,7 @@ func TestReapIgnoresAnInheritedGitDirAndWorkTree(t *testing.T) {
 // origin/main <local commit>` makes that commit reachable from --remotes for
 // any git that honours them, though no remote has it.
 func TestReapIgnoresAReplaceRefThatGraftsALocalCommitOntoTheRemote(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -103,6 +106,7 @@ func TestReapIgnoresAReplaceRefThatGraftsALocalCommitOntoTheRemote(t *testing.T)
 // refs/remotes/origin/main: a local branch of that name passed the landing
 // proof with commits no remote has.
 func TestReapHoldsALocalBranchNamedOriginMain(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	gitOut(t, clone, "config", "remote.origin.followRemoteHEAD", "never")
 	gitOut(t, clone, "remote", "set-head", "origin", "--delete")
@@ -122,6 +126,7 @@ func TestReapHoldsALocalBranchNamedOriginMain(t *testing.T) {
 // since the squash merge read as landed. The same fixture with "mine.txt" is
 // TestSquashLandedWorkspaceStillRefusesWhenItsOwnFileDivergedAfterwards.
 func TestReapComparesAFileNamedLikePathspecMagic(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -146,6 +151,7 @@ func TestReapComparesAFileNamedLikePathspecMagic(t *testing.T) {
 // pathspecs too: ":todo.md" was looked up as "todo.md", and a file named
 // ":(exclude)*" hid itself and every other loose name.
 func TestReapHoldsAFileWhoseNameIsPathspecMagic(t *testing.T) {
+	t.Parallel()
 	enclose := func(t *testing.T, root string) {
 		t.Helper()
 		enc := filepath.Join(root, "Workspaces")

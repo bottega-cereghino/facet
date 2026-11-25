@@ -14,6 +14,7 @@ import (
 // of a configured remote count, which the fetch before the count refreshes
 // and prunes whatever the remote's refspec says (facet#309).
 func TestReapHoldsWorkOnlyAStaleRemoteRefHas(t *testing.T) {
+	t.Parallel()
 	for name, orphan := range map[string]func(t *testing.T, clone string){
 		"refspec narrowed": func(t *testing.T, clone string) {
 			gitOut(t, clone, "remote", "set-branches", "fork", "main")
@@ -49,6 +50,7 @@ func TestReapHoldsWorkOnlyAStaleRemoteRefHas(t *testing.T) {
 // clone itself as a remote, a bare backup inside it, a sibling clone. Its
 // refs never count as pushed (facet#309).
 func TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
 	for name, addRemote := range map[string]func(t *testing.T, ws, clone string) string{
 		"the clone itself": func(t *testing.T, _, clone string) string {
 			gitOut(t, clone, "remote", "add", "self", ".")
@@ -88,6 +90,7 @@ func TestReapHoldsWorkWhoseOnlyRemoteIsInsideTheWorkspace(t *testing.T) {
 // Pushed to a remote outside the workspace, by a local path, the same work
 // counts as pushed.
 func TestReapCountsWorkOnARemoteOutsideTheWorkspaceAsPushed(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	backup := filepath.Join(t.TempDir(), "backup.git")
 	gitOut(t, "", "init", "-q", "--bare", backup)
@@ -108,6 +111,7 @@ func TestReapCountsWorkOnARemoteOutsideTheWorkspaceAsPushed(t *testing.T) {
 // localPath names a local URL's path, read as git reads it, so a remote
 // inside the workspace is found by its path.
 func TestLocalPathInside(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	gone := filepath.Join(root, "ws")
 	clone := filepath.Join(gone, "repo")
@@ -139,6 +143,7 @@ func TestLocalPathInside(t *testing.T) {
 // A backup whose objects directory is a symlink into the clone holds none of
 // its objects once the workspace goes (#382).
 func TestReapHoldsWorkPushedToABackupWhoseObjectsAreTheClones(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	backup := filepath.Join(t.TempDir(), "backup.git")
 	gitOut(t, "", "init", "-q", "--bare", backup)
@@ -165,6 +170,7 @@ func TestReapHoldsWorkPushedToABackupWhoseObjectsAreTheClones(t *testing.T) {
 // also follows a gitfile, so a file reading `gitdir: <clone>/.git` fetches the
 // clone itself: only a bundle is a copy (#380).
 func TestReapHoldsWorkWhoseRemoteURLIsAGitfileIntoTheClone(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	gitfile := filepath.Join(t.TempDir(), "backup")
 	writeTestFile(t, gitfile, "gitdir: "+filepath.Join(clone, ".git")+"\n")
@@ -186,6 +192,7 @@ func TestReapHoldsWorkWhoseRemoteURLIsAGitfileIntoTheClone(t *testing.T) {
 
 // A bundle outside the workspace is a copy of what it holds.
 func TestReapCountsWorkInABundleOutsideTheWorkspaceAsPushed(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	gitOut(t, clone, "switch", "-q", "-c", "feature")
 	commitFile(t, clone, "idea.txt", "the idea\n", "the idea")
@@ -207,6 +214,7 @@ func TestReapCountsWorkInABundleOutsideTheWorkspaceAsPushed(t *testing.T) {
 // local branch made that branch read as pushed. Only refs a fetch writes
 // count; a symref, origin/HEAD included, proves nothing of its own (#399).
 func TestReapHoldsABranchASymrefUnderARemoteNames(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	gitOut(t, clone, "switch", "-q", "-c", "wip")
 	commitFile(t, clone, "work.txt", "a day of work\n", "only here")

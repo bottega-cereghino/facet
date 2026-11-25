@@ -19,6 +19,7 @@ import (
 // commits whose only copy is in the workspace. reap counted the branch as
 // pushed and deleted the objects, leaving the backup's ref dangling (#358).
 func TestReapHoldsWorkPushedToABackupThatBorrowsTheClonesObjects(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	backup := filepath.Join(t.TempDir(), "backup.git")
 	gitOut(t, "", "clone", "-q", "--bare", "--shared", "--", clone, backup)
@@ -44,6 +45,7 @@ func TestReapHoldsWorkPushedToABackupThatBorrowsTheClonesObjects(t *testing.T) {
 // into the clone is the clone itself, read under another name: every local
 // branch fetched from it read as pushed (#359).
 func TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone(t *testing.T) {
+	t.Parallel()
 	for name, link := range map[string]func(t *testing.T, alias, clone string){
 		"gitfile": func(t *testing.T, alias, clone string) {
 			writeTestFile(t, filepath.Join(alias, ".git"), "gitdir: "+filepath.Join(clone, ".git")+"\n")
@@ -76,6 +78,7 @@ func TestReapHoldsWorkWhoseRemoteIsAGitfileIntoTheClone(t *testing.T) {
 // rewrite, and GIT_NO_REPLACE_OBJECTS does not turn it off (#360). It holds,
 // with the command that converts it to replace refs, which reap ignores.
 func TestReapHoldsAGraftFile(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	gitOut(t, clone, "switch", "-q", "-c", "feature")
 	commitFile(t, clone, "idea.txt", "the idea\n", "the idea")
@@ -104,6 +107,7 @@ func TestReapHoldsAGraftFile(t *testing.T) {
 // A clone whose objects/info/alternates leads into the workspace borrows
 // objects that go with it.
 func TestReapHoldsACloneThatBorrowsObjectsFromTheWorkspace(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	store := filepath.Join(ws, "store.git")
 	gitOut(t, "", "clone", "-q", "--bare", "--", clone, store)
@@ -126,6 +130,7 @@ func TestReapHoldsACloneThatBorrowsObjectsFromTheWorkspace(t *testing.T) {
 // file in either store holds, with the push that copies it out (#398); an
 // empty store, after `git annex drop`, does not.
 func TestReapHoldsContentInAGitDirObjectStore(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct{ store, fix string }{
 		"annex": {filepath.Join(".git", "annex", "objects", "Xk", "Pq", "SHA256E-s13--abc.csv"), "git annex copy"},
 		"lfs":   {filepath.Join(".git", "lfs", "objects", "ab", "cd"), "git lfs push --all"},

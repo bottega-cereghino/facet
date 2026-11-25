@@ -12,6 +12,7 @@ import (
 // namespace no git command writes are the shapes a list of what to count
 // misses (#364).
 func TestReapHoldsACommitOnlyALocalRefReaches(t *testing.T) {
+	t.Parallel()
 	for _, ref := range []string{"refs/keep/deep/work", "refs/replace/"} {
 		t.Run(ref, func(t *testing.T) {
 			ws, clone := issueWorkspace(t)
@@ -41,6 +42,7 @@ func TestReapHoldsACommitOnlyALocalRefReaches(t *testing.T) {
 // The namespaces that are not local work do not hold: a counted remote's
 // refs, tags and notes. The stash holds as a stash, not as unpushed commits.
 func TestReapDoesNotCountRefsOutsideLocalWork(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	commitFile(t, clone, "tagged.txt", "tagged\n", "tagged")
 	gitOut(t, clone, "tag", "v1")
@@ -69,6 +71,7 @@ func TestReapDoesNotCountRefsOutsideLocalWork(t *testing.T) {
 // A local ref may point at a tree or a blob. It holds no commit to count, and
 // nothing tells whether a remote has what it keeps, so it holds, with the fix.
 func TestReapHoldsALocalRefThatIsNotACommit(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	blob := gitOut(t, clone, "hash-object", "-w", "README")
 	gitOut(t, clone, "update-ref", "refs/keep/blob", blob)
@@ -93,6 +96,7 @@ func TestReapHoldsALocalRefThatIsNotACommit(t *testing.T) {
 // The count and the walk name the same refs: notLocal is spelled once and
 // read by both.
 func TestWalkedRefsCountAndNamesAgree(t *testing.T) {
+	t.Parallel()
 	_, clone := issueWorkspace(t)
 	head := gitOut(t, clone, "rev-parse", "HEAD")
 	for _, ref := range []string{"refs/keep/a", "refs/tags/t", "refs/notes/n", "refs/remotes/x/y", "refs/stash", "refs/stashed/z"} {
