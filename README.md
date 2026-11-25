@@ -482,7 +482,7 @@ never passed through a shell.
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
 | `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}` `{marker}`. `{marker}` is the line the agent ends its pull request's description with when `fix` is set (below), and empty otherwise. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
-| `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
+| `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. A command that exits 75 (EX_TEMPFAIL) ran nothing: the issue is tried again after `wait`, and no try is counted. Any other non-zero exit is a failed try. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. While the queue runs it holds an exclusive lock on the file beside it named `<state>.lock`, and a second queue on the same state file refuses to start, with the fix. |
 | `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
@@ -565,6 +565,10 @@ that issue it uses the workspace already on disk instead of spawning another.
 
 An issue whose agent exited with status zero is not handed out again. An agent
 that exits non-zero has failed a try: the issue is started again after `wait`.
+Exit status 75 (EX_TEMPFAIL) is the exception: it means the agent ran nothing
+(every lane busy, out of quota or capped). The queue logs "not run", counts no
+try, writes nothing to `done`, adds no label and sends no notify, and starts the
+issue again after `wait`. A fix run that exits 75 uses no fix try.
 After 3 failed tries in this process the queue adds `fix.blockLabel` and runs
 `fix.notify`, as for a refused fix; only a zero exit is written to the state's
 `done` record. A spawn that failed, and a command that never started, are also
@@ -948,7 +952,7 @@ waits.
 | `gate` | run before a fix start, with the same placeholders; exit 3 and 4 and any other non-zero exit act as for new work. Omitted means the main `gate` runs. A gate that refuses a repository with a red pull request needs a different gate here. |
 | `tries` | failed tries before the issue is blocked, 1 to 5. Omitted means 2. |
 | `blockLabel` | the label a blocked issue gets. It must exist in the repository. Omitted means `blocked`. |
-| `notify` | an argument list run once when an issue is blocked: `{repo}` `{number}` `{pr}` `{reason}`. Omitted means none. |
+| `notify` | an argument list run once when an issue is blocked: `{repo}` `{number}` `{pr}` `{reason}`. `{pr}` is empty when the agent itself failed (the reason says so, with the exit status). Omitted means none. |
 | `land` | update a green queue pull request that is behind its base, and merge one that is up to date, as above. Omitted means `true`. |
 | `apps` | GitHub Apps whose pull requests are also queue pull requests when they carry the start's line, for agents that open pull requests as an App. Each entry is the App's slug, written as `gh pr list --json author` prints it (`app/<slug>`), as `<slug>[bot]`, or bare. Omitted means only the account `gh` runs as. |
 | `forbid` | regular expressions matched against lines a fix run added. A match, or a higher number in a file whose name is a baseline, ratchet or limit, refuses the fix (see above). Omitted means patterns for a postfix `!` after an identifier, `]` or `)`, ` as `, `as any`, `@ts-ignore`, `@ts-expect-error`, `# type: ignore`, `eslint-disable`, `nolint` and `noqa`. An empty list turns the check off. |
