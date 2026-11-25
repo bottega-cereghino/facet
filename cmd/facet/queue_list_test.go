@@ -24,7 +24,7 @@ func TestQueueStartsAnIssueFromAnotherRepositoryWhenOneCannotBeListed(t *testing
 			}
 			return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
 		},
-		spawn: func(repo string, n int) (string, error) {
+		spawn: func(repo string, _ int) (string, error) {
 			mu.Lock()
 			spawned = append(spawned, repo)
 			mu.Unlock()
