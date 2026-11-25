@@ -30,7 +30,8 @@ type OpenPR struct {
 	IsDraft           bool   `json:"isDraft"`
 	CreatedAt         string `json:"createdAt"`
 	// Author opened the pull request. The queue takes as its own only a
-	// pull request opened by the account it runs as.
+	// pull request opened by the account it runs as or by an App it is
+	// told to trust; gh prints an App's login as app/<slug>.
 	Author User `json:"author"`
 	// Body is the pull request's description. The queue looks in it for
 	// the line its own agent was told to end it with.
@@ -124,7 +125,8 @@ func (CLI) UpdatePRBranch(repo string, number int) error {
 // merge or rebase, in that order of preference when more than one is. It
 // intersects the repository settings with any branch ruleset restrictions
 // (allowed_merge_methods and required_linear_history). When branch is empty,
-// only the repository settings are read.
+// or the rules are absent (see absentSource), only the repository settings
+// are read.
 func (CLI) MergeMethod(repo, branch string) (string, error) {
 	if _, _, err := splitRepo("MergeMethod", repo); err != nil {
 		return "", err

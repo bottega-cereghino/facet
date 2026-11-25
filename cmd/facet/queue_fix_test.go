@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -294,6 +295,36 @@ func TestQueueFixesARedQueuePRBeforeANewIssue(t *testing.T) {
 	}
 }
 
+// Every agent run and fix run has FACET_QUEUE_RUN=1 in its environment, so
+// a watcher the agent starts ends with the run; it is set whatever the
+// queue itself inherited. The gate is no run and does not get it.
+func TestQueueSetsFacetQueueRunInEveryRun(t *testing.T) {
+	t.Setenv("FACET_QUEUE_RUN", "")
+	if err := os.Unsetenv("FACET_QUEUE_RUN"); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(t.TempDir(), "log")
+	cfg := fixQueue(t, log)
+	env := writeExe(t, "env", "#!/bin/sh\nprintf '%s %s\\n' \"$2\" \"${FACET_QUEUE_RUN-unset}\" >> \"$1\"\n")
+	cfg.Agents[0].Command[0] = env
+	cfg.Fix.Command[0] = env
+	cfg.Gate = []string{env, log, "gate"}
+	seedState(t, cfg.State, []int{1}, nil)
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{openIssue(5, "2025-01-01T00:00:00Z")}, nil
+		},
+		prs:      staticPRs(redPR(11, "feature/1-bell")),
+		addLabel: (&labelCalls{}).add,
+	})
+	waitFor(t, "the new issue", func() bool { return slices.Contains(readLines(t, log), "start 5 1") })
+	s.stop(t)
+	got := readLines(t, log)
+	if !slices.Contains(got, "fix 1 PR 11 try 1: red: ci is FAILURE 1") || !slices.Contains(got, "gate unset") {
+		t.Fatalf("runs = %q, want the fix and the start with 1, the gate unset", got)
+	}
+}
+
 func TestQueueFixesAConflictingQueuePR(t *testing.T) {
 	cfg := fixQueue(t, "unused")
 	seedState(t, cfg.State, []int{1}, nil)
@@ -513,6 +544,11 @@ func TestQueueStateSurvivesARestart(t *testing.T) {
 		addLabel: (&labelCalls{}).add,
 	})
 	waitFor(t, "the first fix", func() bool { return len(readLines(t, log)) >= 2 })
+	// The agent writes its log line before it exits. Stopping now could
+	// cancel a run still in flight, and runFix does not count that as a try.
+	waitFor(t, "the first fix to exit", func() bool {
+		return strings.Contains(second.buf.String(), "queue: fix acme/widgets#5 PR #15 exited")
+	})
 	second.stop(t)
 	// A third queue counts on from the second's try: try 2 is the last,
 	// and then the issue is blocked.
@@ -657,6 +693,13 @@ func TestQueueFixConfig(t *testing.T) {
 	if err != nil || !offForbid.Fix.forbidOff || offForbid.Fix.Forbid != nil {
 		t.Fatalf("forbid off: %+v, %v", offForbid.Fix, err)
 	}
+	if cfg.Fix.Apps != nil {
+		t.Fatalf("apps omitted = %q", cfg.Fix.Apps)
+	}
+	apps, err := loadTempConfig(t, `{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": ["app/Robot", "helper[bot]", " plain-1 "]}, `+base+`}`)
+	if err != nil || strings.Join(apps.Fix.Apps, ",") != "robot,helper,plain-1" {
+		t.Fatalf("apps: %+v, %v", apps.Fix, err)
+	}
 	for _, tc := range []struct{ body, want string }{
 		{`{"fix": {"command": ["fixer", "{prompt}"]}, ` + base + `}`, "state"},
 		{`{"state": "s", "fix": {"command": ["fixer"]}, ` + base + `}`, "{prompt}"},
@@ -665,6 +708,10 @@ func TestQueueFixConfig(t *testing.T) {
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "blockLabel": "a,b"}, ` + base + `}`, "comma"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": ["("]}, ` + base + `}`, "forbid"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": [""]}, ` + base + `}`, "empty pattern"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": [""]}, ` + base + `}`, "fix.apps"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": ["acme/bot"]}, ` + base + `}`, "fix.apps"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": ["app/"]}, ` + base + `}`, "fix.apps"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": ["app/robot", "Robot[bot]"]}, ` + base + `}`, "twice"},
 	} {
 		if _, err := loadTempConfig(t, tc.body); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", tc.body, err, tc.want)

@@ -408,6 +408,13 @@ func (CLI) ViewPR(repo, branch string) (*PR, error) {
 func (CLI) MergedPRForSHA(repo, sha string) (*PRForCommit, error) {
 	out, err := run("api", fmt.Sprintf("repos/%s/commits/%s/pulls", repo, sha))
 	if err != nil {
+		// GitHub answers a commit it does not have (a HEAD never pushed) with
+		// HTTP 422 "No commit found for SHA". A commit the forge does not know
+		// is in no pull request. Any other failure stays an error (CODE.md
+		// section 2).
+		if strings.Contains(err.Error(), "No commit found for SHA") && strings.Contains(err.Error(), "HTTP 422") {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var prs []PRForCommit

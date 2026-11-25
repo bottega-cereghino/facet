@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,6 +58,111 @@ func TestQueueNeverAdoptsAPersonsPROnTheIssueBranch(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// testApp is the App slug fix.apps names in the tests below.
+const testApp = "queue-app"
+
+// A pull request a configured App opened, with the start's trailer line, is
+// the queue's: it is merged, in the form gh prints an App's login and in
+// the form the REST API does.
+func TestQueueLandsAPRAConfiguredAppOpened(t *testing.T) {
+	for _, login := range []string{"app/" + testApp, testApp + "[bot]", "App/Queue-App"} {
+		t.Run(login, func(t *testing.T) {
+			cfg := fixQueue(t, filepath.Join(t.TempDir(), "log"))
+			cfg.Fix.Apps = []string{testApp}
+			seedState(t, cfg.State, []int{1}, nil)
+			land := &landCalls{}
+			var merged atomic.Bool
+			land.merge = func(int) error { merged.Store(true); return nil }
+			pr := landPR(11, "feature/1-bell", "CLEAN")
+			pr.Author = ghx.User{Login: login}
+			prs := func(string) ([]ghx.OpenPR, error) {
+				if merged.Load() {
+					return nil, nil
+				}
+				return []ghx.OpenPR{pr}, nil
+			}
+			s := startQueue(t, cfg, land.env(queueEnv{list: noIssues, prs: prs}))
+			waitFor(t, "the merge", func() bool { return merged.Load() })
+			s.stop(t)
+			if got := land.list(); strings.Join(got, "|") != "merge acme/widgets#11 squash head11" {
+				t.Fatalf("landed = %q", got)
+			}
+		})
+	}
+}
+
+// The App's login alone, or the trailer alone, is never enough. An App
+// pull request without the start's line, or with another start's, is a
+// person's; so is one from an App fix.apps does not name, one from a person
+// whose login is the App's bare slug, one from a fork, and any App pull
+// request when fix.apps is not set.
+func TestQueueNeverAdoptsAnAppPRWithoutEverythingElse(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		apps []string
+		edit func(*ghx.OpenPR)
+	}{
+		{"no trailer", []string{testApp}, func(pr *ghx.OpenPR) { pr.Body = "My own fix." }},
+		{"another run's trailer", []string{testApp}, func(pr *ghx.OpenPR) { pr.Body = markerLine("m99") }},
+		{"another app", []string{testApp}, func(pr *ghx.OpenPR) { pr.Author = ghx.User{Login: "app/other-app"} }},
+		{"a person named like the app", []string{testApp}, func(pr *ghx.OpenPR) { pr.Author = ghx.User{Login: testApp} }},
+		{"a fork", []string{testApp}, func(pr *ghx.OpenPR) { pr.IsCrossRepository = true }},
+		{"apps not set", nil, func(*ghx.OpenPR) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "log")
+			cfg := fixQueue(t, log)
+			cfg.Fix.Apps = tc.apps
+			seedState(t, cfg.State, []int{1, 2}, nil)
+			green := landPR(11, "feature/1-bell", "CLEAN")
+			red := redPR(12, "feature/2-horn")
+			for _, pr := range []*ghx.OpenPR{&green, &red} {
+				pr.Author = ghx.User{Login: "app/" + testApp}
+				tc.edit(pr)
+			}
+			land := &landCalls{}
+			labels := &labelCalls{}
+			ticks := &countCalls{}
+			s := startQueue(t, cfg, land.env(queueEnv{
+				list:     func(repo, _ string) ([]ghx.Issue, error) { ticks.add(repo); return nil, nil },
+				prs:      staticPRs(green, red),
+				addLabel: labels.add,
+			}))
+			waitFor(t, "five rounds", func() bool { return ticks.get("acme/widgets") >= 5 })
+			s.stop(t)
+			if got := readLines(t, log); len(got) != 0 || len(land.list()) != 0 || len(labels.list()) != 0 {
+				t.Fatalf("runs %q, landed %q, labels %q", got, land.list(), labels.list())
+			}
+		})
+	}
+}
+
+func TestAuthorIsApp(t *testing.T) {
+	apps := []string{testApp}
+	for _, tc := range []struct {
+		login string
+		want  bool
+	}{
+		{"app/queue-app", true},
+		{"queue-app[bot]", true},
+		{"APP/QUEUE-APP", true},
+		{"queue-app", false},
+		{"app/", false},
+		{"[bot]", false},
+		{"app/other", false},
+		{"queue-app[bot]x", false},
+		{"xapp/queue-app", false},
+		{"", false},
+	} {
+		if got := authorIsApp(tc.login, apps); got != tc.want {
+			t.Errorf("authorIsApp(%q) = %v, want %v", tc.login, got, tc.want)
+		}
+	}
+	if authorIsApp("app/queue-app", nil) {
+		t.Error("no apps matched app/queue-app")
 	}
 }
 

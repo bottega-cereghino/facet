@@ -10,8 +10,8 @@ import (
 // RequiredChecks lists the status-check contexts the base branch requires,
 // from its rulesets and from classic branch protection. known is false when
 // either source fails for a reason other than being absent, so the caller
-// does not treat a partial answer as the whole list. An absent source (HTTP
-// 404) contributes nothing.
+// does not treat a partial answer as the whole list. An absent source (see
+// absentSource) contributes nothing.
 func (CLI) RequiredChecks(repo, branch string) (names []string, known bool, err error) {
 	if _, _, err := splitRepo("RequiredChecks", repo); err != nil {
 		return nil, false, err
@@ -39,15 +39,40 @@ func (CLI) RequiredChecks(repo, branch string) (names []string, known bool, err 
 	return combineRequired(rules, rulesAbsent, rulesErr, prot, protAbsent, protErr)
 }
 
+// planLimitAnswer is gh's whole answer when the repository's plan has no
+// rulesets or branch protection (a private repository on a free plan).
+const planLimitAnswer = "gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)"
+
+// apiGet reads one REST source of branch rules. absent means the repository
+// has no such source, which is an answer and not an error.
 func apiGet(path string, flags ...string) (body []byte, absent bool, err error) {
 	body, err = run(append(append([]string{"api"}, flags...), path)...)
 	if err == nil {
 		return body, false, nil
 	}
-	if strings.Contains(err.Error(), "404") {
+	if absentSource(err.Error()) {
 		return nil, true, nil
 	}
 	return nil, false, err
+}
+
+// absentSource reports whether a failed gh api call says the source is not
+// there: HTTP 404, or exactly planLimitAnswer. Any other 403 (a missing
+// permission, a rate limit) is not. msg is run's error text, the command line
+// and then gh's stderr. Only gh's words at the end of a line count, because
+// the command line holds repository and branch names, which may hold "404".
+func absentSource(msg string) bool {
+	if strings.HasSuffix(msg, ": "+planLimitAnswer) {
+		return true
+	}
+	// gh may add a line after the answer, such as a missing scope.
+	for _, line := range strings.Split(msg, "\n") {
+		// The second form is gh's when the response gives no message.
+		if strings.HasSuffix(line, " (HTTP 404)") || strings.HasSuffix(line, ": gh: HTTP 404") {
+			return true
+		}
+	}
+	return false
 }
 
 func parseRuleContexts(body []byte) ([]string, error) {

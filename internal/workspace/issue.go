@@ -116,6 +116,9 @@ type IssueState struct {
 	// open PR cannot be ruled out. Distinct from PR == nil, which means the lookup
 	// ran and found none.
 	PRUnknown bool
+	// PRErr is the error of the failed lookup behind PRUnknown, or of a lookup
+	// reap --closed ran itself. Nil when no lookup failed.
+	PRErr error
 	// SessionLive means the multiplexer session of this name has a pane
 	// rooted in the workspace; reap --force ends it.
 	SessionLive bool

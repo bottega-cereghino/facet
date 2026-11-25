@@ -132,14 +132,25 @@ func processGroupAlive(pgid int) bool {
 // sends SIGTERM to the whole group, and SIGKILL follows if it has not exited
 // within queueStopGrace.
 func runArgv(ctx context.Context, dir string, argv []string) error {
-	return runArgvTracked(ctx, dir, argv, nil)
+	return runArgvTracked(ctx, dir, argv, nil, nil)
 }
 
-func runArgvTracked(ctx context.Context, dir string, argv []string, onStart func(pid int)) error {
+// queueRunEnv is set in the environment of every agent run and fix run the
+// queue starts, so a tool the agent starts can tell it runs inside one: a
+// watcher that would outlive the run ends with it instead.
+const queueRunEnv = "FACET_QUEUE_RUN=1"
+
+// runArgvTracked is runArgv with env added to the queue's own environment,
+// a later entry winning over an inherited one of the same name, and
+// onStart called with the process ID once the command has started.
+func runArgvTracked(ctx context.Context, dir string, argv, env []string, onStart func(pid int)) error {
 	if len(argv) == 0 || argv[0] == "" {
 		return fmt.Errorf("empty command\nfix: set the command in the queue config")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
@@ -173,7 +184,16 @@ func (r *queueRunner) runCmd(ctx context.Context, dir string, argv []string, onS
 	if r.env.run != nil {
 		return r.env.run(ctx, dir, argv)
 	}
-	return runArgvTracked(ctx, dir, argv, onStart)
+	return runArgvTracked(ctx, dir, argv, nil, onStart)
+}
+
+// runAgent starts an agent run or a fix run: runCmd, with queueRunEnv in
+// its environment.
+func (r *queueRunner) runAgent(ctx context.Context, dir string, argv []string, onStart func(pid int)) error {
+	if r.env.run != nil {
+		return r.env.run(ctx, dir, argv)
+	}
+	return runArgvTracked(ctx, dir, argv, []string{queueRunEnv}, onStart)
 }
 
 // gateSkipExit is the gate's exit status for "not this run": a refusal about
@@ -844,7 +864,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	r.logf("queue: %s#%d agent %s effort %s bundle %d in %s", iss.Repo, iss.Issue.Number, who, effort, len(run), ws)
 	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, "start", cmdSummary)
 	defer r.clearActive(run)
-	err = r.runCmd(ctx, ws, argv, func(pid int) {
+	err = r.runAgent(ctx, ws, argv, func(pid int) {
 		r.recordActive(run, pid)
 	})
 	if err == nil {
