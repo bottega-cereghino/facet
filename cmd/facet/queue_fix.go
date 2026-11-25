@@ -611,8 +611,8 @@ func (r *queueRunner) saveState() {
 	}
 }
 
-// maxAgentFailures is how many non-zero exits of an issue's agent this
-// process accepts before it labels the issue and notifies.
+// maxAgentFailures is how many non-zero exits of an issue's agent, or spawn
+// failures that cannot pass by themselves, this process accepts before it labels the issue and notifies.
 const maxAgentFailures = 3
 
 // failRun handles an agent that ran and exited non-zero. That is a failed
