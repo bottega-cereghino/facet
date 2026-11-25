@@ -64,17 +64,43 @@ func promptWithMarker(prompt, marker string) string {
 
 // ownsPR reports whether pr is the one the start s opened: from this
 // repository, not a fork; carrying s's trailer line; and opened by the
-// account the queue runs as. An error means the account cannot be read, and
+// account the queue runs as or by an App named in fix.apps. The trailer
+// alone is never enough. An error means the account cannot be read, and
 // the caller must not treat that as "not the queue's" and forget the start.
 func (r *queueRunner) ownsPR(s startedIssue, pr ghx.OpenPR) (bool, error) {
 	if pr.IsCrossRepository || !hasMarker(pr.Body, s.Marker) {
 		return false, nil
+	}
+	if r.cfg.Fix != nil && authorIsApp(pr.Author.Login, r.cfg.Fix.Apps) {
+		return true, nil
 	}
 	login, err := r.viewerLogin()
 	if err != nil {
 		return false, err
 	}
 	return strings.EqualFold(pr.Author.Login, login), nil
+}
+
+// authorIsApp reports whether login is one of apps, given by slug. gh's
+// --json author prints an App as app/<slug>, and the REST API as
+// <slug>[bot]. Only those two forms match: a person's login holds neither a
+// slash nor brackets, so no account can pass as the App, while the bare
+// slug is a login anyone may register.
+func authorIsApp(login string, apps []string) bool {
+	login = strings.ToLower(login)
+	slug, ok := strings.CutPrefix(login, "app/")
+	if !ok {
+		slug, ok = strings.CutSuffix(login, "[bot]")
+	}
+	if !ok || slug == "" {
+		return false
+	}
+	for _, app := range apps {
+		if slug == app {
+			return true
+		}
+	}
+	return false
 }
 
 // viewerLogin is the account the queue runs as, read once per process.

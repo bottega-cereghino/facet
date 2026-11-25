@@ -770,8 +770,11 @@ without it has the sentence added at its end). For an issue this queue
 started, the queue pull request is the first open pull request seen whose
 head branch is the issue's spawn branch (`feature/<number>-…`), that comes
 from the repository itself (not a fork), that was opened after the start,
-whose author is the account `gh` runs as, and whose description carries
-that start's line. The queue records its number the first time it sees it,
+whose author is the account `gh` runs as or an App named in `fix.apps`, and
+whose description carries that start's line. The trailer line alone is
+never enough, and neither is the author: an App is matched only in the forms
+GitHub prints for an App (`app/<slug>` from `gh`, `<slug>[bot]` from the
+REST API), which no person's login can take. The queue records its number the first time it sees it,
 and from then on only that pull request is the issue's, and only while it
 still meets all of that. **A person's own pull request is never touched**:
 one for an issue the queue never started, one from a fork, one opened
@@ -899,6 +902,7 @@ waits.
 | `blockLabel` | the label a blocked issue gets. It must exist in the repository. Omitted means `blocked`. |
 | `notify` | an argument list run once when an issue is blocked: `{repo}` `{number}` `{pr}` `{reason}`. Omitted means none. |
 | `land` | update a green queue pull request that is behind its base, and merge one that is up to date, as above. Omitted means `true`. |
+| `apps` | GitHub Apps whose pull requests are also queue pull requests when they carry the start's line, for agents that open pull requests as an App. Each entry is the App's slug, written as `gh pr list --json author` prints it (`app/<slug>`), as `<slug>[bot]`, or bare. Omitted means only the account `gh` runs as. |
 | `forbid` | regular expressions matched against lines a fix run added. A match, or a higher number in a file whose name is a baseline, ratchet or limit, refuses the fix (see above). Omitted means patterns for a postfix `!` after an identifier, `]` or `)`, ` as `, `as any`, `@ts-ignore`, `@ts-expect-error`, `# type: ignore`, `eslint-disable`, `nolint` and `noqa`. An empty list turns the check off. |
 
 `--dry-run` lists the fix runs first (`would fix <repo>#<n> PR #<pr>:
@@ -913,6 +917,8 @@ writes no state. It runs the gate as for a start.
 `TestQueueFixesAConflictingQueuePR`, `TestQueueDoesNotJudgeAPendingQueuePR`,
 `TestQueueNeverTouchesAPROfAnIssueItDidNotStart`,
 `TestQueueNeverAdoptsAPersonsPROnTheIssueBranch`,
+`TestQueueLandsAPRAConfiguredAppOpened`,
+`TestQueueNeverAdoptsAnAppPRWithoutEverythingElse`, `TestAuthorIsApp`,
 `TestQueueLeavesAPRAloneOnceItsIssueIsClosedUnlabelledOrBlocked`,
 `TestQueuePromptCarriesTheRunMarker`, `TestQueuePromptHasNoMarkerWithoutFix`,
 `TestQueueKeepsTheStartWhenTheAccountCannotBeRead`,

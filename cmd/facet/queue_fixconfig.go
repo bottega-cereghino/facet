@@ -62,6 +62,10 @@ type queueFix struct {
 	// Land updates a green queue pull request that is behind its base, and
 	// merges one that is up to date, without a model run.
 	Land bool
+	// Apps are the slugs, lower case, of the GitHub Apps whose pull
+	// requests the queue also takes as its own when they carry the start's
+	// trailer line. Empty means only the account the queue runs as.
+	Apps []string
 	// forbidOff is set when fix.forbid is an empty list, which turns the
 	// suppression check off. Omitted fix.forbid leaves it false.
 	forbidOff bool
@@ -80,6 +84,8 @@ type queueFixFile struct {
 	BlockLabel string   `json:"blockLabel"`
 	Notify     []string `json:"notify"`
 	Land       *bool    `json:"land"`
+	// Apps names GitHub Apps as app/<slug>, <slug>[bot] or <slug>.
+	Apps []string `json:"apps"`
 	// Forbid nil means the default patterns. A pointer distinguishes an
 	// omitted field from an empty list, which turns the check off.
 	Forbid *[]string `json:"forbid"`
@@ -126,6 +132,11 @@ func normalizeFix(configPath, state string, raw *queueFixFile) (*queueFix, strin
 	if l := strings.TrimSpace(raw.BlockLabel); l != "" {
 		fix.BlockLabel = l
 	}
+	apps, err := normalizeFixApps(raw.Apps)
+	if err != nil {
+		return nil, "", err
+	}
+	fix.Apps = apps
 	patterns := defaultForbid
 	switch {
 	case raw.Forbid == nil:
@@ -147,6 +158,31 @@ func normalizeFix(configPath, state string, raw *queueFixFile) (*queueFix, strin
 		return nil, "", err
 	}
 	return fix, state, nil
+}
+
+// appSlug is a GitHub App's slug: lower-case letters, digits and hyphens.
+var appSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// normalizeFixApps turns each fix.apps entry into the App's slug. The forms
+// gh and the REST API print are taken as they are copied: app/<slug> and
+// <slug>[bot] name the same App as <slug>.
+func normalizeFixApps(raw []string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, entry := range raw {
+		slug := strings.ToLower(strings.TrimSpace(entry))
+		slug = strings.TrimPrefix(slug, "app/")
+		slug = strings.TrimSuffix(slug, "[bot]")
+		if !appSlug.MatchString(slug) {
+			return nil, fmt.Errorf("queue config: fix.apps entry %q is not a GitHub App\nfix: name the App as gh prints the author of its pull requests, app/<slug>", entry)
+		}
+		if seen[slug] {
+			return nil, fmt.Errorf("queue config: fix.apps names %s twice\nfix: list each App once", slug)
+		}
+		seen[slug] = true
+		out = append(out, slug)
+	}
+	return out, nil
 }
 
 // compileForbid compiles the suppression patterns. An empty entry is a

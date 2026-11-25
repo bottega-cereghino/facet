@@ -688,6 +688,13 @@ func TestQueueFixConfig(t *testing.T) {
 	if err != nil || !offForbid.Fix.forbidOff || offForbid.Fix.Forbid != nil {
 		t.Fatalf("forbid off: %+v, %v", offForbid.Fix, err)
 	}
+	if cfg.Fix.Apps != nil {
+		t.Fatalf("apps omitted = %q", cfg.Fix.Apps)
+	}
+	apps, err := loadTempConfig(t, `{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": ["app/Robot", "helper[bot]", " plain-1 "]}, `+base+`}`)
+	if err != nil || strings.Join(apps.Fix.Apps, ",") != "robot,helper,plain-1" {
+		t.Fatalf("apps: %+v, %v", apps.Fix, err)
+	}
 	for _, tc := range []struct{ body, want string }{
 		{`{"fix": {"command": ["fixer", "{prompt}"]}, ` + base + `}`, "state"},
 		{`{"state": "s", "fix": {"command": ["fixer"]}, ` + base + `}`, "{prompt}"},
@@ -696,6 +703,10 @@ func TestQueueFixConfig(t *testing.T) {
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "blockLabel": "a,b"}, ` + base + `}`, "comma"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": ["("]}, ` + base + `}`, "forbid"},
 		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "forbid": [""]}, ` + base + `}`, "empty pattern"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": [""]}, ` + base + `}`, "fix.apps"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": ["acme/bot"]}, ` + base + `}`, "fix.apps"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": ["app/"]}, ` + base + `}`, "fix.apps"},
+		{`{"state": "s", "fix": {"command": ["fixer", "{prompt}"], "apps": ["app/robot", "Robot[bot]"]}, ` + base + `}`, "twice"},
 	} {
 		if _, err := loadTempConfig(t, tc.body); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", tc.body, err, tc.want)
