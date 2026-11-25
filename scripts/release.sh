@@ -40,8 +40,9 @@ gh auth status >/dev/null 2>&1 || {
 cd "$(git rev-parse --show-toplevel)"
 token_file=$(mktemp)
 notes_file=$(mktemp)
+changelog_file=$(mktemp)
 npm_dir=$(mktemp -d)
-trap 'rm -f "$token_file" "$notes_file"; rm -rf "$npm_dir"' EXIT
+trap 'rm -f "$token_file" "$notes_file" "$changelog_file"; rm -rf "$npm_dir"' EXIT
 chmod 600 "$token_file"
 
 cp scripts/release/package.json scripts/release/package-lock.json "$npm_dir"/
@@ -67,12 +68,14 @@ gh auth token >"$token_file"
 # page. Copy the entry for the version on main there (#228).
 git fetch --quiet origin main
 version=$(git show origin/main:.release-please-manifest.json | sed -n 's/.*"\.": *"\([^"]*\)".*/\1/p')
-git show origin/main:CHANGELOG.md |
-  awk -v v="$version" '
-    index($0, "## [" v "]") == 1 { on = 1; next }
-    on && /^## \[/ { exit }
-    on { print }
-  ' >"$notes_file"
+# Write the file first. awk exits at the next heading, and in a pipe that gives
+# git show SIGPIPE (exit 141 under pipefail) on a large changelog (#546).
+git show origin/main:CHANGELOG.md >"$changelog_file"
+awk -v v="$version" '
+  index($0, "## [" v "]") == 1 { on = 1; next }
+  on && /^## \[/ { exit }
+  on { print }
+' "$changelog_file" >"$notes_file"
 if ! grep -q '[^[:space:]]' "$notes_file"; then
   echo "CHANGELOG.md on main has no entry for $version; the release keeps release-please's notes." >&2
   exit 1
