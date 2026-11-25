@@ -40,7 +40,7 @@ const prClockSkew = time.Minute
 // queuePR is the queue's own pull request for iss: one its own run
 // opened, never a person's. It comes from this repository (not a fork), on
 // the spawn branch, opened after the start by the account the queue runs
-// as, and its description carries the start's trailer line (ownsPR). The
+// as or an App in fix.apps, and its description carries the start's trailer line (ownsPR). The
 // first such pull request's number is recorded, and from then on only that
 // pull request is the queue's, and only while it still passes ownsPR. An
 // error means the account could not be read: the caller must not take it
