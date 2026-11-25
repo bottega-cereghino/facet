@@ -544,6 +544,11 @@ func TestQueueStateSurvivesARestart(t *testing.T) {
 		addLabel: (&labelCalls{}).add,
 	})
 	waitFor(t, "the first fix", func() bool { return len(readLines(t, log)) >= 2 })
+	// The agent writes its log line before it exits. Stopping now could
+	// cancel a run still in flight, and runFix does not count that as a try.
+	waitFor(t, "the first fix to exit", func() bool {
+		return strings.Contains(second.buf.String(), "queue: fix acme/widgets#5 PR #15 exited")
+	})
 	second.stop(t)
 	// A third queue counts on from the second's try: try 2 is the last,
 	// and then the issue is blocked.
