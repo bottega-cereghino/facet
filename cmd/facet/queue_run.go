@@ -268,6 +268,9 @@ type queueRunner struct {
 	// left alone, or "" when it may be touched.
 	viewer     string
 	issueRound map[string]string
+	// ignored is the queue-run pull requests the ownership check turns
+	// away, keyed by repo#number, for the heartbeat.
+	ignored map[string]ignoredPR
 	// noted remembers a line already logged for a key, so a refusal is
 	// logged once per head rather than once per tick.
 	noted        map[string]string
@@ -331,6 +334,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		updateHolds:   map[string]*retryHold{},
 		forbidHolds:   map[string]*retryHold{},
 		issueRound:    map[string]string{},
+		ignored:       map[string]ignoredPR{},
 		waited:        map[string]string{},
 		noted:         map[string]string{},
 		mergeMethods:  map[string]cachedMergeMethod{},

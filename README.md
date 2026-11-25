@@ -665,6 +665,21 @@ Without `--json`, it prints one line per fact (`state`, `at`, `age`, `pid`,
 `version`, `running`, `held`, `last_error`). With `--json`, it prints the
 heartbeat object with `age_seconds` and `state` added.
 
+The queue takes a pull request as its own only when it passes the ownership
+check: same repository (not a fork), the start's `Facet-Queue-Run` line, and an
+author that is the queue's account or an App in `fix.apps`. An open pull
+request on a started issue's branch that carries the start's line but fails
+the rest is ignored: the queue neither lands nor fixes it. The queue records
+each one in the heartbeat's `ignored_prs` (`repo`, `number`, `author`,
+`reason`, `issue`), and `facet queue status` prints one warning line per pull
+request with the fix: name the App in `fix.apps` when the author is an App; a
+pull request from a fork is never the queue's. `--json` carries the same
+`ignored_prs` list. The entry goes once the pull request is closed or passes
+the check. The warning is read-only: ownership, landing, fixing, the state
+and the exit codes do not change, and `queue status` still makes no network
+call. The queue spends at most one listing per repository per five minutes
+to notice a closed pull request.
+
 ### `facet queue report`
 
 `facet queue report [--config FILE] [--since 24h] [--json]` says what the
