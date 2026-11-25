@@ -83,7 +83,7 @@ func dryQueue(ctx context.Context, cfg queueConfig, env queueEnv) error {
 			}
 			if gateSkips(err) {
 				r.logf("dry-run: would not start %s#%d: gate skips it: %s", run[0].Repo, run[0].Issue.Number, err.Error())
-				r.deferAll(run, r.deferRetry)
+				r.deferGateSkipped(run, err)
 				continue
 			}
 			r.logf("dry-run: would not start %s#%d: gate: %s", run[0].Repo, run[0].Issue.Number, err.Error())
