@@ -208,7 +208,7 @@ func (CLI) DevelopBranch(repo string, number int, base, name string) (string, er
 		case strings.Contains(err.Error(), "already exists"):
 		case strings.Contains(err.Error(), "empty branch name"):
 			if _, refErr := run("api", "repos/"+repo+"/git/ref/heads/"+name); refErr != nil {
-				return "", fmt.Errorf("%w; branch %q is not on %s (%v): push it or pick another name, then spawn again",
+				return "", fmt.Errorf("%w; branch %q is not on %s (%w): push it or pick another name, then spawn again",
 					err, name, repo, refErr)
 			}
 		default:
