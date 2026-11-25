@@ -1912,3 +1912,74 @@ func TestQueueDryRunSkipsAWholeRepositoryOnExit4(t *testing.T) {
 		t.Fatalf("gate ran %d times, want 2 (once per repository)\n%s", n, got)
 	}
 }
+
+func bundleTwoIssues(repo, _ string) ([]ghx.Issue, error) {
+	if repo != "acme/widgets" {
+		return nil, fmt.Errorf("unexpected repo %s", repo)
+	}
+	return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z"), openIssue(2, "2026-01-02T00:00:00Z")}, nil
+}
+
+func TestQueueGateSkipOfOneIssueDefersOnlyThatIssue(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	asked := filepath.Join(dir, "asked")
+	// The gate is asked with {number}, the first issue of the run. It skips issue 1.
+	gate := writeExe(t, "gate-first", "#!/bin/sh\necho \"$1\" >> "+asked+"\nif [ \"$1\" = 1 ]; then echo 'blocked' >&2; exit 3; fi\nexit 0\n")
+	cfg := oneAgentConfig(nil)
+	cfg.Max = 2
+	cfg.Wait = 100 * time.Millisecond
+	cfg.Decisions = filepath.Join(dir, "decisions.jsonl")
+	cfg.Gate = []string{gate, "{number}"}
+	cfg.Agents = []queueAgent{{Bundle: 2, Command: []string{appendScript(t), out, "{number}"}}}
+	s := startQueue(t, cfg, queueEnv{list: bundleTwoIssues})
+	waitFor(t, "issue 2 to start and issue 1 to be asked about again", func() bool {
+		n := 0
+		for _, l := range readLines(t, asked) {
+			if l == "1" {
+				n++
+			}
+		}
+		return n >= 2 && len(readLines(t, out)) >= 1
+	})
+	s.stop(t)
+	if got := readLines(t, out); len(got) == 0 || got[0] != "2" {
+		t.Fatalf("started %v, want issue 2 first", got)
+	}
+	rows, _ := readDecisionLines(t, cfg.Decisions)
+	var first, second bool
+	for _, row := range rows {
+		if row.Decision != "skip" {
+			continue
+		}
+		first = first || (row.Issue == "1" && strings.Contains(row.Why, "gate skips it"))
+		second = second || (row.Issue == "2" && strings.Contains(row.Why, "left out"))
+	}
+	if !first || !second {
+		t.Fatalf("decision rows lack the refused issue (%v) or the left out one (%v): %+v", first, second, rows)
+	}
+}
+
+func TestQueueGateSkipRepositoryHoldsTheWholeBundle(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	gate := writeExe(t, "gate-repo", "#!/bin/sh\nif [ \"$1\" = acme/widgets ]; then exit 4; fi\nexit 0\n")
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 2
+	cfg.Wait = time.Hour
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Gate = []string{gate, "{repo}"}
+	cfg.Agents = []queueAgent{{Bundle: 2, Command: []string{appendScript(t), out, "{number}"}}}
+	list := func(repo, _ string) ([]ghx.Issue, error) {
+		if repo == "acme/widgets" {
+			return bundleTwoIssues(repo, "")
+		}
+		return []ghx.Issue{openIssue(9, "2026-01-01T00:00:00Z")}, nil
+	}
+	s := startQueue(t, cfg, queueEnv{list: list})
+	waitFor(t, "the other repository's agent", func() bool { return len(readLines(t, out)) >= 1 })
+	s.stop(t)
+	if got := strings.Join(readLines(t, out), ","); got != "9" {
+		t.Fatalf("started %s, want only 9", got)
+	}
+}
