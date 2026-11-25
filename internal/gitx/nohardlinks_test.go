@@ -12,7 +12,7 @@ import (
 func sharedObjectFiles(t *testing.T, dir string) int {
 	t.Helper()
 	n := 0
-	err := filepath.WalkDir(filepath.Join(dir, ".git", "objects"), func(p string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(filepath.Join(dir, ".git", "objects"), func(_ string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
