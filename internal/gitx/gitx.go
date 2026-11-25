@@ -31,10 +31,19 @@ type Error struct {
 	Args     []string
 	ExitCode int
 	Stderr   string
+	// Cause is why git did not finish, when it did not exit by itself: the
+	// signal that killed it, or the reason it never started. Nil when git
+	// exited with a status of its own.
+	Cause error
 }
 
 func (e *Error) Error() string {
 	msg := strings.TrimSpace(e.Stderr)
+	if msg == "" && e.Cause != nil {
+		// Exit status -1 means git has no exit status: a signal ended it, or
+		// it never started. Say which.
+		msg = "git did not finish: " + e.Cause.Error()
+	}
 	if msg == "" {
 		msg = fmt.Sprintf("exit status %d", e.ExitCode)
 	}
@@ -86,11 +95,20 @@ func run(ctx context.Context, dir string, env []string, args ...string) (string,
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		code := -1
+		var cause error
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			code = ee.ExitCode()
 		}
-		return trimOutput(stdout.String()), &Error{Args: args, ExitCode: code, Stderr: stderr.String()}
+		if code == -1 {
+			// No exit status: ee.String() reads "signal: killed" when a signal
+			// ended git; any other error says why it never started.
+			cause = err
+			if ee != nil {
+				cause = errors.New(ee.String())
+			}
+		}
+		return trimOutput(stdout.String()), &Error{Args: args, ExitCode: code, Stderr: stderr.String(), Cause: cause}
 	}
 	return trimOutput(stdout.String()), nil
 }
