@@ -6,6 +6,13 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.19.1](https://github.com/bottega-cereghino/facet/compare/v0.19.0...v0.19.1) (2026-11-25)
+
+
+### Fixed
+
+* **queue:** an agent that exits non-zero is retried later, not marked done ([#562](https://github.com/bottega-cereghino/facet/issues/562)) ([e6280ba](https://github.com/bottega-cereghino/facet/commit/e6280ba98eb588d04a0ed51ee6bd85f4f2f236c9))
+
 ## [0.19.0](https://github.com/bottega-cereghino/facet/compare/v0.18.1...v0.19.0) (2026-11-25)
 
 
