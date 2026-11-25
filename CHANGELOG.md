@@ -6,6 +6,13 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.19.2](https://github.com/bottega-cereghino/facet/compare/v0.19.1...v0.19.2) (2026-11-25)
+
+
+### Fixed
+
+* **queue:** read a file GitHub sends without a patch from its two blobs ([#566](https://github.com/bottega-cereghino/facet/issues/566)) ([7daa96b](https://github.com/bottega-cereghino/facet/commit/7daa96b5daf2a9ee1279679a44fffbf1f218bc3f))
+
 ## [0.19.1](https://github.com/bottega-cereghino/facet/compare/v0.19.0...v0.19.1) (2026-11-25)
 
 
