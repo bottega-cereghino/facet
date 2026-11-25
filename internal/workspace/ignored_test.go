@@ -11,6 +11,7 @@ import (
 // only copy, so it holds. Dependency folders and build output something
 // rebuilds do not (#364, part 7).
 func TestReapHoldsAnIgnoredFileNothingRebuilds(t *testing.T) {
+	t.Parallel()
 	ws, clone := longLivedWorkspace(t, t.TempDir())
 	excludeIn(t, clone, ".env")
 	excludeIn(t, clone, "node_modules/")

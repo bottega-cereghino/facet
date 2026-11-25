@@ -62,6 +62,7 @@ func superWithSubmodule(t *testing.T, worktree bool) (ws, clone string) {
 // submodule as it judges a clone (facet#269), in an own clone and in a
 // worktree clone alike.
 func TestReapHoldsAnUnpushedSubmoduleCommit(t *testing.T) {
+	t.Parallel()
 	for _, worktree := range []bool{false, true} {
 		t.Run(map[bool]string{false: "own clone", true: "worktree clone"}[worktree], func(t *testing.T) {
 			ws, clone := superWithSubmodule(t, worktree)
@@ -97,6 +98,7 @@ func TestReapHoldsAnUnpushedSubmoduleCommit(t *testing.T) {
 // An uninitialised submodule is an empty directory: nothing to judge, nothing
 // held.
 func TestReapIgnoresAnUninitialisedSubmodule(t *testing.T) {
+	t.Parallel()
 	roots, ws, _ := setup(t)
 	remotes := t.TempDir()
 	sub := bareRemote(t, filepath.Join(remotes, "sub.git"))
@@ -131,6 +133,7 @@ func TestReapIgnoresAnUninitialisedSubmodule(t *testing.T) {
 // not, and holds while one has work no remote has (facet#311). Pushed from
 // there, it holds nothing.
 func TestReapHoldsASubmoduleThatIsNotCheckedOut(t *testing.T) {
+	t.Parallel()
 	away := map[string]func(t *testing.T, clone string){
 		"switched away": func(t *testing.T, clone string) {
 			// Back to the commit before the submodule was added: an older
@@ -196,6 +199,7 @@ func TestReapHoldsASubmoduleThatIsNotCheckedOut(t *testing.T) {
 // pushed the clone reads clean. Its commits are judged as a clone's
 // (facet#311).
 func TestReapHoldsAnEmbeddedRepositoryWithoutGitmodules(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	sub := bareRemote(t, filepath.Join(t.TempDir(), "sub.git"))
 	inner := filepath.Join(clone, "inner")
@@ -231,6 +235,7 @@ func TestReapHoldsAnEmbeddedRepositoryWithoutGitmodules(t *testing.T) {
 // in docs/) is neither untracked nor ignored, so git status says nothing of
 // its commits. Reap judges it as a clone (facet#311).
 func TestReapHoldsARepositoryInATrackedDirectory(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	if err := os.Mkdir(filepath.Join(clone, "docs"), 0o777); err != nil {
 		t.Fatal(err)

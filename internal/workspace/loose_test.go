@@ -19,6 +19,7 @@ import (
 // to a name inside it. A note beside the clones then read as committed
 // (#353).
 func TestReapHoldsANoteInAWorkspaceTheEnclosingRepoIgnores(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enc := enclosingRepoIn(t, root)
@@ -37,6 +38,7 @@ func TestReapHoldsANoteInAWorkspaceTheEnclosingRepoIgnores(t *testing.T) {
 // gitlink (its HEAD's sha, none of its commits), reads clean in the status,
 // so its local commit was deleted with the workspace (#354).
 func TestReapHoldsAGitlinkedHandCloneOneLevelDown(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enc := enclosingRepoIn(t, root)
@@ -56,6 +58,7 @@ func TestReapHoldsAGitlinkedHandCloneOneLevelDown(t *testing.T) {
 // note whose name the disk keeps decomposed (copied from an HFS+ volume, an
 // archive, many tools) was never matched to its status record (#355).
 func TestReapHoldsANoteWhoseNameIsDecomposed(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enc := enclosingRepoIn(t, root)
@@ -96,6 +99,7 @@ func TestReapHoldsANoteWhoseNameIsDecomposed(t *testing.T) {
 // bytes is accounted for; staged and not committed, or committed with other
 // bytes, it holds.
 func TestReapAccountsOnlyForCommittedBytes(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enc := enclosingRepoIn(t, root)
@@ -124,6 +128,7 @@ func TestReapAccountsOnlyForCommittedBytes(t *testing.T) {
 // A symlink is skipped only as a link the manifest declares. An undeclared one
 // is judged as any loose entry.
 func TestReapHoldsAnUndeclaredSymlink(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enclosingRepoIn(t, root)
@@ -138,6 +143,7 @@ func TestReapHoldsAnUndeclaredSymlink(t *testing.T) {
 // A repository marker of any kind, at any depth of a loose directory, holds,
 // whatever the enclosing repository has recorded.
 func TestReapHoldsARepositoryDeepInALooseDirectory(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, _ := longLivedWorkspace(t, root)
 	enclosingRepoIn(t, root)

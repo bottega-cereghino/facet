@@ -26,6 +26,9 @@ func writeMiB(t *testing.T, path string) {
 // objects hardlinked from the mirror stay on disk after a reap, and counting
 // them made a workspace look as big as a full copy.
 func TestFreedBytesCountsOnlyWhatDeletingFrees(t *testing.T) {
+	// Serial, not t.Parallel: the test reads the disk blocks of a file it just
+	// wrote, and the filesystem allocates them late when other tests write at
+	// the same time (measured: 0 bytes counted, with the suite parallel).
 	base := t.TempDir()
 	ws := filepath.Join(base, "ws")
 	writeMiB(t, filepath.Join(ws, "own", "data"))
@@ -62,6 +65,9 @@ func TestFreedBytesCountsOnlyWhatDeletingFrees(t *testing.T) {
 }
 
 func TestFreedBytesOfAMissingDirectoryIsZero(t *testing.T) {
+	// Serial, not t.Parallel: the test reads the disk blocks of a file it just
+	// wrote, and the filesystem allocates them late when other tests write at
+	// the same time (measured: 0 bytes counted, with the suite parallel).
 	if got := freedBytes(filepath.Join(t.TempDir(), "gone")); got != 0 {
 		t.Errorf("freedBytes(missing) = %d, want 0", got)
 	}

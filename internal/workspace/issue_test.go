@@ -174,6 +174,7 @@ func issueWorkspaceNoDefaultBranch(t *testing.T) (ws string, clone string) {
 // test below could pass for the wrong reason: a workspace refuses for any number
 // of causes, and "the message changed" is not evidence the branch was entered.
 func TestUnresolvableDefaultBranchIsTheFailSafesTrigger(t *testing.T) {
+	t.Parallel()
 	_, clone := issueWorkspaceNoDefaultBranch(t)
 	if def := remoteDefaultBranch(gitx.Git{}, clone); def != "" {
 		t.Fatalf("remoteDefaultBranch = %q, want \"\" -- the fixture does not reach the fail-safe, so nothing below tests it", def)
@@ -191,6 +192,7 @@ func TestUnresolvableDefaultBranchIsTheFailSafesTrigger(t *testing.T) {
 // unpushed commits, which would make every clean workspace on a repo like this
 // unreapable. This surfaces only where the fail-safe actually cost something.
 func TestUnresolvableDefaultBranchNamesTheCauseInTheRefusal(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspaceNoDefaultBranch(t)
 	g := gitx.Git{}
 	if _, err := g.Run(clone, nil, "checkout", "-qb", "1-x", "origin/trunk"); err != nil {
@@ -223,6 +225,7 @@ func TestUnresolvableDefaultBranchNamesTheCauseInTheRefusal(t *testing.T) {
 // branch was never needed -- reporting it there would be noise on a reap that
 // succeeds, and the StaleRemotes precedent it copies is silent for the same reason.
 func TestUnresolvableDefaultBranchIsSilentOnACleanWorkspace(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspaceNoDefaultBranch(t)
 	g := gitx.Git{}
 	// A branch at origin/trunk with nothing on top. The checkout is needed
@@ -249,6 +252,7 @@ func TestUnresolvableDefaultBranchIsSilentOnACleanWorkspace(t *testing.T) {
 // name makes the landing proof compare that branch with itself and call its
 // only commit landed (#408). Two symrefs, both hand-made.
 func TestReapHoldsABranchASymbolicDefaultRefNames(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	gitOut(t, clone, "switch", "-q", "-c", "wip")
 	commitFile(t, clone, "work.txt", "a day of work\n", "only here")
@@ -286,6 +290,7 @@ func TestReapHoldsABranchASymbolicDefaultRefNames(t *testing.T) {
 }
 
 func TestInspectCleanWorkspaceIsReapable(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
 	if err != nil {
@@ -300,6 +305,7 @@ func TestInspectCleanWorkspaceIsReapable(t *testing.T) {
 }
 
 func TestUncommittedChangesBlockReap(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	if err := os.WriteFile(filepath.Join(clone, "README"), []byte("edited\n"), 0o666); err != nil {
 		t.Fatal(err)
@@ -314,6 +320,7 @@ func TestUncommittedChangesBlockReap(t *testing.T) {
 }
 
 func TestUntrackedFileBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	if err := os.WriteFile(filepath.Join(clone, "scratch.txt"), []byte("x"), 0o666); err != nil {
 		t.Fatal(err)
@@ -328,6 +335,7 @@ func TestUntrackedFileBlocksReap(t *testing.T) {
 // upstream at all. `git rev-list @{u}..HEAD` would error here; counting commits
 // reachable from any branch but no remote catches it.
 func TestUnpushedCommitsOnBranchWithNoUpstreamBlockReap(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 	if _, err := g.Run(clone, nil, "checkout", "-qb", "never-pushed"); err != nil {
@@ -364,6 +372,7 @@ func TestUnpushedCommitsOnBranchWithNoUpstreamBlockReap(t *testing.T) {
 // workspace clone's own remote-tracking refs are left exactly as they were
 // at Sync time.
 func TestStaleRemoteRefButCommitAlreadyUpstreamReapsClean(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -414,6 +423,7 @@ func TestStaleRemoteRefButCommitAlreadyUpstreamReapsClean(t *testing.T) {
 // proof (ancestor check, then merged-PR-by-commit, then my-files-match-def) is
 // what tells the two apart, and this must reap clean without --force.
 func TestSquashMergedBranchWithDeletedRemoteReapsClean(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -489,6 +499,7 @@ func TestSquashMergedBranchWithDeletedRemoteReapsClean(t *testing.T) {
 // ancestor-or-merged-PR-or-my-files-match-def test on the branch tip, which does
 // not care how many commits got there.
 func TestMultiCommitSquashMergedBranchReapsClean(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -554,6 +565,7 @@ func TestMultiCommitSquashMergedBranchReapsClean(t *testing.T) {
 // third check (every file this ref touched still reads as it does on def) is
 // what a detached HEAD needs, same as a checked-out branch.
 func TestDetachedHeadOnSquashMergedShaReapsClean(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -616,6 +628,7 @@ func TestDetachedHeadOnSquashMergedShaReapsClean(t *testing.T) {
 // non-checked-out branch only needs to prove "this belonged to a merged PR" --
 // whatever superseded it merged too, so nothing is lost.
 func TestLeftoverBranchBelongingToMergedPRIsNotCountedUnpushed(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 
@@ -662,6 +675,7 @@ func TestLeftoverBranchBelongingToMergedPRIsNotCountedUnpushed(t *testing.T) {
 // per-ref rev-list --not --remotes pre-check (0 commits => skip) is what keeps
 // this branch's already-pushed-elsewhere commits from being touched at all.
 func TestSquashLandedBranchWithSiblingPushedElsewhereReapsClean(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -738,6 +752,7 @@ func TestSquashLandedBranchWithSiblingPushedElsewhereReapsClean(t *testing.T) {
 // must not become "an absent remote ref is safe" -- that is exactly the case
 // the guard exists for (Deliberately not proposed, facet#66).
 func TestBranchWithDeletedRemoteButNoLandedContentStillBlocks(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 	if _, err := g.Run(clone, nil, "checkout", "-qb", "never-landed"); err != nil {
@@ -801,6 +816,7 @@ func squashLand(t *testing.T, g gitx.Git, clone, origin, ref string) string {
 // `rev-list --count HEAD --branches --not --remotes` is a set and reports 1,
 // which is the answer; the per-ref walk that replaced it lost that property.
 func TestUnpushedCommitCountedOnceAcrossSeveralBranches(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 
@@ -843,6 +859,7 @@ func TestUnpushedCommitCountedOnceAcrossSeveralBranches(t *testing.T) {
 // report", and a wrong number there teaches exactly the distrust it was added
 // to remove.
 func TestSquashLandedCommitCountedOnceAcrossSeveralBranches(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -937,6 +954,7 @@ func squashLandedWorkspace(t *testing.T) (ws string, clone string, origin string
 // Nothing about the workspace changes between reaping clean and refusing. Only
 // somebody else's pull request landed.
 func TestSquashLandedWorkspaceStillReapsAfterAnUnrelatedMerge(t *testing.T) {
+	t.Parallel()
 	ws, _, origin, pr := squashLandedWorkspace(t)
 	landOnDefault(t, gitx.Git{}, origin, "someone-else.txt", "their work\n")
 
@@ -958,6 +976,7 @@ func TestSquashLandedWorkspaceStillReapsAfterAnUnrelatedMerge(t *testing.T) {
 // changed on the default branch after the merge, still means the tree here is
 // not what landed.
 func TestSquashLandedWorkspaceStillRefusesWhenItsOwnFileDivergedAfterwards(t *testing.T) {
+	t.Parallel()
 	ws, _, origin, pr := squashLandedWorkspace(t)
 	landOnDefault(t, gitx.Git{}, origin, "mine.txt", "my work, rewritten by someone else\n")
 
@@ -974,6 +993,7 @@ func TestSquashLandedWorkspaceStillRefusesWhenItsOwnFileDivergedAfterwards(t *te
 // the whole workspace. An unrelated local branch carrying work that landed
 // nowhere must still refuse, even though the checked-out ref is provably safe.
 func TestLandedHeadWithAnUnlandedSiblingBranchStillBlocks(t *testing.T) {
+	t.Parallel()
 	ws, clone, origin, pr := squashLandedWorkspace(t)
 	g := gitx.Git{}
 	landOnDefault(t, g, origin, "someone-else.txt", "their work\n")
@@ -1013,6 +1033,7 @@ func TestLandedHeadWithAnUnlandedSiblingBranchStillBlocks(t *testing.T) {
 // landed would clear a blocker on a workspace that is genuinely the only copy
 // of the commit stacked on top.
 func TestCommitOnBothLandedAndUnpushedRefsCountsUnpushed(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	m, err := manifest.Read(ws)
 	if err != nil {
@@ -1082,6 +1103,7 @@ func TestCommitOnBothLandedAndUnpushedRefsCountsUnpushed(t *testing.T) {
 // candidate only counts as landed when cherry explicitly marks it "-";
 // anything else, including silence, stays unpushed.
 func TestUnpushedMergeCommitStillBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 
@@ -1140,6 +1162,7 @@ func TestUnpushedMergeCommitStillBlocksReap(t *testing.T) {
 // a branch deleted or force-pushed upstream since the last fetch would still
 // read as pushed against the stale remote-tracking refs (#491).
 func TestFetchFailureHoldsCleanClone(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, fetchFailGit(), nil, nil)
 	if err != nil {
@@ -1156,6 +1179,7 @@ func TestFetchFailureHoldsCleanClone(t *testing.T) {
 // Genuinely unpushed work must still refuse even when the fetch itself
 // failed, and the blocker message must disclose that the count may be stale.
 func TestFetchFailureDisclaimerOnGenuinelyUnpushedWork(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 	if _, err := g.Run(clone, nil, "checkout", "-qb", "never-pushed"); err != nil {
@@ -1183,6 +1207,7 @@ func TestFetchFailureDisclaimerOnGenuinelyUnpushedWork(t *testing.T) {
 }
 
 func TestOpenPRBlocksReapButMergedDoesNot(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 
 	st, _ := InspectIssue(ws, gitx.Git{}, fakePR{&ghx.PR{Number: 9, State: "OPEN"}}, nil)
@@ -1206,6 +1231,7 @@ func TestOpenPRBlocksReapButMergedDoesNot(t *testing.T) {
 // that silently lost work before: a held index.lock makes `git status` exit
 // non-zero, and the old code left Dirty=false.
 func TestGitProbeFailureBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, failGit(), nil, nil)
 	if err != nil {
@@ -1219,6 +1245,7 @@ func TestGitProbeFailureBlocksReap(t *testing.T) {
 // A clone directory that exists but is not a valid repo may still hold edited
 // files, so it must block reap rather than drop out of the accounting entirely.
 func TestNonRepoCloneDirBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	if err := os.RemoveAll(filepath.Join(clone, ".git")); err != nil {
 		t.Fatal(err) // leave the working tree, destroy the repo
@@ -1235,6 +1262,7 @@ func TestNonRepoCloneDirBlocksReap(t *testing.T) {
 // Commits made on a detached HEAD belong to no branch; --branches alone would
 // miss them. They are unpushed work all the same and must block reap.
 func TestDetachedHeadCommitsBlockReap(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 	if _, err := g.Run(clone, nil, "checkout", "-q", "--detach"); err != nil {
@@ -1260,6 +1288,7 @@ func TestDetachedHeadCommitsBlockReap(t *testing.T) {
 
 // Stashed work is carried by no push and shown by no status; it must block reap.
 func TestStashedWorkBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 	if err := os.WriteFile(filepath.Join(clone, "README"), []byte("stash me\n"), 0o666); err != nil {
@@ -1281,6 +1310,7 @@ func TestStashedWorkBlocksReap(t *testing.T) {
 // --prune=now`) empties the stash's reflog but leaves refs/stash naming the
 // stash: `git stash list` prints nothing, yet the stash is there (#378).
 func TestReapHoldsAStashWhoseReflogWasExpired(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	writeTestFile(t, filepath.Join(clone, "README"), "work in progress, only here\n")
 	gitOut(t, clone, "-c", "user.name=t", "-c", "user.email=t@example.com", "stash", "-q")
@@ -1303,6 +1333,7 @@ func TestReapHoldsAStashWhoseReflogWasExpired(t *testing.T) {
 // A pull-request lookup that errors is not proof there is no open PR; it must
 // block reap, distinctly from a lookup that ran and found none (which does not).
 func TestFailedPRLookupBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, gitx.Git{}, fakePRErr{}, nil)
 	if err != nil {
@@ -1316,6 +1347,7 @@ func TestFailedPRLookupBlocksReap(t *testing.T) {
 // A session of this workspace's name with a pane in it is a soft blocker: the
 // reap is "only rude" while it runs, but must still refuse.
 func TestLiveSessionBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, fakeLive{live: true})
 	if err != nil {
@@ -1339,6 +1371,7 @@ func TestLiveSessionBlocksReap(t *testing.T) {
 // the one named after it -- must block reap the same way a live named session
 // does, and must name the pane so the operator can kill it.
 func TestLiveTmuxPaneBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, fakeLiveRoots{roots: []string{"tmux pane iss-x:1.0 (pid 4242) at " + ws}})
 	if err != nil {
@@ -1350,6 +1383,7 @@ func TestLiveTmuxPaneBlocksReap(t *testing.T) {
 }
 
 func TestNoLiveRootsDoesNotBlockReap(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, fakeLiveRoots{roots: nil})
 	if err != nil {
@@ -1370,6 +1404,7 @@ func TestNoLiveRootsDoesNotBlockReap(t *testing.T) {
 }
 
 func TestInspectRefusesNonIssueWorkspace(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	m := &manifest.Manifest{Name: "topical"}
 	if err := m.Write(dir); err != nil {
@@ -1386,6 +1421,7 @@ func TestInspectRefusesNonIssueWorkspace(t *testing.T) {
 // mirror's. A chmod on every file once made each reap leave the mirror's packs
 // writable.
 func TestReapLeavesTheMirrorAloneAndDeletesReadOnlyDirs(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	// The fixture clones from a local origin, which git hardlinks exactly as
 	// sync hardlinks from a mirror: origin's objects play the mirror's part.
@@ -1442,6 +1478,7 @@ func TestReapLeavesTheMirrorAloneAndDeletesReadOnlyDirs(t *testing.T) {
 // manifest, so none is rebuilt, and reap must hold for it as it does in a
 // long-lived workspace. CLAUDE.md is spawn's own and does not hold.
 func TestIssueWorkspaceHoldsFilesBesideItsClones(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	writeSpawnsClaudeMD(t, ws)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, nil)
@@ -1478,6 +1515,7 @@ func TestIssueWorkspaceHoldsFilesBesideItsClones(t *testing.T) {
 // the checks on the main worktree, and deleting the clone deletes their
 // repository.
 func TestLinkedWorktreeBlocksReap(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	g := gitx.Git{}
 	wt := filepath.Join(clone, ".worktrees", "spike")
@@ -1494,6 +1532,7 @@ func TestLinkedWorktreeBlocksReap(t *testing.T) {
 }
 
 func TestLinkedWorktrees(t *testing.T) {
+	t.Parallel()
 	porcelain := "worktree /w/repo\nHEAD abc\nbranch refs/heads/main\n\nworktree /w/repo/.worktrees/a\nHEAD def\ndetached\n\nworktree /elsewhere/b\nHEAD 123\nbranch refs/heads/b\n"
 	got := linkedWorktrees(porcelain)
 	if strings.Join(got, ",") != "/w/repo/.worktrees/a,/elsewhere/b" {
@@ -1507,6 +1546,7 @@ func TestLinkedWorktrees(t *testing.T) {
 // The session reap checks is the one named after the directory, which is what
 // the user sees; a copied workspace keeps the original's manifest name.
 func TestLiveSessionIsMatchedByDirectory(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	rec := &recordLive{}
 	if _, err := InspectIssue(ws, gitx.Git{}, nil, rec); err != nil {
@@ -1533,6 +1573,7 @@ func hasBlocker(st *IssueState, substr string) bool {
 // reap is documented as "run it from inside the workspace", so Reap steps out
 // of it before deleting it.
 func TestReapFromInsideTheWorkspace(t *testing.T) {
+	// Serial, not t.Parallel: os.Chdir changes the working directory of the whole process.
 	ws, _ := issueWorkspace(t)
 	orig, err := os.Getwd()
 	if err != nil {
@@ -1557,6 +1598,7 @@ func TestReapFromInsideTheWorkspace(t *testing.T) {
 
 // Reaping a subdirectory of the workspace (a clone) must also work.
 func TestReapFromInsideAClone(t *testing.T) {
+	// Serial, not t.Parallel: os.Chdir changes the working directory of the whole process.
 	ws, clone := issueWorkspace(t)
 	orig, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(orig) })
@@ -1590,6 +1632,7 @@ func TestReapFromInsideAClone(t *testing.T) {
 // The assertion is on the TARGET's mode, not on reap succeeding: reap succeeded
 // every single time this fired. The damage was always somewhere else.
 func TestRemoveAllForceLeavesSymlinkTargetsAlone(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 
 	target := filepath.Join(base, "live", "skills", "seat-exit")
@@ -1628,6 +1671,7 @@ func TestRemoveAllForceLeavesSymlinkTargetsAlone(t *testing.T) {
 }
 
 func TestIsUnder(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join("a", "b")
 	cases := map[string]bool{
 		filepath.Join("a", "b"):      true,
@@ -1648,6 +1692,7 @@ func TestIsUnder(t *testing.T) {
 
 // A workspace facet issues cannot inspect is named, never silently dropped.
 func TestListIssuesNamesWhatItCouldNotCheck(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	root := filepath.Dir(ws)
 	broken := filepath.Join(root, "iss-repo-2-broken")
@@ -1673,6 +1718,7 @@ func TestListIssuesNamesWhatItCouldNotCheck(t *testing.T) {
 // status.showUntrackedFiles=no, which large repositories recommend, would
 // otherwise hide a new file and reap would delete it (facet#270).
 func TestReapHoldsAnUntrackedFileTheConfigHides(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	m := &manifest.Manifest{Name: "w", Clones: map[string]string{"repo": origin}}
 	if err := m.Write(ws); err != nil {
@@ -1712,6 +1758,7 @@ func writeSpawnsClaudeMD(t *testing.T, ws string) {
 // while it hashes to what spawn recorded; edited, or with no hash recorded (a
 // workspace spawned before the hash was), it holds like a note beside it.
 func TestIssueWorkspaceHoldsAnEditedClaudeMD(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	writeSpawnsClaudeMD(t, ws)
 	path := filepath.Join(ws, "CLAUDE.md")
@@ -1751,6 +1798,7 @@ func TestIssueWorkspaceHoldsAnEditedClaudeMD(t *testing.T) {
 // cannot rule out a process rooted there, so it holds, as it does in prune
 // (facet#292).
 func TestReapHoldsWhenTheLiveRootsProbeFails(t *testing.T) {
+	t.Parallel()
 	ws, _ := issueWorkspace(t)
 	st, err := InspectIssue(ws, gitx.Git{}, nil, failingLiveRoots{})
 	if err != nil {

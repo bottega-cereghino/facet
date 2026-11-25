@@ -12,6 +12,7 @@ import (
 // directory of its own and origin is the repository's remote, though a checkout
 // of that repository sits under the projects root.
 func TestSyncWithoutWorktreesClonesEvenWhereACheckoutExists(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin, _ := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{NoHardlinks: true}); err != nil {
 		t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 // the manifest declares for a worktree clone is added to the repository's
 // shared config, which is the checkout's own .git/config.
 func TestGrillSyncRemoteOnAWorktreeCloneWritesTheCheckoutConfig(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin, checkout := worktreeSetup(t)
 	m := &manifest.Manifest{
 		Name:    "w",
@@ -42,6 +43,7 @@ func TestGrillSyncRemoteOnAWorktreeCloneWritesTheCheckoutConfig(t *testing.T) {
 // enclosing repository (the README says ~/Workspaces usually is one) and adds
 // the remote there.
 func TestGrillSyncRemoteOnAPlainDirWritesTheEnclosingRepository(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	gitOut(t, roots.Workspaces, "init", "-q", "-b", "main")
 	if err := os.MkdirAll(filepath.Join(ws, "notes"), 0o777); err != nil {
@@ -62,6 +64,7 @@ func TestGrillSyncRemoteOnAPlainDirWritesTheEnclosingRepository(t *testing.T) {
 }
 
 func TestSyncSkipsAnExtraRemoteOnAWorktreeClone(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin, checkout := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
 		t.Fatal(err)
@@ -88,6 +91,7 @@ func TestSyncSkipsAnExtraRemoteOnAWorktreeClone(t *testing.T) {
 }
 
 func TestSyncSkipsACloneFolderThatIsNotItsOwnRepository(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	gitOut(t, roots.Workspaces, "init", "-q", "-b", "main")
 	notes := filepath.Join(ws, "notes")

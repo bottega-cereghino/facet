@@ -39,6 +39,7 @@ func enclosingRepoIn(t *testing.T, root string) string {
 // usual way to keep a local config change out of git status, is not shown by
 // git status, so the clone read clean.
 func TestReapSeesAnEditBehindAnIndexBit(t *testing.T) {
+	t.Parallel()
 	for _, bit := range []string{"--assume-unchanged", "--skip-worktree"} {
 		t.Run(bit, func(t *testing.T) {
 			ws, clone := longLivedWorkspace(t, t.TempDir())
@@ -55,6 +56,7 @@ func TestReapSeesAnEditBehindAnIndexBit(t *testing.T) {
 // not hold the workspace; a sparse checkout's skip-worktree files, absent from
 // the disk, do not either.
 func TestReapDoesNotHoldAnUneditedFileBehindAnIndexBit(t *testing.T) {
+	t.Parallel()
 	ws, clone := longLivedWorkspace(t, t.TempDir())
 	mustGit(t, clone, "update-index", "--assume-unchanged", "README")
 	commitFile(t, clone, "gone.txt", "committed\n", "gone")
@@ -72,6 +74,7 @@ func TestReapDoesNotHoldAnUneditedFileBehindAnIndexBit(t *testing.T) {
 // working file to what is committed, so content only the working copy holds
 // read as unmodified.
 func TestReapSeesContentACleanFilterHides(t *testing.T) {
+	t.Parallel()
 	ws, clone := longLivedWorkspace(t, t.TempDir())
 	writeTestFile(t, filepath.Join(clone, ".git", "info", "attributes"), "README filter=strip\n")
 	mustGit(t, clone, "config", "filter.strip.clean", "grep -v '^output:'")
@@ -90,6 +93,7 @@ func TestReapSeesContentACleanFilterHides(t *testing.T) {
 // is a hidden edit, even when the filter (a stand-in that always prints the
 // same pointer here) maps both to the same blob.
 func TestReapJudgesAnLFSFileByThePointerItsBlobHolds(t *testing.T) {
+	t.Parallel()
 	ws, clone := longLivedWorkspace(t, t.TempDir())
 	content := "a large binary, stored on the LFS server\n"
 	pointer := fmt.Sprintf("version https://git-lfs.github.com/spec/v1\noid sha256:%x\nsize %d\n",
@@ -122,6 +126,7 @@ func TestReapJudgesAnLFSFileByThePointerItsBlobHolds(t *testing.T) {
 // core.fsmonitor, a config setting, lets a hook answer for which files
 // changed; one that misses an event hid the edit from status.
 func TestReapSeesAnEditTheFSMonitorMisses(t *testing.T) {
+	t.Parallel()
 	ws, clone := longLivedWorkspace(t, t.TempDir())
 	hook := filepath.Join(t.TempDir(), "fsmonitor.sh")
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\nprintf 'token\\0'\n"), 0o755); err != nil {
@@ -142,6 +147,7 @@ func TestReapSeesAnEditTheFSMonitorMisses(t *testing.T) {
 // core.worktree in the clone's config points git at another directory, so the
 // files in the clone's own directory were never looked at.
 func TestReapSeesFilesWhenCoreWorktreePointsElsewhere(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ws, clone := longLivedWorkspace(t, root)
 	other := filepath.Join(root, "other")
@@ -156,6 +162,7 @@ func TestReapSeesFilesWhenCoreWorktreePointsElsewhere(t *testing.T) {
 // An edit to a note committed in the enclosing repository, hidden there by an
 // index bit, read as committed.
 func TestReapHoldsAnEnclosingEditBehindAnIndexBit(t *testing.T) {
+	t.Parallel()
 	for _, bit := range []string{"--assume-unchanged", "--skip-worktree"} {
 		t.Run(bit, func(t *testing.T) {
 			root := t.TempDir()
