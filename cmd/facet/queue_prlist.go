@@ -54,6 +54,9 @@ func (r *queueRunner) roundListing(repo string) prListing {
 		r.prCache[repo] = got
 	}
 	r.mu.Unlock()
+	if err == nil {
+		r.pruneIgnored(repo, prs)
+	}
 	return got
 }
 

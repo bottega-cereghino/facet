@@ -15,6 +15,7 @@ import (
 // lists, Jujutsu's `.jj/`, which jj ignores itself with `.jj/.gitignore` --
 // the repository was never seen (#357).
 func TestReapHoldsARepositoryWhoseMarkerIsTheIgnoredDirectory(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		marker string
@@ -64,6 +65,7 @@ func TestReapHoldsARepositoryWhoseMarkerIsTheIgnoredDirectory(t *testing.T) {
 // submoduleStates skips it too, finding no .git there. A library copied in by
 // hand and patched, or notes written there, were deleted unseen (#356).
 func TestReapHoldsFilesInASubmoduleDirectoryThatIsNotInitialised(t *testing.T) {
+	t.Parallel()
 	for _, worktree := range []bool{false, true} {
 		t.Run(map[bool]string{false: "own clone", true: "worktree clone"}[worktree], func(t *testing.T) {
 			ws, clone := superWithSubmodule(t, worktree)
@@ -84,6 +86,7 @@ func TestReapHoldsFilesInASubmoduleDirectoryThatIsNotInitialised(t *testing.T) {
 // committed content even when its name marks a repository: a test fixture
 // named .hg or CVS does not hold.
 func TestReapDoesNotHoldOnAnEmptySubmoduleOrATrackedMarker(t *testing.T) {
+	t.Parallel()
 	ws, clone := superWithSubmodule(t, false)
 	mkdirs(t, filepath.Join(clone, "testdata", "CVS"))
 	commitFile(t, clone, filepath.Join("testdata", "CVS", "Entries"), "a fixture\n", "fixture")
@@ -100,6 +103,7 @@ func TestReapDoesNotHoldOnAnEmptySubmoduleOrATrackedMarker(t *testing.T) {
 // A repository judged as a clone (a checked-out submodule) is judged by its
 // .git only; another VCS beside that .git holds.
 func TestReapHoldsAnotherVCSBesideASubmodulesGit(t *testing.T) {
+	t.Parallel()
 	ws, clone := superWithSubmodule(t, false)
 	gitOut(t, clone, "-c", "protocol.file.allow=always", "submodule", "update", "-q", "--init")
 	mkdirs(t, filepath.Join(clone, "sub", ".hg", "store"))

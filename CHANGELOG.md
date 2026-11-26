@@ -6,6 +6,43 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.19.3](https://github.com/bottega-cereghino/facet/compare/v0.19.2...v0.19.3) (2026-11-25)
+
+
+### Fixed
+
+* **queue:** an agent that ran nothing (exit 75) is deferred, not a failed try ([#573](https://github.com/bottega-cereghino/facet/issues/573)) ([f70ca91](https://github.com/bottega-cereghino/facet/commit/f70ca911683fa5398391673ffdca2bd810417c95))
+
+## [0.19.2](https://github.com/bottega-cereghino/facet/compare/v0.19.1...v0.19.2) (2026-11-25)
+
+
+### Fixed
+
+* **queue:** read a file GitHub sends without a patch from its two blobs ([#566](https://github.com/bottega-cereghino/facet/issues/566)) ([7daa96b](https://github.com/bottega-cereghino/facet/commit/7daa96b5daf2a9ee1279679a44fffbf1f218bc3f))
+
+## [0.19.1](https://github.com/bottega-cereghino/facet/compare/v0.19.0...v0.19.1) (2026-11-25)
+
+
+### Fixed
+
+* **queue:** an agent that exits non-zero is retried later, not marked done ([#562](https://github.com/bottega-cereghino/facet/issues/562)) ([e6280ba](https://github.com/bottega-cereghino/facet/commit/e6280ba98eb588d04a0ed51ee6bd85f4f2f236c9))
+
+## [0.19.0](https://github.com/bottega-cereghino/facet/compare/v0.18.1...v0.19.0) (2026-11-25)
+
+
+### Added
+
+* **queue:** queue status warns about a queue-run pull request the queue ignores ([#559](https://github.com/bottega-cereghino/facet/issues/559)) ([4cee3d2](https://github.com/bottega-cereghino/facet/commit/4cee3d2002e13e8570c8b57c239869317d3a0b2a))
+
+
+### Fixed
+
+* **queue:** a gate skip of one issue defers only that issue ([#558](https://github.com/bottega-cereghino/facet/issues/558)) ([b15774a](https://github.com/bottega-cereghino/facet/commit/b15774a788bb5c40b40a60e34096cd3846d88f10))
+* **queue:** list issues through conditional REST and skip a repository that fails ([#554](https://github.com/bottega-cereghino/facet/issues/554)) ([31d15e1](https://github.com/bottega-cereghino/facet/commit/31d15e1452295b26639056de5e0d4bd66fa1064d))
+* **queue:** spawn queue workspaces as clones that share no files with their source ([#553](https://github.com/bottega-cereghino/facet/issues/553)) ([55420b6](https://github.com/bottega-cereghino/facet/commit/55420b687a5087b7f343750843e3e61a01183bcc))
+* **reap:** name the signal or start failure behind a git exit status of -1 ([#555](https://github.com/bottega-cereghino/facet/issues/555)) ([eddf57f](https://github.com/bottega-cereghino/facet/commit/eddf57f4c78276084c6a2f8ea6ded7c4bd78b81a))
+* **release:** the tag step dies before setting the release notes ([#549](https://github.com/bottega-cereghino/facet/issues/549)) ([7cd0bdc](https://github.com/bottega-cereghino/facet/commit/7cd0bdcec38cba6eb9a60e87c38909937caa5e42))
+
 ## [0.18.1](https://github.com/bottega-cereghino/facet/compare/v0.18.0...v0.18.1) (2026-11-25)
 
 

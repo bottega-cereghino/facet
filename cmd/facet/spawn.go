@@ -90,6 +90,10 @@ type spawnOpts struct {
 	// NoWorktree clones every repository, even one checked out under the
 	// projects root, which is otherwise added as a worktree of that checkout.
 	NoWorktree bool
+	// NoHardlinks makes each clone share no file with its source (git clone
+	// --no-hardlinks). The queue sets it, so a sandboxed agent writes nothing
+	// outside its workspace.
+	NoHardlinks bool
 	// Writeback records the confirmed repo set in the issue body when true.
 	// Default is false (facet#69): a wrong inference used to write to
 	// someone else's issue silently, on by default. Leaving it off means the

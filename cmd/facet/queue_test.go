@@ -600,31 +600,6 @@ func TestQueueStopsWhenTheHoldFileExists(t *testing.T) {
 	}
 }
 
-func TestQueueDoesNotStartWhenARepositoryCannotBeListed(t *testing.T) {
-	var spawned atomic.Int32
-	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
-	s := startQueue(t, cfg, queueEnv{
-		list: func(repo, _ string) ([]ghx.Issue, error) {
-			if repo == "acme/other" {
-				return nil, errors.New("temporary failure")
-			}
-			return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
-		},
-		spawn: func(string, int) (string, error) {
-			spawned.Add(1)
-			return "", errors.New("spawned")
-		},
-	})
-	time.Sleep(150 * time.Millisecond)
-	s.stop(t)
-	if spawned.Load() != 0 {
-		t.Fatalf("spawned %d time(s) while a repository could not be listed", spawned.Load())
-	}
-	if !strings.Contains(s.buf.String(), "cannot be listed") {
-		t.Fatalf("output = %q", s.buf.String())
-	}
-}
-
 func TestParsePriorities(t *testing.T) {
 	got, err := parsePriorities("p.txt", []byte("# highest first\n\nWidgets\nother  # lower\n"))
 	if err != nil {
@@ -1317,7 +1292,7 @@ func TestQueueDoesNotHandTheSameIssueOutTwice(t *testing.T) {
 	}
 }
 
-func TestQueueDoesNotRetryAnAgentThatExitsNonZero(t *testing.T) {
+func TestQueueRetriesAnAgentThatExitsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	cfg := oneAgentConfig([]string{"acme/widgets"})
 	cfg.Agents = []queueAgent{{Command: []string{writeExe(t, "fail", "#!/bin/sh\nexit 1\n"), "{prompt}"}}}
@@ -1331,11 +1306,42 @@ func TestQueueDoesNotRetryAnAgentThatExitsNonZero(t *testing.T) {
 			return os.MkdirTemp(dir, "ws")
 		},
 	})
-	waitFor(t, "the agent", func() bool { return spawned.Load() >= 1 })
-	time.Sleep(200 * time.Millisecond)
+	waitFor(t, "a second try", func() bool { return spawned.Load() >= 2 })
 	s.stop(t)
-	if spawned.Load() != 1 {
-		t.Fatalf("spawned %d time(s), want 1", spawned.Load())
+	if spawned.Load() < 2 {
+		t.Fatalf("spawned %d time(s), want at least 2", spawned.Load())
+	}
+}
+
+func TestQueueAgentThatRanNothingIsNeverBlocked(t *testing.T) {
+	dir := t.TempDir()
+	cfg := oneAgentConfig([]string{"acme/widgets"})
+	cfg.Fix = &queueFix{Command: []string{"fix"}, Prompt: defaultFixPrompt, Tries: 2, BlockLabel: "blocked"}
+	cfg.State = filepath.Join(dir, "state.json")
+	cfg.Agents = []queueAgent{{Command: []string{writeExe(t, "tempfail", "#!/bin/sh\nexit 75\n"), "{prompt}"}}}
+	var spawned atomic.Int32
+	labels := &labelCalls{}
+	s := startQueue(t, cfg, queueEnv{
+		list: func(string, string) ([]ghx.Issue, error) {
+			return []ghx.Issue{openIssue(10, "2026-01-01T00:00:00Z")}, nil
+		},
+		spawn: func(string, int) (string, error) {
+			spawned.Add(1)
+			return os.MkdirTemp(dir, "ws")
+		},
+		addLabel: labels.add,
+	})
+	waitFor(t, "more than three starts", func() bool { return spawned.Load() >= 5 })
+	s.stop(t)
+	if got := labels.list(); len(got) != 0 {
+		t.Fatalf("labels = %q, want none", got)
+	}
+	st, err := loadQueueState(cfg.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Done) != 0 {
+		t.Fatalf("done = %+v, want empty", st.Done)
 	}
 }
 
@@ -1935,5 +1941,76 @@ func TestQueueDryRunSkipsAWholeRepositoryOnExit4(t *testing.T) {
 	}
 	if n := len(readLines(t, count)); n != 2 {
 		t.Fatalf("gate ran %d times, want 2 (once per repository)\n%s", n, got)
+	}
+}
+
+func bundleTwoIssues(repo, _ string) ([]ghx.Issue, error) {
+	if repo != "acme/widgets" {
+		return nil, fmt.Errorf("unexpected repo %s", repo)
+	}
+	return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z"), openIssue(2, "2026-01-02T00:00:00Z")}, nil
+}
+
+func TestQueueGateSkipOfOneIssueDefersOnlyThatIssue(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	asked := filepath.Join(dir, "asked")
+	// The gate is asked with {number}, the first issue of the run. It skips issue 1.
+	gate := writeExe(t, "gate-first", "#!/bin/sh\necho \"$1\" >> "+asked+"\nif [ \"$1\" = 1 ]; then echo 'blocked' >&2; exit 3; fi\nexit 0\n")
+	cfg := oneAgentConfig(nil)
+	cfg.Max = 2
+	cfg.Wait = 100 * time.Millisecond
+	cfg.Decisions = filepath.Join(dir, "decisions.jsonl")
+	cfg.Gate = []string{gate, "{number}"}
+	cfg.Agents = []queueAgent{{Bundle: 2, Command: []string{appendScript(t), out, "{number}"}}}
+	s := startQueue(t, cfg, queueEnv{list: bundleTwoIssues})
+	waitFor(t, "issue 2 to start and issue 1 to be asked about again", func() bool {
+		n := 0
+		for _, l := range readLines(t, asked) {
+			if l == "1" {
+				n++
+			}
+		}
+		return n >= 2 && len(readLines(t, out)) >= 1
+	})
+	s.stop(t)
+	if got := readLines(t, out); len(got) == 0 || got[0] != "2" {
+		t.Fatalf("started %v, want issue 2 first", got)
+	}
+	rows, _ := readDecisionLines(t, cfg.Decisions)
+	var first, second bool
+	for _, row := range rows {
+		if row.Decision != "skip" {
+			continue
+		}
+		first = first || (row.Issue == "1" && strings.Contains(row.Why, "gate skips it"))
+		second = second || (row.Issue == "2" && strings.Contains(row.Why, "left out"))
+	}
+	if !first || !second {
+		t.Fatalf("decision rows lack the refused issue (%v) or the left out one (%v): %+v", first, second, rows)
+	}
+}
+
+func TestQueueGateSkipRepositoryHoldsTheWholeBundle(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	gate := writeExe(t, "gate-repo", "#!/bin/sh\nif [ \"$1\" = acme/widgets ]; then exit 4; fi\nexit 0\n")
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/other"})
+	cfg.Max = 2
+	cfg.Wait = time.Hour
+	cfg.Priorities = writePriorities(t, "widgets\nother\n")
+	cfg.Gate = []string{gate, "{repo}"}
+	cfg.Agents = []queueAgent{{Bundle: 2, Command: []string{appendScript(t), out, "{number}"}}}
+	list := func(repo, _ string) ([]ghx.Issue, error) {
+		if repo == "acme/widgets" {
+			return bundleTwoIssues(repo, "")
+		}
+		return []ghx.Issue{openIssue(9, "2026-01-01T00:00:00Z")}, nil
+	}
+	s := startQueue(t, cfg, queueEnv{list: list})
+	waitFor(t, "the other repository's agent", func() bool { return len(readLines(t, out)) >= 1 })
+	s.stop(t)
+	if got := strings.Join(readLines(t, out), ","); got != "9" {
+		t.Fatalf("started %s, want only 9", got)
 	}
 }

@@ -14,7 +14,7 @@ import (
 // reapQueueWorkspace runs facet's guarded path reap for an issue workspace.
 // A missing workspace needs no cleanup; every other error is reported so the
 // operator can handle a workspace reap refused to remove.
-func reapQueueWorkspace(repo string, number int) error {
+func reapQueueWorkspace(repo string, number int, mergedHead string) error {
 	ws, err := findIssueWorkspace(roots.Workspaces, repo, number)
 	if err != nil {
 		return err
@@ -26,13 +26,34 @@ func reapQueueWorkspace(repo string, number int) error {
 	if err != nil {
 		return fmt.Errorf("find facet executable to reap %s#%d: %w", repo, number, err)
 	}
-	cmd := exec.Command(exe, "reap", "--path", ws, "--yes")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("reap workspace for %s#%d: %w", repo, number, err)
+	args := []string{"reap", "--path", ws, "--yes"}
+	if mergedHead != "" {
+		args = append(args, "--merged-head", mergedHead)
+	}
+	out, err := exec.Command(exe, args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("reap workspace for %s#%d: %w: %s", repo, number, err, reapReason(string(out)))
 	}
 	return nil
+}
+
+// reapReason is what reap said, on one line: its lines joined with "; ", the
+// last 600 bytes at most, since the reason is at the end.
+func reapReason(out string) string {
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	s := strings.Join(lines, "; ")
+	if len(s) > 600 {
+		s = "..." + s[len(s)-600:]
+	}
+	if s == "" {
+		return "reap printed nothing"
+	}
+	return s
 }
 
 // prepareWorkspace returns the workspace directory for repo#number, spawning
@@ -41,8 +62,17 @@ func prepareWorkspace(repo string, number int) (string, error) {
 	return prepareWorkspaceSpawn(roots.Workspaces, repo, number, func() error {
 		// Yes skips the confirmation: a queue has no one to answer the prompt.
 		// The list already required the issue to be open.
-		return runSpawn(spawnOpts{Number: number, Repo: repo, Yes: true})
+		return runSpawn(queueSpawnOpts(repo, number))
 	})
+}
+
+// queueSpawnOpts is how the queue spawns a workspace. Every repository is a
+// clone that shares no file with its source: a worktree would make
+// each commit, ref update and hook of the agent write into another checkout's
+// .git, and a sandbox that confines the agent to its workspace would have to
+// open that directory.
+func queueSpawnOpts(repo string, number int) spawnOpts {
+	return spawnOpts{Number: number, Repo: repo, Yes: true, NoWorktree: true, NoHardlinks: true}
 }
 
 // prepareWorkspaceSpawn uses spawn only when findIssueWorkspace reports none.

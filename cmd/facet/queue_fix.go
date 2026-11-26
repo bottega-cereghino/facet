@@ -148,6 +148,7 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 			}
 			continue
 		}
+		r.noteIgnoredPRs(iss, got.prs)
 		pr, ok, err := r.queuePR(iss, got.prs)
 		if err != nil {
 			r.noteOnce(iss.key()+" owner", err.Error(), func() {
@@ -163,6 +164,7 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 			jobs = append(jobs, job)
 		}
 	}
+	r.relistIgnored()
 	return jobs
 }
 
@@ -267,6 +269,10 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 			r.clearFailure(r.forbidHolds, k)
 		}
 		switch {
+		case errors.As(err, new(*ghx.UnreadableError)):
+			// Reading it again will not help: a person reads the diff.
+			r.blockUnreadable(ctx, iss, pr, runs, err)
+			return nil
 		case err != nil:
 			// A diff that cannot be read is not a pass: landing it could
 			// merge a suppression the check did not see.
@@ -298,6 +304,20 @@ func (r *queueRunner) judgeQueuePR(ctx context.Context, iss queuedIssue, pr ghx.
 		return nil
 	}
 	return &fixJob{iss: iss, pr: pr, reason: reason, try: runs + 1}
+}
+
+// blockUnreadable stops the retries of a green pull request whose diff has a
+// file that cannot be read, labels the issue and notifies once.
+func (r *queueRunner) blockUnreadable(ctx context.Context, iss queuedIssue, pr ghx.OpenPR, runs int, err error) {
+	if r.touchStop(iss) != "" {
+		return
+	}
+	var u *ghx.UnreadableError
+	file := ""
+	if errors.As(err, &u) {
+		file = u.File
+	}
+	r.block(ctx, iss, pr, fmt.Sprintf("green, but the queue cannot read the diff of %s: read the diff and merge by hand", file), runs)
 }
 
 func baseName(pr ghx.OpenPR) string {
@@ -540,6 +560,10 @@ func (r *queueRunner) runFix(ctx context.Context, job *fixJob) bool {
 	case err == nil:
 		r.logf("queue: fix %s PR #%d exited", k, job.pr.Number)
 		r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", decisionExitOK, "exit 0")
+	case agentNotRun(err):
+		r.logf("queue: fix %s PR #%d not run (exit %d); no try used, tried again after %s", k, job.pr.Number, agentNotRunExit, r.cfg.Wait)
+		r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", "skip", fmt.Sprintf("fix not run (exit %d)", agentNotRunExit))
+		return false
 	case errors.As(err, &exitErr):
 		r.logf("queue: fix %s PR #%d exited: %v", k, job.pr.Number, err)
 		r.recordDecision(job.iss.Repo, strconv.Itoa(job.iss.Issue.Number), "fix", decisionExitFail, firstErrorLine(err.Error()))
@@ -584,5 +608,60 @@ func (r *queueRunner) saveState() {
 	if err != nil {
 		r.setLastError(err.Error())
 		r.logf("queue: %v", err)
+	}
+}
+
+// maxAgentFailures is how many non-zero exits of an issue's agent this
+// process accepts before it labels the issue and notifies.
+const maxAgentFailures = 3
+
+// failRun handles an agent that ran and exited non-zero. That is a failed
+// try, not a finished issue: each issue waits and is started again. The
+// third failed try in this process labels it with fix.blockLabel and runs
+// fix.notify, as a refused fix does. Nothing is written to state.Done: only
+// a zero exit is a done issue.
+func (r *queueRunner) failRun(ctx context.Context, run []queuedIssue, reason string) {
+	for _, iss := range run {
+		k := iss.key()
+		r.mu.Lock()
+		r.failTries[k]++
+		tries := r.failTries[k]
+		r.mu.Unlock()
+		if tries < maxAgentFailures {
+			r.deferRetry(iss)
+			continue
+		}
+		r.blockFailed(ctx, iss, tries, reason)
+	}
+}
+
+func (r *queueRunner) blockFailed(ctx context.Context, iss queuedIssue, tries int, reason string) {
+	fix := r.cfg.Fix
+	if fix == nil || r.env.addLabel == nil {
+		// Nothing can label it. Park it in this process only, as before.
+		r.logf("queue: %s#%d: agent failed %d times and no block label can be added; not started again in this process", iss.Repo, iss.Issue.Number, tries)
+		r.mu.Lock()
+		r.done[iss.key()] = true
+		r.mu.Unlock()
+		return
+	}
+	// The label keeps the issue out of the list. If it is removed later, the
+	// issue is tried again after wait.
+	r.deferRetry(iss)
+	if err := r.env.addLabel(iss.Repo, iss.Issue.Number, fix.BlockLabel); err != nil {
+		r.logf("queue: %s#%d: add label %s: %v\nfix: create the label %s in %s, or set fix.blockLabel to a label that exists; trying again after %s",
+			iss.Repo, iss.Issue.Number, fix.BlockLabel, err, fix.BlockLabel, iss.Repo, r.cfg.Wait)
+		return
+	}
+	r.logf("queue: %s#%d agent failed %d times (%s); labelled %s", iss.Repo, iss.Issue.Number, tries, reason, fix.BlockLabel)
+	r.mu.Lock()
+	r.failTries[iss.key()] = 0
+	r.mu.Unlock()
+	if len(fix.Notify) == 0 {
+		return
+	}
+	vars := map[string]string{"repo": iss.Repo, "number": strconv.Itoa(iss.Issue.Number), "pr": "", "reason": reason}
+	if err := r.runCmd(ctx, "", expandArgv(fix.Notify, vars), nil); err != nil {
+		r.logf("queue: %s#%d notify: %v", iss.Repo, iss.Issue.Number, err)
 	}
 }

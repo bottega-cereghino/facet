@@ -17,6 +17,7 @@ import (
 // since: a stale fork/* ref must not read as pushed. Every remote the clone
 // has is fetched with --prune, not only origin (facet#268).
 func TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	fork := filepath.Join(t.TempDir(), "fork.git")
 	gitOut(t, "", "init", "-q", "--bare", fork)
@@ -48,6 +49,7 @@ func TestReapFetchesEveryRemoteBeforeCountingWorkAsPushed(t *testing.T) {
 // A remote that cannot be fetched is named in the blocker, so the operator
 // knows which one failed.
 func TestReapNamesTheRemoteItCouldNotFetch(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	gitOut(t, clone, "remote", "add", "fork", filepath.Join(t.TempDir(), "gone.git"))
 	git := &gitxtest.Runner{
@@ -84,6 +86,7 @@ func (c *countingGit) Run(dir string, env []string, args ...string) (string, err
 // leave the count judged stale. Through one SharedFetch each repository is
 // fetched once, whichever workspace asks first (facet#267).
 func TestSharedFetchFetchesEachRepositoryOnce(t *testing.T) {
+	t.Parallel()
 	roots, _, origin, checkout := worktreeSetup(t)
 	var dirs []string
 	for _, name := range []string{"a", "b", "c", "d"} {
@@ -136,6 +139,7 @@ func TestSharedFetchFetchesEachRepositoryOnce(t *testing.T) {
 // commit and then count nothing unpushed. Reap fetches into refs/remotes only,
 // whatever the remote's refspec says (facet#321).
 func TestReapsFetchNeverWritesOutsideRefsRemotes(t *testing.T) {
+	t.Parallel()
 	ws, clone := issueWorkspace(t)
 	mirror := filepath.Join(t.TempDir(), "mirror.git")
 	gitOut(t, "", "init", "-q", "--bare", mirror)
@@ -164,6 +168,7 @@ func TestReapsFetchNeverWritesOutsideRefsRemotes(t *testing.T) {
 // refs/remotes/origin/<branch> ref. Reap must hold the workspace rather than
 // counting the stale remote ref as pushed (#491).
 func TestReapHoldsWorkWhenTheFetchFailsAndOnlyAStaleRemoteRefHasIt(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (ws, clone, origin string) {
 		t.Helper()
 		root := t.TempDir()

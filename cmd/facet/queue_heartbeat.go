@@ -42,19 +42,27 @@ type queueHeartbeat struct {
 	Running   []heartbeatRun `json:"running"`
 	Held      []string       `json:"held"`
 	LastError string         `json:"last_error"`
+	// ListPausedUntil is set while a GitHub rate limit keeps the queue from
+	// listing issues; it is the reset time.
+	ListPausedUntil *time.Time `json:"list_paused_until,omitempty"`
+	// IgnoredPRs are open pull requests that carry a start's marker line
+	// and fail the ownership check, so the queue leaves them alone.
+	IgnoredPRs []ignoredPR `json:"ignored_prs,omitempty"`
 }
 
 // queueStatusJSON is the --json output of `facet queue status`: the heartbeat
 // object plus age_seconds and state.
 type queueStatusJSON struct {
-	At         *time.Time     `json:"at,omitempty"`
-	PID        int            `json:"pid"`
-	Version    string         `json:"version"`
-	Running    []heartbeatRun `json:"running"`
-	Held       []string       `json:"held"`
-	LastError  string         `json:"last_error"`
-	AgeSeconds *float64       `json:"age_seconds"`
-	State      string         `json:"state"`
+	At              *time.Time     `json:"at,omitempty"`
+	PID             int            `json:"pid"`
+	Version         string         `json:"version"`
+	Running         []heartbeatRun `json:"running"`
+	Held            []string       `json:"held"`
+	LastError       string         `json:"last_error"`
+	ListPausedUntil *time.Time     `json:"list_paused_until,omitempty"`
+	IgnoredPRs      []ignoredPR    `json:"ignored_prs,omitempty"`
+	AgeSeconds      *float64       `json:"age_seconds"`
+	State           string         `json:"state"`
 }
 
 // existingHoldFiles returns every hold file in paths that currently exists.
@@ -87,6 +95,11 @@ func (r *queueRunner) heartbeatSnapshot() queueHeartbeat {
 	r.mu.Lock()
 	now := r.env.now().UTC()
 	lastErr := r.lastError
+	var paused *time.Time
+	if now.Before(r.listWaitUntil) {
+		until := r.listWaitUntil.UTC()
+		paused = &until
+	}
 	if err != nil {
 		lastErr = err.Error()
 		held = []string{}
@@ -95,6 +108,7 @@ func (r *queueRunner) heartbeatSnapshot() queueHeartbeat {
 	for _, run := range r.active {
 		running = append(running, run)
 	}
+	ignored := r.ignoredListLocked()
 	r.mu.Unlock()
 	sort.Slice(running, func(i, j int) bool {
 		if !running[i].Since.Equal(running[j].Since) {
@@ -103,12 +117,14 @@ func (r *queueRunner) heartbeatSnapshot() queueHeartbeat {
 		return running[i].Issue < running[j].Issue
 	})
 	return queueHeartbeat{
-		At:        now,
-		PID:       os.Getpid(),
-		Version:   buildVersion(),
-		Running:   running,
-		Held:      held,
-		LastError: lastErr,
+		At:              now,
+		PID:             os.Getpid(),
+		Version:         buildVersion(),
+		Running:         running,
+		Held:            held,
+		LastError:       lastErr,
+		ListPausedUntil: paused,
+		IgnoredPRs:      ignored,
 	}
 }
 
@@ -271,11 +287,13 @@ func runQueueStatus(cfg queueConfig, now time.Time, asJSON bool, out io.Writer) 
 
 func buildQueueStatus(cfg queueConfig, hb queueHeartbeat, found bool, readErr error, held []string, now time.Time) (queueStatusJSON, int) {
 	st := queueStatusJSON{
-		PID:       hb.PID,
-		Version:   hb.Version,
-		Running:   hb.Running,
-		Held:      held,
-		LastError: hb.LastError,
+		PID:             hb.PID,
+		Version:         hb.Version,
+		Running:         hb.Running,
+		Held:            held,
+		LastError:       hb.LastError,
+		ListPausedUntil: hb.ListPausedUntil,
+		IgnoredPRs:      hb.IgnoredPRs,
 	}
 	if st.Running == nil {
 		st.Running = []heartbeatRun{}
@@ -344,5 +362,11 @@ func printQueueStatusText(out io.Writer, path string, st queueStatusJSON, missin
 		_, _ = fmt.Fprintln(out, "last_error: none")
 	} else {
 		_, _ = fmt.Fprintf(out, "last_error: %s\n", st.LastError)
+	}
+	if st.ListPausedUntil != nil {
+		_, _ = fmt.Fprintf(out, "listing paused until: %s (GitHub rate limit)\n", st.ListPausedUntil.Format(time.RFC3339))
+	}
+	for _, p := range st.IgnoredPRs {
+		_, _ = fmt.Fprintln(out, p.warning())
 	}
 }

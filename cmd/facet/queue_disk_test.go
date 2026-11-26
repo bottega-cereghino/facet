@@ -249,8 +249,10 @@ func TestQueueDiskOmittedChangesNothing(t *testing.T) {
 	list := func(string, string) ([]ghx.Issue, error) {
 		return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
 	}
+	// Both runs share one clock, so no line differs by its timestamp.
+	fixed := func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }
 	var without, with bytes.Buffer
-	if err := testDryQueue(context.Background(), plain, queueEnv{list: list, out: &without}); err != nil {
+	if err := testDryQueue(context.Background(), plain, queueEnv{list: list, out: &without, now: fixed}); err != nil {
 		t.Fatal(err)
 	}
 	watched := plain
@@ -258,11 +260,12 @@ func TestQueueDiskOmittedChangesNothing(t *testing.T) {
 	if err := testDryQueue(context.Background(), watched, queueEnv{
 		list:     list,
 		out:      &with,
+		now:      fixed,
 		diskFree: func(string) (int64, error) { return 80 * diskGB, nil },
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if without.String() != with.String() || !strings.Contains(without.String(), "would start acme/widgets#1") || strings.Contains(with.String(), "disk:") {
+	if without.String() != with.String() || !strings.Contains(without.String(), "2026-01-02T03:04:05Z") || !strings.Contains(without.String(), "would start acme/widgets#1") || strings.Contains(with.String(), "disk:") {
 		t.Fatalf("without =\n%s\nwith =\n%s", without.String(), with.String())
 	}
 }

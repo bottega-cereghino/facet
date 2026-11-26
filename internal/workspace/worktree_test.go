@@ -50,6 +50,7 @@ func isGitFile(t *testing.T, dir string) bool {
 }
 
 func TestSyncMakesAWorktreeOfTheProjectCheckout(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
 		t.Fatal(err)
@@ -77,6 +78,7 @@ func TestSyncMakesAWorktreeOfTheProjectCheckout(t *testing.T) {
 }
 
 func TestSyncClonesWhenTheCheckoutTracksAnotherRepository(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	other := originRepo(t, filepath.Join(t.TempDir(), "other"))
 	gitOut(t, checkout, "remote", "set-url", "origin", other)
@@ -89,6 +91,7 @@ func TestSyncClonesWhenTheCheckoutTracksAnotherRepository(t *testing.T) {
 }
 
 func TestSyncWithoutWorktreesClones(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, _ := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{}); err != nil {
 		t.Fatal(err)
@@ -101,6 +104,7 @@ func TestSyncWithoutWorktreesClones(t *testing.T) {
 // What removing a worktree leaves in place does not hold it: the checkout's
 // own unpushed branch, its stash, and its other worktrees.
 func TestWorktreeCloneIsNotHeldByWhatTheCheckoutKeeps(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
 		t.Fatal(err)
@@ -130,6 +134,7 @@ func TestWorktreeCloneIsNotHeldByWhatTheCheckoutKeeps(t *testing.T) {
 }
 
 func TestWorktreeCloneIsHeldByItsOwnWork(t *testing.T) {
+	t.Parallel()
 	t.Run("uncommitted", func(t *testing.T) {
 		roots, ws, _, _ := worktreeSetup(t)
 		if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
@@ -167,6 +172,7 @@ func TestWorktreeCloneIsHeldByItsOwnWork(t *testing.T) {
 }
 
 func TestReapRemovesTheWorktreeAndLeavesTheCheckout(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
 		t.Fatal(err)
@@ -193,6 +199,7 @@ func TestReapRemovesTheWorktreeAndLeavesTheCheckout(t *testing.T) {
 
 // A locked worktree is removed too: reap has decided by then.
 func TestRemoveWorktreeRemovesALockedOne(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
 		t.Fatal(err)
@@ -206,6 +213,7 @@ func TestRemoveWorktreeRemovesALockedOne(t *testing.T) {
 // also refuse one holding a submodule) is deleted by hand, and the checkout's
 // entry for it dropped.
 func TestRemoveWorktreeFallsBackToDeletingByHand(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
 		t.Fatal(err)
@@ -234,6 +242,7 @@ func assertWorktreeGone(t *testing.T, checkout, clone string) {
 }
 
 func TestSameRepoURL(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		a, b string
 		want bool
@@ -253,6 +262,7 @@ func TestSameRepoURL(t *testing.T) {
 }
 
 func TestRepoName(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"git@github.com:acme/platform.git": "platform",
 		"https://github.com/acme/infra":    "infra",
@@ -284,6 +294,7 @@ func githubOrigin(t *testing.T, checkout string) {
 }
 
 func TestInspectWorktreeRefusesACheckout(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	_, err := InspectWorktree(checkout, gitx.Git{}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "fix:") {
@@ -292,6 +303,7 @@ func TestInspectWorktreeRefusesACheckout(t *testing.T) {
 }
 
 func TestPlainWorktreeIsJudgedByItsOwnWork(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")
 	st, err := InspectWorktree(wt, gitx.Git{}, nil, nil)
@@ -315,6 +327,7 @@ func TestPlainWorktreeIsJudgedByItsOwnWork(t *testing.T) {
 }
 
 func TestPlainWorktreeIsHeldByItsBranchsPullRequest(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")
 	githubOrigin(t, checkout)
@@ -350,6 +363,7 @@ func TestPlainWorktreeIsHeldByItsBranchsPullRequest(t *testing.T) {
 }
 
 func TestPlainWorktreeWithAnAliasedOriginHasUnknownPullRequestState(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")
 	gitOut(t, checkout, "remote", "set-url", "origin", "git@github-work:acme/repo.git")
@@ -364,6 +378,7 @@ func TestPlainWorktreeWithAnAliasedOriginHasUnknownPullRequestState(t *testing.T
 }
 
 func TestReapRemovesAPlainWorktreeAndKeepsItsBranch(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")
 	st, err := InspectWorktree(wt, gitx.Git{}, nil, nil)
@@ -387,6 +402,7 @@ func TestReapRemovesAPlainWorktreeAndKeepsItsBranch(t *testing.T) {
 // long-lived working copy: beside the checkout, or a service run from a tag
 // with its ignored data beside the code (facet#275).
 func TestProjectWorktreesOffersOnlyWorktreesInsideTheirCheckout(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	excludeIn(t, checkout, ".claude/")
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
@@ -443,6 +459,7 @@ func bareLayout(t *testing.T, projects, origin, gitDir string) (app, everyday st
 // repository sits in app/.bare, named by a .git file, or in app/.git itself
 // (facet#275). `facet reap <path>` still takes one by name.
 func TestProjectWorktreesSkipsABareLayout(t *testing.T) {
+	t.Parallel()
 	for _, gitDir := range []string{".bare", ".git"} {
 		t.Run(gitDir, func(t *testing.T) {
 			roots, _, origin := setup(t)
@@ -466,6 +483,7 @@ func TestProjectWorktreesSkipsABareLayout(t *testing.T) {
 // with the clone, so it holds the workspace; a sibling elsewhere does not
 // (TestWorktreeCloneIsNotHeldByWhatTheCheckoutKeeps). facet#265.
 func TestWorktreeCloneIsHeldByAWorktreeNestedInIt(t *testing.T) {
+	t.Parallel()
 	roots, ws, _, checkout := worktreeSetup(t)
 	excludeIn(t, checkout, ".claude/")
 	if err := Sync(roots, ws, gitx.Git{}, quiet(), SyncOptions{Worktrees: true}); err != nil {
@@ -505,6 +523,7 @@ func TestWorktreeCloneIsHeldByAWorktreeNestedInIt(t *testing.T) {
 
 // The same for a plain worktree reaped by path. facet#265.
 func TestPlainWorktreeIsHeldByAWorktreeNestedInIt(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	excludeIn(t, checkout, "inner/")
 	wt := plainWorktree(t, checkout, "topic")
@@ -541,6 +560,7 @@ func excludeIn(t *testing.T, checkout, pattern string) {
 // A folder inside a plain worktree is not a worktree: reaping it would delete
 // that folder alone and leave the worktree (facet#274).
 func TestInspectWorktreeRefusesAFolderInsideOne(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")
 	src := filepath.Join(wt, "src")
@@ -556,6 +576,7 @@ func TestInspectWorktreeRefusesAFolderInsideOne(t *testing.T) {
 // removeWorktree deletes by hand only a directory its checkout lists as a
 // worktree, so a folder inside one is never deleted on its own (facet#274).
 func TestRemoveWorktreeLeavesAFolderItDoesNotList(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")
 	src := filepath.Join(wt, "src")
@@ -578,6 +599,7 @@ func TestRemoveWorktreeLeavesAFolderItDoesNotList(t *testing.T) {
 // ref reaches goes with a worktree clone, so it holds like one HEAD reaches
 // (#315).
 func TestReapHoldsACommitOnlyAPerWorktreeRefReaches(t *testing.T) {
+	t.Parallel()
 	for _, ref := range []string{"refs/worktree/keep", "refs/bisect/bad", "refs/rewritten/side"} {
 		t.Run(ref, func(t *testing.T) {
 			roots, ws, _, _ := worktreeSetup(t)
@@ -606,6 +628,7 @@ func TestReapHoldsACommitOnlyAPerWorktreeRefReaches(t *testing.T) {
 // `reset`, has no other ref until the rebase reaches its `merge`; stopped
 // there, the clone reads clean. Reap counts it (facet#361).
 func TestReapHoldsACommitOnlyARebaseLabelReaches(t *testing.T) {
+	// Serial, not t.Parallel: t.Setenv changes the environment of the whole process.
 	ws, clone := issueWorkspace(t)
 	gitOut(t, clone, "switch", "-q", "-c", "feature")
 	commitFile(t, clone, "a.txt", "a\n", "a")
@@ -638,6 +661,7 @@ func TestReapHoldsACommitOnlyARebaseLabelReaches(t *testing.T) {
 // gone. removeWorktree makes directories writable first and finishes the
 // delete either way (#316).
 func TestRemoveWorktreeEmptiesAReadOnlyDirectory(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	wt := plainWorktree(t, checkout, "topic")
 	ro := filepath.Join(wt, "cache", "mod")
@@ -659,6 +683,7 @@ func TestRemoveWorktreeEmptiesAReadOnlyDirectory(t *testing.T) {
 // worktree prune` would drop every prunable one, a worktree on a disk that is
 // not mounted included (#316).
 func TestRemoveWorktreeFallbackKeepsOtherWorktreeEntries(t *testing.T) {
+	t.Parallel()
 	_, _, _, checkout := worktreeSetup(t)
 	away := plainWorktree(t, checkout, "away")
 	if err := os.RemoveAll(away); err != nil { // its disk, unmounted
@@ -685,6 +710,7 @@ func TestRemoveWorktreeFallbackKeepsOtherWorktreeEntries(t *testing.T) {
 // unpushed commit in an ignored node_modules went unseen through the link
 // (#381).
 func TestReapHoldsARepositoryInAWorktreeNamedThroughASymlink(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	origin := originRepo(t, filepath.Join(root, "origin"))
 	checkout := filepath.Join(root, "checkout")
@@ -714,6 +740,7 @@ func TestReapHoldsARepositoryInAWorktreeNamedThroughASymlink(t *testing.T) {
 }
 
 func TestNetworkRemote(t *testing.T) {
+	t.Parallel()
 	for url, want := range map[string]bool{
 		"git@github-work:acme/repo.git":  true,
 		"ssh://git@ghe.example/acme/r":   true,

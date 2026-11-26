@@ -10,6 +10,7 @@ import (
 )
 
 func TestNewAddRemove(t *testing.T) {
+	t.Parallel()
 	roots, _, origin := setup(t)
 	rep := quiet()
 
@@ -46,6 +47,7 @@ func TestNewAddRemove(t *testing.T) {
 }
 
 func TestNewRefusesExisting(t *testing.T) {
+	t.Parallel()
 	roots, _, _ := setup(t)
 	if _, err := New(roots, gitx.Git{}, quiet(), NewOptions{Name: "demo"}, SyncOptions{}); err != nil {
 		t.Fatal(err)
@@ -56,6 +58,7 @@ func TestNewRefusesExisting(t *testing.T) {
 }
 
 func TestAddCloneRefusesNameUsedByALink(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	m := &manifest.Manifest{Name: "w", Links: map[string]string{"x": "proj"}}
 	if err := m.Write(ws); err != nil {
@@ -68,6 +71,7 @@ func TestAddCloneRefusesNameUsedByALink(t *testing.T) {
 }
 
 func TestRemoveUnknownEntry(t *testing.T) {
+	t.Parallel()
 	_, ws, _ := setup(t)
 	m := &manifest.Manifest{Name: "w"}
 	if err := m.Write(ws); err != nil {
@@ -82,6 +86,7 @@ func TestRemoveUnknownEntry(t *testing.T) {
 // then declare a link over it, or the checkout, unpushed work and all, is
 // judged by nothing. The refusal comes before the manifest is written.
 func TestAddLinkRefusesARealDirectoryAtItsName(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	if err := os.MkdirAll(filepath.Join(roots.Projects, "app"), 0o777); err != nil {
 		t.Fatal(err)
@@ -110,6 +115,7 @@ func TestAddLinkRefusesARealDirectoryAtItsName(t *testing.T) {
 
 // A symlink at a name is a link; AddClone must not declare a clone there.
 func TestAddCloneRefusesASymlinkAtItsName(t *testing.T) {
+	t.Parallel()
 	roots, ws, origin := setup(t)
 	m := &manifest.Manifest{Name: "w"}
 	if err := m.Write(ws); err != nil {
@@ -134,6 +140,7 @@ func TestAddCloneRefusesASymlinkAtItsName(t *testing.T) {
 // judges that directory like any file beside the clones, since only a symlink
 // is a link.
 func TestReapHoldsARealDirectoryAtALinkName(t *testing.T) {
+	t.Parallel()
 	_, ws, _ := setup(t)
 	m := &manifest.Manifest{Name: "w", Links: map[string]string{"app": "app"}}
 	if err := m.Write(ws); err != nil {

@@ -12,6 +12,7 @@ import (
 // On a case-insensitive filesystem a link `docs` on disk is the declared
 // `Docs`: --prune deletes only links absent from the manifest.
 func TestSyncPruneKeepsADeclaredLinkOfAnotherCase(t *testing.T) {
+	t.Parallel()
 	roots, ws, _ := setup(t)
 	if err := os.MkdirAll(filepath.Join(roots.Projects, "proj"), 0o777); err != nil {
 		t.Fatal(err)

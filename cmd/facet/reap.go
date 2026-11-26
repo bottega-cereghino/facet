@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/bottega-cereghino/facet/internal/config"
+	"github.com/bottega-cereghino/facet/internal/ghx"
 	"github.com/bottega-cereghino/facet/internal/gitx"
 	"github.com/bottega-cereghino/facet/internal/launchd"
 	"github.com/bottega-cereghino/facet/internal/manifest"
@@ -80,6 +81,7 @@ func newReapCmd() *cobra.Command {
 		dryRun   bool
 		closed   bool
 		safe     bool
+		merged   string
 	)
 	cmd := &cobra.Command{
 		Use:   "reap",
@@ -170,7 +172,11 @@ func newReapCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := inspectTarget(ws, git, muxLive())
+			if merged != "" && (reapable || force) {
+				return fmt.Errorf("--merged-head names the merged commit of one workspace; it takes no --reapable or --force\nfix: drop it, or name one workspace")
+			}
+			prs := prLookupFor(merged)
+			st, err := inspectTargetWith(ws, git, prs, muxLive())
 			if err != nil {
 				return err
 			}
@@ -228,7 +234,7 @@ func newReapCmd() *cobra.Command {
 				// Work can start while the prompt waits: a commit, a new file,
 				// an agent in a second pane. Check again, as --reapable does, and
 				// refuse on anything that was not on the list just shown.
-				again, err := inspectTarget(ws, git, muxLive())
+				again, err := inspectTargetWith(ws, git, prs, muxLive())
 				if err != nil {
 					return err
 				}
@@ -275,6 +281,7 @@ func newReapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&reapable, "reapable", false, "delete every workspace at the root that reap would delete now, after one confirmation")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --reapable or --safe: print the list, delete nothing")
 	cmd.Flags().BoolVar(&closed, "closed", false, "with --reapable or --safe: only issue workspaces whose pull request is merged or closed")
+	cmd.Flags().StringVar(&merged, "merged-head", "", "the commit a merged pull request had as its head: a branch tip equal to it counts as landed (the queue passes it after a squash merge); any commit beyond it still holds the workspace")
 	cmd.Flags().BoolVar(&safe, "safe", false, "--reapable without a prompt, for unattended runs; refuses --force and a named workspace")
 	return cmd
 }
@@ -343,6 +350,39 @@ func reapTarget(path string, args []string) (string, error) {
 // repository commits does not make its clone or worktree a workspace (#313).
 // It inspects dir's real path, which is what reap deletes.
 func inspectTarget(dir string, git gitx.Runner, live workspace.LiveChecker) (*workspace.IssueState, error) {
+	return inspectTargetWith(dir, git, gh, live)
+}
+
+// mergedHeadLookup is the pull-request lookup with one commit known to be the
+// head of a merged pull request. It is asked first; only that exact sha is
+// proven by what the caller says, every other commit goes to GitHub as before.
+type mergedHeadLookup struct {
+	workspace.PRLookup
+	head string
+}
+
+func (m mergedHeadLookup) MergedPRForSHA(repo, sha string) (*ghx.PRForCommit, error) {
+	if l, ok := m.PRLookup.(workspace.CommitPRLookup); ok {
+		if pr, err := l.MergedPRForSHA(repo, sha); err == nil && pr != nil {
+			return pr, nil
+		}
+	}
+	if sha == m.head {
+		return &ghx.PRForCommit{}, nil
+	}
+	return nil, nil
+}
+
+// prLookupFor is gh, or gh told the merged head. An empty head is plain gh.
+func prLookupFor(head string) workspace.PRLookup {
+	head = strings.TrimSpace(head)
+	if head == "" {
+		return gh
+	}
+	return mergedHeadLookup{PRLookup: gh, head: head}
+}
+
+func inspectTargetWith(dir string, git gitx.Runner, pr workspace.PRLookup, live workspace.LiveChecker) (*workspace.IssueState, error) {
 	// What reap deletes is where the path leads: a clone named through a
 	// symlink outside its workspace is still inside it (#384), and a walk
 	// does not descend into a symlink at its root (#381).
@@ -359,16 +399,16 @@ func inspectTarget(dir string, git gitx.Runner, live workspace.LiveChecker) (*wo
 	}
 	top, linked := workspace.TopLevel(git, dir)
 	if linked {
-		return workspace.InspectWorktree(dir, git, gh, live)
+		return workspace.InspectWorktree(dir, git, pr, live)
 	}
 	if _, err := os.Stat(manifest.Path(dir)); err == nil {
 		if top {
 			return nil, fmt.Errorf("%s is the top level of a git repository, so it is not a workspace: its .git, with every commit, branch and stash, would go with it\n"+
 				"fix: if it is a workspace someone ran `git init` in, push what that repository holds and move its .git out, then reap again", dir)
 		}
-		return workspace.Inspect(dir, git, gh, live)
+		return workspace.Inspect(dir, git, pr, live)
 	}
-	return workspace.InspectWorktree(dir, git, gh, live)
+	return workspace.InspectWorktree(dir, git, pr, live)
 }
 
 // enclosingWorkspace returns the nearest workspace above dir, or "". A

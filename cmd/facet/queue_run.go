@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,8 +34,9 @@ type queueEnv struct {
 	mergeMethod  func(repo, branch string) (string, error)
 	mergePR      func(repo string, number int, method, head string) error
 	// reap removes the issue workspace after a queue pull request merges.
+	// mergedHead is the head commit the pull request had when it merged.
 	// Nil leaves reaping to the operator.
-	reap       func(repo string, number int) error
+	reap       func(repo string, number int, mergedHead string) error
 	behindBase func(repo, base, head string) (bool, error)
 	prFiles    func(repo string, number int) ([]string, error)
 	// compareFiles is the net diff from base to head, one entry per file.
@@ -217,6 +220,16 @@ func gateSkipsRepo(err error) bool {
 	return gateExit(err) == gateSkipRepoExit
 }
 
+// agentNotRunExit is the agent's exit status for "I ran nothing" (EX_TEMPFAIL:
+// every lane busy, out of quota or capped). It is no failed try.
+const agentNotRunExit = 75
+
+// agentNotRun reports that the agent exited with agentNotRunExit.
+func agentNotRun(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == agentNotRunExit
+}
+
 func gateExit(err error) int {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
@@ -237,6 +250,7 @@ type queueRunner struct {
 	running     int
 	repoRunning map[string]int
 	done        map[string]bool
+	failTries   map[string]int
 	retryAt     map[string]time.Time
 	repoWait    map[string]time.Time
 	wake        chan struct{}
@@ -266,6 +280,9 @@ type queueRunner struct {
 	// left alone, or "" when it may be touched.
 	viewer     string
 	issueRound map[string]string
+	// ignored is the queue-run pull requests the ownership check turns
+	// away, keyed by repo#number, for the heartbeat.
+	ignored map[string]ignoredPR
 	// noted remembers a line already logged for a key, so a refusal is
 	// logged once per head rather than once per tick.
 	noted        map[string]string
@@ -300,6 +317,11 @@ type queueRunner struct {
 	active      map[string]heartbeatRun
 	lastError   string
 	heartbeatMu sync.Mutex
+	// listWaitUntil is the end of a GitHub rate-limit pause: no issue listing
+	// call is made before it. listFailSince is when each repository began
+	// failing to list. Both are guarded by mu.
+	listWaitUntil time.Time
+	listFailSince map[string]time.Time
 }
 
 // newQueueRunner builds a runner and reads the state file when the config
@@ -307,29 +329,32 @@ type queueRunner struct {
 func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, error) {
 	env.fill()
 	r := &queueRunner{
-		cfg:          cfg,
-		env:          env,
-		inflight:     map[string]bool{},
-		repoRunning:  map[string]int{},
-		done:         map[string]bool{},
-		retryAt:      map[string]time.Time{},
-		repoWait:     map[string]time.Time{},
-		wake:         make(chan struct{}, 1),
-		round:        map[string]prListing{},
-		fixing:       map[string]bool{},
-		fixRetry:     map[string]time.Time{},
-		labelRetry:   map[string]time.Time{},
-		prCache:      map[string]prListing{},
-		landed:       map[string]time.Time{},
-		updateHolds:  map[string]*retryHold{},
-		forbidHolds:  map[string]*retryHold{},
-		issueRound:   map[string]string{},
-		waited:       map[string]string{},
-		noted:        map[string]string{},
-		mergeMethods: map[string]cachedMergeMethod{},
-		rules:        map[string]checkRules{},
-		active:       map[string]heartbeatRun{},
-		dry:          dry,
+		cfg:           cfg,
+		env:           env,
+		inflight:      map[string]bool{},
+		repoRunning:   map[string]int{},
+		done:          map[string]bool{},
+		failTries:     map[string]int{},
+		retryAt:       map[string]time.Time{},
+		repoWait:      map[string]time.Time{},
+		wake:          make(chan struct{}, 1),
+		round:         map[string]prListing{},
+		fixing:        map[string]bool{},
+		fixRetry:      map[string]time.Time{},
+		labelRetry:    map[string]time.Time{},
+		prCache:       map[string]prListing{},
+		landed:        map[string]time.Time{},
+		updateHolds:   map[string]*retryHold{},
+		forbidHolds:   map[string]*retryHold{},
+		issueRound:    map[string]string{},
+		ignored:       map[string]ignoredPR{},
+		waited:        map[string]string{},
+		noted:         map[string]string{},
+		mergeMethods:  map[string]cachedMergeMethod{},
+		rules:         map[string]checkRules{},
+		active:        map[string]heartbeatRun{},
+		listFailSince: map[string]time.Time{},
+		dry:           dry,
 	}
 	if !dry && cfg.Decisions != "" {
 		r.lastHeld = lastHoldPath(cfg.Decisions)
@@ -418,6 +443,12 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		r.logf("queue: stopping")
 		return true, nil
 	}
+	if until := r.listingPausedUntil(); !until.IsZero() {
+		r.writeHeartbeat()
+		r.logf("queue: GitHub rate limit; listing issues is paused until %s", until.Format(time.RFC3339))
+		r.pause(ctx)
+		return false, nil
+	}
 	run, err := r.candidate(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -430,7 +461,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		r.pause(ctx)
 		return false, nil
 	}
-	r.setLastError("")
+	r.setLastError(r.staleListError())
 	if len(run) == 0 {
 		r.writeHeartbeat()
 		r.logf("queue: no open issue labelled %s to start; waiting %s", r.cfg.Label, r.cfg.Wait)
@@ -462,7 +493,7 @@ func (r *queueRunner) tick(ctx context.Context) (bool, error) {
 		}
 		if gateSkips(err) {
 			r.logf("queue: %s#%d gate skips it: %s; trying the next run, this one again after %s", run[0].Repo, run[0].Issue.Number, err.Error(), r.cfg.Wait)
-			r.deferAll(run, r.deferRetry)
+			r.deferGateSkipped(run, err)
 			return false, nil
 		}
 		r.setLastError(err.Error())
@@ -654,20 +685,44 @@ func (r *queueRunner) projectOrder() ([]string, error) {
 	return readPriorities(r.cfg.Priorities)
 }
 
-// collect asks every repository. One failure fails the round: starting while
-// a repository could not be listed would skip an older issue the queue
-// cannot see.
+// listFailureAfter is how long a repository may fail to list before the
+// heartbeat's last_error says so.
+const listFailureAfter = time.Hour
+
+// collect asks every repository. A repository that cannot be listed is logged
+// and skipped for this tick, and the others are still ranked: one repository's
+// failure (a 24 Nov rate limit stopped every tick, 95 times) must not stop
+// work in the rest. The cost is a stated guarantee: the queue may start a
+// newer issue while an older one in the unlisted repository waits. The log
+// names the repository left unseen. When every repository fails, or the
+// repository list is empty of answers, collect returns an error. A rate-limit
+// answer pauses all listing until its reset (see pauseListing).
 func (r *queueRunner) collect() ([]queuedIssue, error) {
+	if until := r.listingPausedUntil(); !until.IsZero() {
+		return nil, fmt.Errorf("listing issues is paused until %s: GitHub rate limit\nfix: wait; the queue lists again after that time", until.Format(time.RFC3339))
+	}
 	var (
-		all  []queuedIssue
-		errs []error
+		all    []queuedIssue
+		errs   []error
+		listed int
 	)
 	for _, repo := range r.cfg.Repos {
 		got, err := r.env.list(repo, r.cfg.Label)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", repo, err))
+			r.noteListFailure(repo)
+			var rl *ghx.RateLimitError
+			if errors.As(err, &rl) {
+				// The budget is shared: the repositories after this one would
+				// fail the same way.
+				r.pauseListing(rl.Reset)
+				break
+			}
+			r.logf("queue: %s cannot be listed this tick, so its issues are unseen: %s", repo, firstErrorLine(err.Error()))
 			continue
 		}
+		listed++
+		r.noteListed(repo)
 		if len(got) == ghx.OpenIssueLimit {
 			r.logf("queue: %s returned %d open issues labelled %s, the cap, so any beyond it are unseen", repo, len(got), r.cfg.Label)
 		}
@@ -678,10 +733,66 @@ func (r *queueRunner) collect() ([]queuedIssue, error) {
 			all = append(all, queuedIssue{Repo: repo, Issue: iss})
 		}
 	}
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("list issues: %w\nfix: the queue will not start while a repository cannot be listed", errors.Join(errs...))
+	if len(errs) > 0 && listed == 0 {
+		return nil, fmt.Errorf("list issues: %w\nfix: the queue will not start while no repository can be listed", errors.Join(errs...))
 	}
 	return all, nil
+}
+
+// noteListFailure records the first failure of repo in a row.
+func (r *queueRunner) noteListFailure(repo string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.listFailSince[repo]; !ok {
+		r.listFailSince[repo] = r.env.now()
+	}
+}
+
+func (r *queueRunner) noteListed(repo string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.listFailSince, repo)
+}
+
+// staleListError names the repositories that have failed to list for an hour
+// or more, for last_error. It is empty when there are none.
+func (r *queueRunner) staleListError() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.env.now()
+	var stale []string
+	for repo, since := range r.listFailSince {
+		if now.Sub(since) >= listFailureAfter {
+			stale = append(stale, repo)
+		}
+	}
+	if len(stale) == 0 {
+		return ""
+	}
+	sort.Strings(stale)
+	return fmt.Sprintf("cannot list issues in %s for over %s\nfix: read the queue log for the reason", strings.Join(stale, ", "), listFailureAfter)
+}
+
+// pauseListing makes no GitHub listing call before until, and logs it.
+func (r *queueRunner) pauseListing(until time.Time) {
+	r.mu.Lock()
+	if until.After(r.listWaitUntil) {
+		r.listWaitUntil = until
+	}
+	until = r.listWaitUntil
+	r.mu.Unlock()
+	r.logf("queue: GitHub rate limit reached; listing issues is paused until %s", until.Format(time.RFC3339))
+}
+
+// listingPausedUntil is the end of a rate-limit pause, or the zero time when
+// listing is not paused.
+func (r *queueRunner) listingPausedUntil() time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.env.now().Before(r.listWaitUntil) {
+		return r.listWaitUntil
+	}
+	return time.Time{}
 }
 
 // blocked reads the runner maps. The caller holds r.mu.
@@ -870,18 +981,29 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	if err == nil {
 		r.logf("queue: %s#%d agent exited, bundle %d", iss.Repo, iss.Issue.Number, len(run))
 		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitOK, "exit 0")
+		r.mu.Lock()
+		for _, iss := range run {
+			delete(r.failTries, iss.key())
+		}
+		r.mu.Unlock()
 		r.markRunDone(run)
 		return
 	}
-	// An ExitError means the process ran and finished, whatever its status.
-	// This process does not run that issue again. Anything else means the
-	// command never started (the binary is missing, or it cannot be executed),
-	// which is not the agent finishing the issue.
+	// An ExitError means the process ran and failed. That is a failed try: the
+	// issue is started again after wait, and blocked after three. Anything
+	// else means the command never started (the binary is missing, or it
+	// cannot be executed).
 	var exitErr *exec.ExitError
+	if agentNotRun(err) {
+		r.logf("queue: %s#%d agent not run (exit %d), bundle %d; no try counted, tried again after %s", iss.Repo, iss.Issue.Number, agentNotRunExit, len(run), r.cfg.Wait)
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, "skip", fmt.Sprintf("agent not run (exit %d)", agentNotRunExit))
+		r.deferAll(run, r.deferRetry)
+		return
+	}
 	if errors.As(err, &exitErr) {
 		r.logf("queue: %s#%d agent exited: %v, bundle %d", iss.Repo, iss.Issue.Number, err, len(run))
 		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), who, decisionExitFail, firstErrorLine(err.Error()))
-		r.markRunDone(run)
+		r.failRun(ctx, run, "the agent failed: "+firstErrorLine(err.Error()))
 		return
 	}
 	r.setLastError(err.Error())
@@ -895,6 +1017,20 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 func (r *queueRunner) deferAll(run []queuedIssue, fn func(queuedIssue)) {
 	for _, iss := range run {
 		fn(iss)
+	}
+}
+
+// deferGateSkipped handles a gate skip (exit 3). The gate judged run[0], so
+// only that issue waits. The others in the bundle are left out of this run,
+// not deferred: they form a run again on the next tick without it. Each
+// issue gets a skip row in the decision log.
+func (r *queueRunner) deferGateSkipped(run []queuedIssue, err error) {
+	first := run[0]
+	r.deferRetry(first)
+	r.recordDecision(first.Repo, strconv.Itoa(first.Issue.Number), r.laneFor(first), "skip", "gate skips it: "+firstErrorLine(err.Error()))
+	for _, iss := range run[1:] {
+		r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), r.laneFor(iss), "skip",
+			fmt.Sprintf("left out of the run while the gate skips %s#%d", first.Repo, first.Issue.Number))
 	}
 }
 

@@ -344,6 +344,12 @@ failed". A lookup that fails holds the workspace; it is never read as closed.
 `--closed` never adds a workspace `--reapable` alone would keep, and works with
 `--dry-run` and `-y`.
 
+`facet reap <name> --merged-head <sha>` names the commit a merged pull request
+had as its head. A branch tip equal to it counts as landed, even when GitHub
+cannot say so; any commit beyond it, and any uncommitted work, still holds the
+workspace. The queue passes it after it merges a pull request. When that reap
+is refused, the queue's log line carries reap's own reason.
+
 `reap` also takes a plain git worktree: one made with `git worktree add`, by
 hand or by an agent (Claude Code keeps its own under `.claude/worktrees/`).
 `facet reap <path>` refuses while it has uncommitted or untracked files,
@@ -476,13 +482,13 @@ never passed through a shell.
 | `max` | how many agents run at once across all repositories. Omitted means 6. |
 | `per_repo` | how many agents from one repository may run at once. Omitted means 2. |
 | `hold` | a file path, or a list of them. When one exists, the queue starts nothing and stops. An agent already running is left to finish. |
-| `gate` | a command run before each start. Its arguments are expanded with the issue about to start (`{repo}` `{number}` `{title}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`). `{workspace}` is empty, because the gate runs before a workspace is spawned, and `{prompt}` is not substituted. Exit 3 skips that run: its issues are tried again after `wait`, and the queue goes straight on to the next run, so a refusal about one repository (a red pull request there, a `blocked` label) does not hold the others. Exit 4 skips the run's whole repository the same way: every queued issue there waits `wait`, so the gate runs once per repository. Any other non-zero exit waits `wait`, starts nothing, and tries later: a refusal about the whole queue, such as a spend cap. Omitted means there is no gate. |
+| `gate` | a command run before each start. Its arguments are expanded with the issue about to start (`{repo}` `{number}` `{title}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}`). `{workspace}` is empty, because the gate runs before a workspace is spawned, and `{prompt}` is not substituted. Exit 3 skips the issue the gate was asked about, the first of the run: that issue is tried again after `wait`. The rest of the bundle forms a run again without it on the next tick, and each issue left out gets a `skip` row in the decision log. The queue goes straight on to the next run, so a refusal about one repository (a red pull request there, a `blocked` label) does not hold the others. Exit 4 skips the run's whole repository the same way: every queued issue there waits `wait`, so the gate runs once per repository. Any other non-zero exit waits `wait`, starts nothing, and tries later: a refusal about the whole queue, such as a spend cap. Omitted means there is no gate. |
 | `wait` | how long to wait before looking again. Omitted means 30s. |
 | `label` | which label marks an issue as queued. Omitted means `next`. |
 | `priorities` | a file of repository names, one per line, highest first. A `#` starts a comment. A relative path is beside the config file. Omitted means projects are not ranked. |
 | `repos` | the `owner/name` repositories to read. |
 | `prompt` | the task text. `{repo}` `{number}` `{title}` `{workspace}` `{label}` `{url}` `{effort}` `{issues}` `{bundle}` `{labels}` `{fallback_from}` `{marker}`. `{marker}` is the line the agent ends its pull request's description with when `fix` is set (below), and empty otherwise. `{labels}` is the issue's labels, comma-separated. `{fallback_from}` is the lane a preference gave up, or empty. |
-| `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. |
+| `agents` | one command per label. `{prompt}` is the task text. `{effort}` is the effort word. `bundle` is how many issues that command takes from one repository in one run. Omitted means 1. The maximum is 5. A command that exits 75 (EX_TEMPFAIL) ran nothing: the issue is tried again after `wait`, and no try is counted. Any other non-zero exit is a failed try. |
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. While the queue runs it holds an exclusive lock on the file beside it named `<state>.lock`, and a second queue on the same state file refuses to start, with the fix. |
 | `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
@@ -549,13 +555,30 @@ seconds. The agent, and a fix run (below), has `FACET_QUEUE_RUN=1` in its
 environment, whatever the queue inherited, so a tool it starts can tell it
 runs inside a queue run and end with it rather than outlive it. The gate and
 the other commands the queue runs do not get it. The `CLAUDE.md` there is the one
-`facet spawn` wrote, with the issue text quoted. The queue does not reap
+`facet spawn` wrote, with the issue text quoted.
+
+The queue spawns its workspaces as clones, never as worktrees: as with
+`facet spawn --no-worktree`, and each clone is also made with
+`git clone --no-hardlinks`, so it shares no file with the mirror or with any
+checkout under the projects root. A worktree would make every commit, ref
+update and hook the agent runs write into that other checkout's `.git`, and a
+sandbox that confines the agent to its workspace would have to open that
+directory. `facet spawn` by hand still makes worktrees. `origin` of each clone
+is the repository's remote, so `reap` judges unpushed work as for any clone.
+The queue does not reap
 workspaces. When it stops, the directories stay, and the next time it takes
 that issue it uses the workspace already on disk instead of spawning another.
 
-An issue this process has already handed to an agent is not handed out again,
-including one whose agent exited with a non-zero status. A spawn that failed,
-and a command that never started, are retried after `wait`. Remove the queue
+An issue whose agent exited with status zero is not handed out again. An agent
+that exits non-zero has failed a try: the issue is started again after `wait`.
+Exit status 75 (EX_TEMPFAIL) is the exception: it means the agent ran nothing
+(every lane busy, out of quota or capped). The queue logs "not run", counts no
+try, writes nothing to `done`, adds no label and sends no notify, and starts the
+issue again after `wait`. A fix run that exits 75 uses no fix try.
+After 3 failed tries in this process the queue adds `fix.blockLabel` and runs
+`fix.notify`, as for a refused fix; only a zero exit is written to the state's
+`done` record. A spawn that failed, and a command that never started, are also
+retried after `wait`. Remove the queue
 label when the work is done; the next run of `facet queue` starts an agent
 for whatever still carries it.
 
@@ -567,6 +590,16 @@ reaches its 1000-result limit, the queue starts nothing and waits.
 
 At most 1000 open issues per repository are considered. When a repository
 returns exactly that many, the queue says so: any beyond the cap are unseen.
+
+The queue lists issues through the REST API, not GraphQL, one conditional
+request per page: an unchanged list answers 304 and costs no rate limit. A
+repository that cannot be listed is logged and skipped for that tick, and the
+others are still ranked. So the queue may start a newer issue while an older
+one in the unlisted repository waits; the log names that repository. When no
+repository can be listed, the queue starts nothing. A repository that fails
+for an hour sets `last_error`. On a GitHub rate-limit answer (429, or 403 with
+no budget left) the queue makes no listing call until the reset time, and
+the heartbeat's `list_paused_until` says when.
 
 The stop is the hold file, or an interrupt. Remove the file and start
 `facet queue` again to resume.
@@ -644,6 +677,21 @@ network calls, so a watcher can run it every minute.
 Without `--json`, it prints one line per fact (`state`, `at`, `age`, `pid`,
 `version`, `running`, `held`, `last_error`). With `--json`, it prints the
 heartbeat object with `age_seconds` and `state` added.
+
+The queue takes a pull request as its own only when it passes the ownership
+check: same repository (not a fork), the start's `Facet-Queue-Run` line, and an
+author that is the queue's account or an App in `fix.apps`. An open pull
+request on a started issue's branch that carries the start's line but fails
+the rest is ignored: the queue neither lands nor fixes it. The queue records
+each one in the heartbeat's `ignored_prs` (`repo`, `number`, `author`,
+`reason`, `issue`), and `facet queue status` prints one warning line per pull
+request with the fix: name the App in `fix.apps` when the author is an App; a
+pull request from a fork is never the queue's. `--json` carries the same
+`ignored_prs` list. The entry goes once the pull request is closed or passes
+the check. The warning is read-only: ownership, landing, fixing, the state
+and the exit codes do not change, and `queue status` still makes no network
+call. The queue spends at most one listing per repository per five minutes
+to notice a closed pull request.
 
 ### `facet queue report`
 
@@ -828,7 +876,11 @@ is a failed try. So is a fix whose own commits suppress a finding instead of
 fixing it: after the run, and before anything of that pull request is
 landed, the queue reads the diff from the head the first fix run started
 at. An added line that matches `fix.forbid`, or a higher number in a file
-named like a baseline, ratchet or limit, is refused. A diff that cannot be read (a changed file with no patch, say) is not a
+named like a baseline, ratchet or limit, is refused. A file GitHub sends without a patch (a large one) is read at both
+commits and diffed locally, so every added line is judged. If such a file
+cannot be read, the queue stops retrying, adds the `fix.blockLabel` label,
+runs `fix.notify` once and says to read the diff and merge by hand. Any other
+diff that cannot be read is not a
 pass and is not landed: the queue reads it again after `wait`, then twice
 that, doubling up to an hour, and logs each read that fails. The refusal is a failed
 try. Nothing of that pull request is landed, and the next try is told the
@@ -906,7 +958,7 @@ waits.
 | `gate` | run before a fix start, with the same placeholders; exit 3 and 4 and any other non-zero exit act as for new work. Omitted means the main `gate` runs. A gate that refuses a repository with a red pull request needs a different gate here. |
 | `tries` | failed tries before the issue is blocked, 1 to 5. Omitted means 2. |
 | `blockLabel` | the label a blocked issue gets. It must exist in the repository. Omitted means `blocked`. |
-| `notify` | an argument list run once when an issue is blocked: `{repo}` `{number}` `{pr}` `{reason}`. Omitted means none. |
+| `notify` | an argument list run once when an issue is blocked: `{repo}` `{number}` `{pr}` `{reason}`. `{pr}` is empty when the agent itself failed (the reason says so, with the exit status). Omitted means none. |
 | `land` | update a green queue pull request that is behind its base, and merge one that is up to date, as above. Omitted means `true`. |
 | `apps` | GitHub Apps whose pull requests are also queue pull requests when they carry the start's line, for agents that open pull requests as an App. Each entry is the App's slug, written as `gh pr list --json author` prints it (`app/<slug>`), as `<slug>[bot]`, or bare. Omitted means only the account `gh` runs as. |
 | `forbid` | regular expressions matched against lines a fix run added. A match, or a higher number in a file whose name is a baseline, ratchet or limit, refuses the fix (see above). Omitted means patterns for a postfix `!` after an identifier, `]` or `)`, ` as `, `as any`, `@ts-ignore`, `@ts-expect-error`, `# type: ignore`, `eslint-disable`, `nolint` and `noqa`. An empty list turns the check off. |

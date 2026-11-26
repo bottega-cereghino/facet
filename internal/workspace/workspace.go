@@ -93,6 +93,9 @@ type SyncOptions struct {
 	// same repository under the projects root, when there is one (see
 	// projectCheckout). Without one, the clone is made from Source.
 	Worktrees bool
+	// NoHardlinks makes each clone copy its objects from the source rather than
+	// hardlink them, so no file is shared with a mirror.
+	NoHardlinks bool
 }
 
 // Sync makes the workspace directory match its manifest, idempotently.
@@ -312,7 +315,7 @@ func createClone(roots config.Roots, dir string, m *manifest.Manifest, name stri
 	stage := filepath.Join(tmpRoot, filepath.Base(dir))
 
 	rep.Working("%s : cloning %s%s", name, src, note)
-	if err := gitx.Clone(git, src, stage, gitx.CloneOptions{SkipLFS: skipLFS, SetOriginTo: setOrigin}); err != nil {
+	if err := gitx.Clone(git, src, stage, gitx.CloneOptions{SkipLFS: skipLFS, SetOriginTo: setOrigin, NoHardlinks: opt.NoHardlinks}); err != nil {
 		rep.Warn("%s (clone failed: %v)", name, err)
 		// A clone whose final checkout failed (an origin whose HEAD names no
 		// branch) still holds fetched objects. Keep it in place, as a clone made
