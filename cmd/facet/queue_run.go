@@ -285,7 +285,10 @@ type queueRunner struct {
 	ignored map[string]ignoredPR
 	// noted remembers a line already logged for a key, so a refusal is
 	// logged once per head rather than once per tick.
-	noted        map[string]string
+	noted map[string]string
+	// stalls is the clock of each queue pull request that is not landing,
+	// keyed by repo#number, guarded by mu.
+	stalls       map[string]*stallWatch
 	mergeMethods map[string]cachedMergeMethod
 	// rules caches the required checks of a base branch for ruleCacheTTL.
 	// A ruleset does not change between ticks, and reading it every tick
@@ -350,6 +353,7 @@ func newQueueRunner(cfg queueConfig, env queueEnv, dry bool) (*queueRunner, erro
 		ignored:       map[string]ignoredPR{},
 		waited:        map[string]string{},
 		noted:         map[string]string{},
+		stalls:        map[string]*stallWatch{},
 		mergeMethods:  map[string]cachedMergeMethod{},
 		rules:         map[string]checkRules{},
 		active:        map[string]heartbeatRun{},

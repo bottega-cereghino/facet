@@ -693,6 +693,17 @@ and the exit codes do not change, and `queue status` still makes no network
 call. The queue spends at most one listing per repository per five minutes
 to notice a closed pull request.
 
+A queue pull request whose head and verdict have not changed for 2 hours is
+reported once: a `stalled` row in the decision log, a line in the queue log,
+an entry in the heartbeat's `stalled_prs` (`repo`, `number`, `reason`,
+`since`), a warning line in `facet queue status`, and `fix.notify` with
+`{reason}`. The reason is one of: a draft, no checks, a pending check, a red or
+cancelled or missing required check, a conflict, a missing queue label or a
+closed issue, a pull request without the run marker, `fix.land` off, or green
+but not merged. A new head or a new reason starts the 2 hours again. The
+clock is kept in memory, so a restart of the queue starts it again. Landing
+rules do not change: nothing without checks is merged.
+
 ### `facet queue report`
 
 `facet queue report [--config FILE] [--since 24h] [--json]` says what the

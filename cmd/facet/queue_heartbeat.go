@@ -48,6 +48,8 @@ type queueHeartbeat struct {
 	// IgnoredPRs are open pull requests that carry a start's marker line
 	// and fail the ownership check, so the queue leaves them alone.
 	IgnoredPRs []ignoredPR `json:"ignored_prs,omitempty"`
+	// StalledPRs are queue pull requests reported as unlanded for stallAfter.
+	StalledPRs []stalledPR `json:"stalled_prs,omitempty"`
 }
 
 // queueStatusJSON is the --json output of `facet queue status`: the heartbeat
@@ -61,6 +63,7 @@ type queueStatusJSON struct {
 	LastError       string         `json:"last_error"`
 	ListPausedUntil *time.Time     `json:"list_paused_until,omitempty"`
 	IgnoredPRs      []ignoredPR    `json:"ignored_prs,omitempty"`
+	StalledPRs      []stalledPR    `json:"stalled_prs,omitempty"`
 	AgeSeconds      *float64       `json:"age_seconds"`
 	State           string         `json:"state"`
 }
@@ -109,6 +112,7 @@ func (r *queueRunner) heartbeatSnapshot() queueHeartbeat {
 		running = append(running, run)
 	}
 	ignored := r.ignoredListLocked()
+	stalled := r.stalledListLocked()
 	r.mu.Unlock()
 	sort.Slice(running, func(i, j int) bool {
 		if !running[i].Since.Equal(running[j].Since) {
@@ -125,6 +129,7 @@ func (r *queueRunner) heartbeatSnapshot() queueHeartbeat {
 		LastError:       lastErr,
 		ListPausedUntil: paused,
 		IgnoredPRs:      ignored,
+		StalledPRs:      stalled,
 	}
 }
 
@@ -294,6 +299,7 @@ func buildQueueStatus(cfg queueConfig, hb queueHeartbeat, found bool, readErr er
 		LastError:       hb.LastError,
 		ListPausedUntil: hb.ListPausedUntil,
 		IgnoredPRs:      hb.IgnoredPRs,
+		StalledPRs:      hb.StalledPRs,
 	}
 	if st.Running == nil {
 		st.Running = []heartbeatRun{}
@@ -367,6 +373,9 @@ func printQueueStatusText(out io.Writer, path string, st queueStatusJSON, missin
 		_, _ = fmt.Fprintf(out, "listing paused until: %s (GitHub rate limit)\n", st.ListPausedUntil.Format(time.RFC3339))
 	}
 	for _, p := range st.IgnoredPRs {
+		_, _ = fmt.Fprintln(out, p.warning())
+	}
+	for _, p := range st.StalledPRs {
 		_, _ = fmt.Fprintln(out, p.warning())
 	}
 }
