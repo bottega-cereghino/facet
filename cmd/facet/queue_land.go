@@ -230,6 +230,7 @@ func (r *queueRunner) mergePR(ctx context.Context, iss queuedIssue, pr ghx.OpenP
 	r.mu.Lock()
 	delete(r.state.Fixes, k)
 	delete(r.state.Merges, key)
+	delete(r.stalls, key)
 	r.mu.Unlock()
 	r.saveState()
 	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), "land", decisionLanded, fmt.Sprintf("PR #%d (%s)", pr.Number, method))

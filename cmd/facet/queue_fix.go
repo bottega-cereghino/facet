@@ -157,9 +157,11 @@ func (r *queueRunner) scanQueuePRs(ctx context.Context) []*fixJob {
 			continue
 		}
 		if !ok {
+			r.watchUnowned(ctx, iss, got.prs)
 			r.forgetStarted(iss)
 			continue
 		}
+		r.watchStall(ctx, iss, pr, r.stallReason(iss.Repo, pr, r.alreadyReported(iss, pr)))
 		if job := r.judgeQueuePR(ctx, iss, pr, got, mergedRepo); job != nil {
 			jobs = append(jobs, job)
 		}
@@ -346,6 +348,7 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 		return
 	}
 	delete(r.state.Fixes, k)
+	delete(r.stalls, landKey(iss.Repo, s.PR))
 	if s.PR != 0 {
 		delete(r.state.Merges, landKey(iss.Repo, s.PR))
 	}
