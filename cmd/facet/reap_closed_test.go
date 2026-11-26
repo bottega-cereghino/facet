@@ -194,3 +194,47 @@ func TestReapClosedNeedsReapable(t *testing.T) {
 		t.Fatalf("reap --closed: %v, want a refusal naming --reapable", err)
 	}
 }
+
+// A workspace whose home clone directory is gone, with only its manifest
+// left, is reaped once its pull request is merged: git is never run in the
+// missing directory. A stray file beside the manifest still holds it, and a
+// workspace with no pull request by branch is left out with a reason that
+// names the missing directory, not a git failure (#551).
+func TestReapClosedHomeCloneGone(t *testing.T) {
+	root, _, _ := reapableRoot(t)
+	merged, _ := homeWorkspace(t, root, "iss-11-gone")
+	held, _ := homeWorkspace(t, root, "iss-12-gone-stray")
+	noPR, _ := homeWorkspace(t, root, "iss-13-gone-nopr")
+	for _, ws := range []string{merged, held, noPR} {
+		if err := os.RemoveAll(filepath.Join(ws, "app")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(held, "notes.txt"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := newClosedGH()
+	f.prs["iss-11-gone"] = &ghx.PR{Number: 20, State: "MERGED"}
+	f.prs["iss-12-gone-stray"] = &ghx.PR{Number: 21, State: "MERGED"}
+	gh = f
+	var out bytes.Buffer
+	if err := reapBatch(&out, []string{merged, held, noPR}, true, false, closedReason, nil); err != nil {
+		t.Fatalf("reapBatch: %v\n%s", err, out.String())
+	}
+	if exists(t, merged) {
+		t.Errorf("a merged workspace with only its manifest left was held:\n%s", out.String())
+	}
+	if !exists(t, held) {
+		t.Errorf("a workspace with a stray file was deleted:\n%s", out.String())
+	}
+	if !exists(t, noPR) {
+		t.Errorf("a workspace with no pull request was deleted:\n%s", out.String())
+	}
+	want := "  " + closedHomeGone + " (1)\n    iss-13-gone-nopr\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out.String())
+	}
+	if strings.Contains(out.String(), "exit status") || strings.Contains(out.String(), "did not finish") {
+		t.Errorf("a missing directory was named as a git failure:\n%s", out.String())
+	}
+}

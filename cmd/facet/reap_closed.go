@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,6 +20,7 @@ const (
 	closedNoPR         = "no pull request"
 	closedPROpen       = "pull request open"
 	closedLookupFailed = "pull request lookup failed"
+	closedHomeGone     = "no pull request by branch, and the home clone directory is gone"
 )
 
 // closedReason is the --closed narrowing: "" when st is an issue workspace
@@ -27,7 +31,9 @@ const (
 // When it found none, the home clone's HEAD is asked for the merged pull
 // request that had it as a commit (ghx MergedPRForSHA), which finds a squash
 // merge whose branch is gone. A lookup that fails holds the workspace: it is
-// never read as closed (CODE.md section 2).
+// never read as closed (CODE.md section 2). A home clone whose directory is
+// gone has no HEAD to ask about: git is not run there, and the workspace is
+// left out with a reason that says the directory is missing.
 func closedReason(st *workspace.IssueState) string {
 	if st.Worktree || st.Issue == nil {
 		return closedNotIssue
@@ -49,7 +55,11 @@ func closedReason(st *workspace.IssueState) string {
 	if st.Issue.Home == "" {
 		return closedNoPR
 	}
-	head, err := git.Run(filepath.Join(st.Dir, st.Issue.Home), nil, "rev-parse", "--verify", "HEAD")
+	home := filepath.Join(st.Dir, st.Issue.Home)
+	if _, err := os.Stat(home); errors.Is(err, fs.ErrNotExist) {
+		return closedHomeGone
+	}
+	head, err := git.Run(home, nil, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		st.PRErr = err
 		return closedLookupFailed
