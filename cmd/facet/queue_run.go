@@ -948,7 +948,14 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 	if err != nil {
 		r.setLastError(err.Error())
 		r.logf("queue: spawn %s#%d: %v", iss.Repo, iss.Issue.Number, err)
-		r.deferAll(run, r.deferRetry)
+		if ctx.Err() != nil {
+			return
+		}
+		if spawnErrorMayPass(err) {
+			r.deferAll(run, r.deferRetry)
+			return
+		}
+		r.failRun(ctx, run, "spawn failed: "+firstErrorLine(err.Error()))
 		return
 	}
 	if ctx.Err() != nil {
