@@ -6,6 +6,16 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.19.4](https://github.com/bottega-cereghino/facet/compare/v0.19.3...v0.19.4) (2026-11-26)
+
+
+### Fixed
+
+* **queue:** count a spawn failure like an agent failure and block the third ([#577](https://github.com/bottega-cereghino/facet/issues/577)) ([605bc59](https://github.com/bottega-cereghino/facet/commit/605bc59053caf08d007b78730aa6714f5d59d1a7))
+* **queue:** reap after a merge gets the merged head and its reason is logged ([#574](https://github.com/bottega-cereghino/facet/issues/574)) ([112154a](https://github.com/bottega-cereghino/facet/commit/112154a7800f06121aa28396fd0867b812caf2f2))
+* **queue:** report a queue pull request that stays unlanded for 2 hours ([#579](https://github.com/bottega-cereghino/facet/issues/579)) ([09ea3aa](https://github.com/bottega-cereghino/facet/commit/09ea3aa3637d64c65c149ce0e2b7423e1dc9cff2))
+* **reap:** --closed does not run git in a home clone directory that is gone ([#578](https://github.com/bottega-cereghino/facet/issues/578)) ([d000ca7](https://github.com/bottega-cereghino/facet/commit/d000ca7542252bc1f8d46302b18812a5258f8bf8))
+
 ## [0.19.3](https://github.com/bottega-cereghino/facet/compare/v0.19.2...v0.19.3) (2026-11-25)
 
 
