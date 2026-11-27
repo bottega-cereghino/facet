@@ -1,0 +1,9 @@
+{
+  "rows": 5,
+  "at": "2026-11-24T11:30:00Z",
+  "startable": 0,
+  "running": 0,
+  "free_slots": 2,
+  "by_reason": {},
+  "starved_minutes_24h": 90
+}

@@ -747,6 +747,14 @@ makes no GitHub call. Per agent label it counts runs started, exits with
 status 0 and not 0, fix runs, pull requests landed, issues blocked and the
 skips by reason (the fix lane is `fix`, merges are `land`). It then prints
 the holds, the last error, and the issues the state file holds as blocked.
+When the config sets `census`, `--json` also prints `census`, read from
+`census.jsonl`: `startable`, `running`, `free_slots` and `by_reason` of the
+latest row in the window, `rows` (how many rows the window holds, so no data
+differs from a quiet queue), `at`, and `starved_minutes_24h`. That is the
+minutes of the last 24 hours with a free slot, nothing startable and labelled
+issues open. A row counts until the next row, at most an hour, so a gap while
+the queue was down is not counted. Without `census` in the config, `census` is
+null; with it and no `census.jsonl`, the report is refused.
 Without `--json` it prints a short table. A line of the log that cannot be
 read is skipped and counted in `torn_lines`. A missing log is refused, so a
 broken path never reads as a quiet day. Exit, landed, blocked and error rows
