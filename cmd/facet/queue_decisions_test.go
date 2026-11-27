@@ -449,3 +449,46 @@ func TestQueueDecisionsSkipPerRepoCap(t *testing.T) {
 		t.Fatalf("expected per-repo cap skip for issue 2 in %+v", rows)
 	}
 }
+
+func TestQueueDecisionsSkipOncePerChangeOfReason(t *testing.T) {
+	logFile := filepath.Join(t.TempDir(), "queue-gate.jsonl")
+	clock := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	r := &queueRunner{
+		cfg: queueConfig{Decisions: logFile},
+		env: queueEnv{out: &bytes.Buffer{}, now: func() time.Time { return clock }},
+	}
+	skip := func(issue, why string) {
+		clock = clock.Add(time.Minute)
+		r.recordDecision("acme/widgets", issue, "default", "skip", why)
+	}
+
+	for range 10 {
+		skip("10", "open pull request #99")
+	}
+	skip("11", "open pull request #99") // another issue, same reason: its own row
+	skip("10", "effort conflict")       // changed reason writes again
+	skip("10", "effort conflict")
+	clock = clock.Add(time.Minute)
+	r.recordDecision("acme/widgets", "10", "default", "start", "agent")
+	skip("10", "effort conflict") // a skip after the issue ran writes again
+	skip("10", "effort conflict")
+
+	rows, _ := readDecisionLines(t, logFile)
+	var got []string
+	for _, row := range rows {
+		got = append(got, row.Issue+" "+row.Decision+" "+row.Why)
+	}
+	want := []string{
+		"10 skip open pull request #99",
+		"11 skip open pull request #99",
+		"10 skip effort conflict",
+		"10 start agent",
+		"10 skip effort conflict",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("rows = %q, want %q", got, want)
+	}
+	if rows[0].At != "2026-11-27T09:01:00Z" {
+		t.Fatalf("first row at %s, want the first tick's time", rows[0].At)
+	}
+}

@@ -111,7 +111,9 @@ func (r *queueRunner) recordHold(held string) {
 	r.recordDecision("", "", "", "released", prev)
 }
 
-// recordDecision appends one JSON object line to the decision log.
+// recordDecision appends one JSON object line to the decision log. A skip row
+// for an issue is written once per change of reason: the same reason again
+// writes nothing until another row for the issue, or a new reason, comes.
 // A failed write logs a warning and never stops the queue.
 func (r *queueRunner) recordDecision(repo, issue, lane, decision, why string) {
 	if r.dry || r.cfg.Decisions == "" {
@@ -134,7 +136,24 @@ func (r *queueRunner) recordDecision(repo, issue, lane, decision, why string) {
 	b = append(b, '\n')
 
 	r.decisionMu.Lock()
+	key := repo + "#" + issue
+	if issue != "" {
+		if decision == "skip" {
+			if prev, ok := r.lastSkip[key]; ok && prev == why {
+				r.decisionMu.Unlock()
+				return
+			}
+		} else {
+			delete(r.lastSkip, key)
+		}
+	}
 	err = appendDecisionLine(r.cfg.Decisions, b)
+	if err == nil && decision == "skip" && issue != "" {
+		if r.lastSkip == nil {
+			r.lastSkip = map[string]string{}
+		}
+		r.lastSkip[key] = why
+	}
 	r.decisionMu.Unlock()
 	if err != nil {
 		r.logf("queue: write decision log %s: %v", r.cfg.Decisions, err)

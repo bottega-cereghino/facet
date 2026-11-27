@@ -493,7 +493,7 @@ never passed through a shell.
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. While the queue runs it holds an exclusive lock on the file beside it named `<state>.lock`, and a second queue on the same state file refuses to start, with the fix. |
 | `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
 | `census` | the census file's path (below). A relative path is beside the config file. Omitted means no census is written. |
-| `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`, `disk`, `disk_clear`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
+| `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`, `disk`, `disk_clear`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A `skip` row is written once per change of reason for an issue: the same reason on the next ticks writes nothing, a new reason writes again, and so does a skip after the issue started or ended a run. A restart writes each standing skip once more. Rows of every other kind are unchanged. A failed write never stops the queue. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
 | `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
 | `cap` | how often the queue starts standards or CI work, once that repository's own check passes (below). Omitted means no cap. |
@@ -745,7 +745,7 @@ rules do not change: nothing without checks is merged.
 queue did in the window. It reads the decision log and the state file and
 makes no GitHub call. Per agent label it counts runs started, exits with
 status 0 and not 0, fix runs, pull requests landed, issues blocked and the
-skips by reason (the fix lane is `fix`, merges are `land`). It then prints
+skips by reason (a skip is counted once per change of reason, not once per tick; the fix lane is `fix`, merges are `land`). It then prints
 the holds, the last error, and the issues the state file holds as blocked.
 When the config sets `census`, `--json` also prints `census`, read from
 `census.jsonl`: `startable`, `running`, `free_slots` and `by_reason` of the
