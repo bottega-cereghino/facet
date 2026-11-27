@@ -579,7 +579,15 @@ issue again after `wait`. A fix run that exits 75 uses no fix try.
 After 3 failed tries in this process the queue adds `fix.blockLabel` and runs
 `fix.notify`, as for a refused fix; only a zero exit is written to the state's
 `done` record. A spawn that failed, and a command that never started, are also
-retried after `wait`. Remove the queue
+retried after `wait`. An agent that exits with status zero, leaves no open pull
+request on the issue's branch and keeps the queue label has made no progress.
+The second such exit for one issue adds `fix.blockLabel`, comments why and what
+to do, and runs `fix.notify`. The count is in the state file (`no_pr`), so a
+restart keeps it. A pull request on the branch, a closed issue or a removed
+queue label clears it, and so does starting the issue again after a person
+removed the block label. Exit 75 is not counted. Only the first issue of a
+bundle is counted. Nothing is counted when the issue or the pull requests
+cannot be read, or when `fix` is not set. Remove the queue
 label when the work is done; the next run of `facet queue` starts an agent
 for whatever still carries it.
 

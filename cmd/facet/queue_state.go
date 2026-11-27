@@ -32,6 +32,18 @@ type queueState struct {
 	// merged one, so the cap window still counts that run. Empty when the
 	// config has no cap.
 	Starts []startedIssue `json:"starts,omitempty"`
+	// NoPR counts, per issue, the agent exits with status zero that left
+	// no pull request and kept the queue label. It lives here so a restart
+	// does not reset it.
+	NoPR map[string]*noPRRecord `json:"no_pr,omitempty"`
+}
+
+// noPRRecord is one issue's count of exits without a pull request. Blocked
+// means the queue added the block label for it; a start of the issue after
+// that means a person removed the label, and the count begins again.
+type noPRRecord struct {
+	Count   int  `json:"count"`
+	Blocked bool `json:"blocked,omitempty"`
 }
 
 // mergeHold is one pull request's refused merges. Head and Checks are what
@@ -88,6 +100,7 @@ func newQueueState() *queueState {
 		Done:     map[string]time.Time{},
 		Active:   map[string]int{},
 		ActiveAt: map[string]time.Time{},
+		NoPR:     map[string]*noPRRecord{},
 	}
 }
 
@@ -120,6 +133,9 @@ func loadQueueState(path string) (*queueState, error) {
 	}
 	if st.ActiveAt == nil {
 		st.ActiveAt = map[string]time.Time{}
+	}
+	if st.NoPR == nil {
+		st.NoPR = map[string]*noPRRecord{}
 	}
 	if st.Active == nil {
 		st.Active = map[string]int{}
