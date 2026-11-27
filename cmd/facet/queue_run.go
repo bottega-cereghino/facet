@@ -311,6 +311,11 @@ type queueRunner struct {
 	diskSeen   bool
 	diskHeld   bool
 	decisionMu sync.Mutex
+	// lastSkip is the reason of the last skip row written for each issue
+	// (repo#number), so a skip is logged once per change of reason. Any other
+	// row for the issue clears it, so a skip after a run writes again. It is
+	// guarded by decisionMu and empty after a restart.
+	lastSkip map[string]string
 	// rooms is this tick's lanes answer. Nil means a lane label keeps its
 	// agent. The map is not mutated after refreshRooms returns.
 	rooms map[string]string
