@@ -20,6 +20,7 @@
   },
   "state": "facet-queue.state.json",
   "heartbeat": "facet-queue.heartbeat.json",
+  "census": "facet-queue.census.json",
   "decisions": "queue-gate.jsonl",
   "fix": {
     "command": ["agent", "--effort", "{effort}", "{prompt}"],
