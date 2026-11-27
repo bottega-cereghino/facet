@@ -6,6 +6,18 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.21.0](https://github.com/bottega-cereghino/facet/compare/v0.20.0...v0.21.0) (2026-11-27)
+
+
+### Added
+
+* **queue:** a run that twice exits without a pull request is blocked ([#589](https://github.com/bottega-cereghino/facet/issues/589)) ([c520de0](https://github.com/bottega-cereghino/facet/commit/c520de0333393be4ea9b122ff1386ca578d35a40))
+
+
+### Fixed
+
+* **queue:** log a skip once per change of reason ([#588](https://github.com/bottega-cereghino/facet/issues/588)) ([dfeb05a](https://github.com/bottega-cereghino/facet/commit/dfeb05a5dabc3631a52ce17933268ec9cc387d06))
+
 ## [0.20.0](https://github.com/bottega-cereghino/facet/compare/v0.19.4...v0.20.0) (2026-11-27)
 
 
