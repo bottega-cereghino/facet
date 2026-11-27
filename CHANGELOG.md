@@ -6,6 +6,17 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.20.0](https://github.com/bottega-cereghino/facet/compare/v0.19.4...v0.20.0) (2026-11-27)
+
+
+### Added
+
+* **queue:** a census of every queued issue each tick ([#581](https://github.com/bottega-cereghino/facet/issues/581)) ([d9a4caf](https://github.com/bottega-cereghino/facet/commit/d9a4caf7f69a660f55a5fdc73146a3310d5e4bc7))
+* **queue:** report --json carries the census and starved minutes ([#584](https://github.com/bottega-cereghino/facet/issues/584)) ([de66187](https://github.com/bottega-cereghino/facet/commit/de661870ddfb9787a7d745ea9ea654f5a9da3ce7))
+* **queue:** the census reports configuration drift ([#583](https://github.com/bottega-cereghino/facet/issues/583)) ([783ac96](https://github.com/bottega-cereghino/facet/commit/783ac96670cded6a49f59b2712da09681dd5ef99))
+* **release:** ship tags, installs the tag and swaps the queue onto it ([#576](https://github.com/bottega-cereghino/facet/issues/576)) ([01b0f17](https://github.com/bottega-cereghino/facet/commit/01b0f17ddd1c252c87b6e9c1b1088b62d5cf2cb5))
+* **release:** ship tags, installs the tag and swaps the queue onto it ([#582](https://github.com/bottega-cereghino/facet/issues/582)) ([01b0f17](https://github.com/bottega-cereghino/facet/commit/01b0f17ddd1c252c87b6e9c1b1088b62d5cf2cb5))
+
 ## [0.19.4](https://github.com/bottega-cereghino/facet/compare/v0.19.3...v0.19.4) (2026-11-26)
 
 
