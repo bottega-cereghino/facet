@@ -4,6 +4,15 @@
 #   scripts/release.sh pr    open or update the release PR from the commits on main
 #   scripts/release.sh tag   after the release PR merged: tag it, publish the release,
 #                            and copy the version's CHANGELOG entry into its notes
+#   scripts/release.sh ship  after the release PR merged: do `tag`, install the tag into
+#                            $FACET_INSTALL_ROOT/<tag>/, copy it to .../current/, run the
+#                            swap command, and print the one-line way back
+#
+# ship reads two environment variables. FACET_INSTALL_ROOT is the install root
+# (default $HOME/.local/lib/facet). FACET_SWAP_CMD names the operator's command
+# that moves the queue onto the new version; it runs with the new tag and the
+# previous tag as its two arguments. Unset, nothing is swapped and ship says so.
+# The service itself is not in this repository.
 #
 # Why not a workflow: the org does not let GitHub Actions open pull requests, and
 # a PR opened with GITHUB_TOKEN starts no workflows, so its required checks would
@@ -23,11 +32,12 @@ REPO_URL=bottega-cereghino/facet
 
 case "${1:-}" in
   pr) cmd=release-pr ;;
-  tag) cmd=github-release ;;
+  tag | ship) cmd=github-release ;;
   *)
-    echo "usage: scripts/release.sh pr|tag" >&2
+    echo "usage: scripts/release.sh pr|tag|ship" >&2
     echo "  pr   open or update the release PR from the commits on main" >&2
     echo "  tag  after the release PR merged: tag it and publish the release" >&2
+    echo "  ship after the release PR merged: tag, install the tag, swap the queue onto it" >&2
     exit 2
     ;;
 esac
@@ -84,3 +94,40 @@ fi
 printf '\nInstall: `go install github.com/bottega-cereghino/facet/cmd/facet@v%s`\n' "$version" >>"$notes_file"
 gh release edit "v$version" --repo "$REPO_URL" --notes-file "$notes_file" >/dev/null
 echo "v$version: release notes set from CHANGELOG.md"
+[ "$1" = ship ] || exit 0
+
+tag="v$version"
+root=${FACET_INSTALL_ROOT:-$HOME/.local/lib/facet}
+git fetch --quiet --tags origin
+# The newest tag below the new one, by version order.
+previous=$(git tag --list 'v*' --sort=-v:refname | awk -v t="$tag" 'seen { print; exit } $0 == t { seen = 1 }')
+if [ -z "$previous" ]; then
+  echo "no tag below $tag, so there is no way back. fix: tag the release again once an earlier tag exists" >&2
+  exit 1
+fi
+
+mkdir -p "$root/$tag" "$root/current"
+GOBIN="$root/$tag" go install "github.com/$REPO_URL/cmd/facet@$tag" || {
+  echo "could not install $tag. fix: check the network and that the tag exists, then run again" >&2
+  exit 1
+}
+cp "$root/$tag/facet" "$root/current/facet.new"
+mv "$root/current/facet.new" "$root/current/facet"
+echo "$tag installed in $root/$tag and copied to $root/current"
+
+back="GOBIN=$root/$previous go install github.com/$REPO_URL/cmd/facet@$previous && cp $root/$previous/facet $root/current/facet && ${FACET_SWAP_CMD:-<swap command>} $previous $tag"
+if [ -z "${FACET_SWAP_CMD:-}" ]; then
+  echo "FACET_SWAP_CMD is not set: the service was not swapped. Run your swap command with: $tag $previous" >&2
+else
+  "$FACET_SWAP_CMD" "$tag" "$previous" || {
+    echo "the swap command failed for $tag. way back: $back" >&2
+    exit 1
+  }
+  running=$("$root/current/facet" version)
+  if [ "$running" != "facet $tag" ]; then
+    echo "the binary in $root/current says \"$running\", not \"facet $tag\". way back: $back" >&2
+    exit 1
+  fi
+  echo "swapped to $tag; $root/current/facet reports $running"
+fi
+echo "way back: $back"
