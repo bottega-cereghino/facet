@@ -20,6 +20,7 @@ reasons. Read the section of CODE.md you are about to touch.
 | `docs/design/` | design notes for single behaviours (reap's refusal) |
 | `docs/decisions/` | decision records, one file per decision (`NNNN-slug.md`) |
 | `scripts/release.sh` | cuts a release with release-please (section Releases) |
+| `scripts/release_ship_test.go` | tests `release.sh ship` against fake tools in a temporary install root |
 | `scripts/release/` | `package.json` and `package-lock.json` pinning the release-please the script runs |
 | `scripts/test-change.sh` | the `test-change` check: does a PR weaken the tests |
 | `scripts/gofmt-on-write.sh` | the PostToolUse hook in `.claude/settings.json`: gofmt a Go file after an agent writes it |
@@ -148,6 +149,18 @@ afresh.
    GitHub release, and copies the version's CHANGELOG entry into the release
    notes (release-please would write them from the commit titles instead).
    `go install …/cmd/facet@vX.Y.Z` then works.
+4. `scripts/release.sh ship` does step 3, then installs the tag with
+   `go install` into `$FACET_INSTALL_ROOT/<tag>/` (default
+   `$HOME/.local/lib/facet`), copies the binary to `<root>/current/`, and
+   runs the command named in `FACET_SWAP_CMD` with the new tag and the
+   previous tag. That command is the operator's: this repository holds no
+   service manager, label or path. With it unset, `ship` prints that the
+   service was not swapped. After a swap it checks that `<root>/current/facet
+   version` reports the new tag, which proves the binary, not the running
+   process. Every step stops the script on failure and prints the way back as
+   one line: install the previous tag, copy it to `current/`, run the swap
+   command with the tags reversed. `scripts/release_ship_test.go` runs it
+   against fakes of `gh`, `npm`, `go` and the swap command.
 
 The way back from a bad release is the previous tag:
 `go install github.com/bottega-cereghino/facet/cmd/facet@<previous tag>`.
