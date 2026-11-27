@@ -27,6 +27,8 @@ type queueEnv struct {
 	// addLabel adds a label to an issue. The fix stage uses it to block an
 	// issue that used up its tries.
 	addLabel func(repo string, number int, label string) error
+	// comment posts a comment on an issue. Nil posts none.
+	comment func(repo string, number int, body string) error
 	// updateBranch, mergeMethod, mergePR, behindBase and prFiles land a
 	// green queue pull request (fix.land) and serialize on shared files.
 	// Nil skips that step.
@@ -79,8 +81,12 @@ func realQueueEnv() queueEnv {
 		list: func(repo, label string) ([]ghx.Issue, error) {
 			return gh.OpenIssues(repo, label)
 		},
-		prs:            ghx.CLI{}.OpenPRs,
-		addLabel:       ghx.CLI{}.AddIssueLabel,
+		prs:      ghx.CLI{}.OpenPRs,
+		addLabel: ghx.CLI{}.AddIssueLabel,
+		comment: func(repo string, number int, body string) error {
+			_, err := ghx.CLI{}.PostComment(repo, number, body)
+			return err
+		},
 		updateBranch:   ghx.CLI{}.UpdatePRBranch,
 		mergeMethod:    ghx.CLI{}.MergeMethod,
 		mergePR:        ghx.CLI{}.MergePR,
@@ -1008,6 +1014,7 @@ func (r *queueRunner) runOne(ctx context.Context, run []queuedIssue, rooms map[s
 		}
 		r.mu.Unlock()
 		r.markRunDone(run)
+		r.noteNoPR(ctx, run[0])
 		return
 	}
 	// An ExitError means the process ran and failed. That is a failed try: the

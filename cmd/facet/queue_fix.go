@@ -348,6 +348,7 @@ func (r *queueRunner) forgetStarted(iss queuedIssue) {
 		return
 	}
 	delete(r.state.Fixes, k)
+	delete(r.state.NoPR, k)
 	delete(r.stalls, landKey(iss.Repo, s.PR))
 	if s.PR != 0 {
 		delete(r.state.Merges, landKey(iss.Repo, s.PR))
@@ -592,6 +593,11 @@ func (r *queueRunner) recordStarted(run []queuedIssue, marker string) {
 			Labels: iss.Issue.LabelNames(), Marker: marker,
 		}
 		r.state.Started[iss.key()] = rec
+		// An issue started again with a block record had its label removed
+		// by a person: count from zero.
+		if n := r.state.NoPR[iss.key()]; n != nil && n.Blocked {
+			delete(r.state.NoPR, iss.key())
+		}
 		if r.cfg.Cap != nil {
 			r.state.noteStart(rec)
 		}
@@ -666,5 +672,113 @@ func (r *queueRunner) blockFailed(ctx context.Context, iss queuedIssue, tries in
 	vars := map[string]string{"repo": iss.Repo, "number": strconv.Itoa(iss.Issue.Number), "pr": "", "reason": reason}
 	if err := r.runCmd(ctx, "", expandArgv(fix.Notify, vars), nil); err != nil {
 		r.logf("queue: %s#%d notify: %v", iss.Repo, iss.Issue.Number, err)
+	}
+}
+
+// maxNoPRExits is how many exits with status zero, with no pull request and
+// the queue label kept, the queue accepts for one issue before it blocks it.
+const maxNoPRExits = 2
+
+// noteNoPR runs after an agent exited with status zero. It counts the exit
+// when the issue is still open, still carries the queue label and has no open
+// pull request on its branch. The second such exit adds fix.blockLabel,
+// comments why and runs fix.notify. Only the run's first issue is judged: a
+// bundle's other issues have no branch of their own in this run, and the
+// agent may have covered them in one pull request. When the issue or the
+// pull requests cannot be read, nothing is counted: a count needs evidence.
+func (r *queueRunner) noteNoPR(ctx context.Context, iss queuedIssue) {
+	fix := r.cfg.Fix
+	if r.dry || r.state == nil || fix == nil || r.env.issue == nil || r.env.prs == nil {
+		return
+	}
+	k := iss.key()
+	cur, err := r.env.issue(iss.Repo, iss.Issue.Number)
+	if err != nil || cur == nil {
+		r.logf("queue: %s: cannot read the issue to count the exit without a pull request: %v", k, err)
+		return
+	}
+	prs, err := r.env.prs(iss.Repo)
+	if err != nil {
+		r.logf("queue: %s: cannot list pull requests to count the exit without a pull request: %v", k, err)
+		return
+	}
+	prefix := issueBranchName(iss.Issue.Number, "")
+	hasPR := false
+	for _, pr := range prs {
+		if strings.HasPrefix(pr.HeadRefName, prefix) {
+			hasPR = true
+		}
+	}
+	open := strings.EqualFold(cur.State, "open") || cur.State == ""
+	if hasPR || !open || !hasLabel(cur, r.cfg.Label) {
+		r.mu.Lock()
+		delete(r.state.NoPR, k)
+		r.mu.Unlock()
+		r.saveState()
+		return
+	}
+	r.mu.Lock()
+	rec := r.state.NoPR[k]
+	if rec == nil {
+		rec = &noPRRecord{}
+		r.state.NoPR[k] = rec
+	}
+	rec.Count++
+	count := rec.Count
+	r.mu.Unlock()
+	r.saveState()
+	if count < maxNoPRExits {
+		r.logf("queue: %s: agent exited without a pull request (%d of %d)", k, count, maxNoPRExits)
+		return
+	}
+	r.blockNoPR(ctx, iss, count)
+}
+
+func hasLabel(iss *ghx.Issue, label string) bool {
+	for _, l := range iss.LabelNames() {
+		if strings.EqualFold(l, label) {
+			return true
+		}
+	}
+	return false
+}
+
+// blockNoPR labels the issue, comments why and what to do, and notifies. A
+// label that cannot be added leaves the count as it is, so the next exit
+// tries again.
+func (r *queueRunner) blockNoPR(ctx context.Context, iss queuedIssue, count int) {
+	fix := r.cfg.Fix
+	k := iss.key()
+	if r.env.addLabel == nil {
+		r.logf("queue: %s: cannot add the %s label: no label seam", k, fix.BlockLabel)
+		return
+	}
+	if err := r.env.addLabel(iss.Repo, iss.Issue.Number, fix.BlockLabel); err != nil {
+		r.logf("queue: %s: add label %s: %v\nfix: create the label %s in %s, or set fix.blockLabel to a label that exists; tried again at the next exit",
+			k, fix.BlockLabel, err, fix.BlockLabel, iss.Repo)
+		return
+	}
+	r.mu.Lock()
+	if rec := r.state.NoPR[k]; rec != nil {
+		rec.Blocked = true
+	}
+	r.mu.Unlock()
+	r.saveState()
+	reason := fmt.Sprintf("the agent exited %d times without opening a pull request", count)
+	r.recordDecision(iss.Repo, strconv.Itoa(iss.Issue.Number), "queue", decisionBlocked, reason)
+	r.logf("queue: %s: %s; labelled %s", k, reason, fix.BlockLabel)
+	if r.env.comment != nil {
+		body := fmt.Sprintf("The queue started an agent for this issue %d times. Each time it exited with no error and opened no pull request, and the `%s` label stayed. The queue added `%s` and starts no more runs.\n\nWhat to do: read the agent's log for the last run and decide whether the issue is clear enough, or does the work another way. Then remove the `%s` label to let the queue start it again; that also resets the count.",
+			count, r.cfg.Label, fix.BlockLabel, fix.BlockLabel)
+		if err := r.env.comment(iss.Repo, iss.Issue.Number, body); err != nil {
+			r.logf("queue: %s: comment: %v", k, err)
+		}
+	}
+	if len(fix.Notify) == 0 {
+		return
+	}
+	vars := map[string]string{"repo": iss.Repo, "number": strconv.Itoa(iss.Issue.Number), "pr": "", "reason": reason}
+	if err := r.runCmd(ctx, "", expandArgv(fix.Notify, vars), nil); err != nil {
+		r.logf("queue: %s notify: %v", k, err)
 	}
 }
