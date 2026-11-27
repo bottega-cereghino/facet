@@ -492,6 +492,7 @@ never passed through a shell.
 | `effort` | `default` (omitted means `medium`) and `labels`, a map from an issue label to an effort. |
 | `state` | the state file's path. A relative path is beside the config file. Required when `fix` or `cap` is set. Unused when neither is set. While the queue runs it holds an exclusive lock on the file beside it named `<state>.lock`, and a second queue on the same state file refuses to start, with the fix. |
 | `heartbeat` | the heartbeat file's path. A relative path is beside the config file. Omitted means no heartbeat file is written. |
+| `census` | the census file's path (below). A relative path is beside the config file. Omitted means no census is written. |
 | `decisions` | JSONL file where dispatch decisions (`held`, `released`, `start`, `fix_start`, `skip`, `disk`, `disk_clear`) are appended, one object per line with `source: "queue"`. A relative path is beside the config file. Omitted uses `FACET_QUEUE_GATE_LOG` or `~/.local/state/fleet/queue-gate.jsonl`. A failed write never stops the queue. |
 | `fix` | how the queue repairs its own red or conflicting pull requests (below). Omitted means the queue never returns to a pull request, and needs no state file. |
 | `lanes` | `command`, a program that prints which lanes have room, and `log`, a JSONL file a fallback row is appended to. Omitted means a `lane:` label always runs its own agent. |
@@ -640,6 +641,32 @@ start, and the issues are not listed.
 `TestQueueRetriesASpawnThatFailed`,
 `TestQueueRetriesWhenTheAgentCannotStart` and
 `TestQueueUsesAWorkspaceThatAlreadyExists` hold this.
+
+### Census
+
+When `census` is set, the queue writes `census.json` after each pick. Every open
+issue with the queue label, in a configured repository the tick could list,
+gets exactly one reason:
+
+| reason | meaning |
+| --- | --- |
+| `startable` | free to start, or the issue the tick is starting |
+| `running` | an agent for it is running |
+| `pr_pending`, `pr_red`, `pr_conflict` | an open pull request on its branch: checks pending or green, red, or conflicting |
+| `pr_orphan` | an open pull request on its branch that the state file does not track |
+| `blocked_label`, `blocked_after_fix` | the block label is on it; the second when the fix stage blocked it |
+| `ran_no_pr` | the agent ran and exited, and the label stays |
+| `per_repo_cap`, `gate_wait`, `retry_wait`, `capped` | held by `per_repo`, a gate skip of its repository, a retry wait, or the `cap` block |
+
+The file holds `total`, `startable`, `running`, `free_slots`, `by_reason` and one
+row per issue. The counts in `by_reason` sum to `total`. It is written
+atomically. One row an hour, without the per-issue rows, is appended to
+`census.jsonl`, the same path with an `l` added.
+
+The census makes no GitHub call. It reads the listings the tick already made, so
+a pull request is judged only in a repository whose pull requests the tick
+listed. Where the tick did not list them, the issue gets the reason that
+follows from what is known.
 
 ### Heartbeat and `facet queue status`
 

@@ -325,6 +325,9 @@ type queueRunner struct {
 	// failing to list. Both are guarded by mu.
 	listWaitUntil time.Time
 	listFailSince map[string]time.Time
+	// censusLogged is when the last census.jsonl row was written, guarded
+	// by mu.
+	censusLogged time.Time
 }
 
 // newQueueRunner builds a runner and reads the state file when the config
@@ -563,7 +566,7 @@ func (r *queueRunner) full() bool {
 // agent opened the pull request and exited, and the label stays until the
 // merge. This process may not remember handing it out, after a restart
 // (#421). Such an issue counts as not free, like one already running.
-func (r *queueRunner) candidate(ctx context.Context) ([]queuedIssue, error) {
+func (r *queueRunner) candidate(ctx context.Context) (run []queuedIssue, err error) {
 	issues, err := r.collect()
 	if err != nil {
 		return nil, err
@@ -575,6 +578,8 @@ func (r *queueRunner) candidate(ctx context.Context) ([]queuedIssue, error) {
 	ranked := orderQueued(issues, projects)
 	r.recordBlockedSkips(ranked)
 	skip := map[string]bool{}
+	// The census is written after the pick, from what the pick read.
+	defer func() { r.writeCensus(ranked, skip) }()
 	for {
 		if err := r.skipCapped(ctx, ranked, skip); err != nil {
 			return nil, err
