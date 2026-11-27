@@ -33,6 +33,21 @@ const (
 	censusFileLogSuffix = "l"
 )
 
+// The kinds of configuration drift the census names.
+const (
+	driftPriorityNoRepo = "priority_not_in_repos"
+	driftNoRoutingKey   = "repo_no_routing_key"
+	driftNotInPriority  = "repo_not_in_priorities"
+)
+
+// censusDrift is one finding where the config, the priorities file and the
+// routing file disagree. Subject is a project name or a repository.
+type censusDrift struct {
+	Kind    string `json:"kind"`
+	Subject string `json:"subject"`
+	Detail  string `json:"detail"`
+}
+
 // censusIssue is one issue and the one reason it is not, or is, startable.
 type censusIssue struct {
 	Repo   string `json:"repo"`
@@ -50,6 +65,7 @@ type queueCensus struct {
 	FreeSlots int            `json:"free_slots"`
 	ByReason  map[string]int `json:"by_reason"`
 	Issues    []censusIssue  `json:"issues"`
+	Drift     []censusDrift  `json:"drift"`
 }
 
 // censusRow is one line of census.jsonl: the counts without the issues.
@@ -149,7 +165,7 @@ func (r *queueRunner) censusPR(iss queuedIssue) string {
 
 // buildCensus gives each issue its reason. The counts sum to the number of
 // issues, because every issue lands in exactly one count.
-func (r *queueRunner) buildCensus(ranked []queuedIssue, skipped map[string]bool) queueCensus {
+func (r *queueRunner) buildCensus(ranked []queuedIssue, skipped map[string]bool, projects []string) queueCensus {
 	r.mu.Lock()
 	now := r.env.now()
 	c := queueCensus{
@@ -165,6 +181,7 @@ func (r *queueRunner) buildCensus(ranked []queuedIssue, skipped map[string]bool)
 		c.Issues = append(c.Issues, censusIssue{Repo: iss.Repo, Number: iss.Issue.Number, Reason: why})
 	}
 	r.mu.Unlock()
+	c.Drift = r.censusDrift(projects)
 	c.Startable = c.ByReason[censusStartable]
 	c.Running = c.ByReason[censusRunning]
 	sort.SliceStable(c.Issues, func(i, j int) bool {
@@ -177,15 +194,59 @@ func (r *queueRunner) buildCensus(ranked []queuedIssue, skipped map[string]bool)
 	return c
 }
 
+// repoName is the part of owner/name after the slash.
+func repoName(repo string) string {
+	if _, n, ok := strings.Cut(repo, "/"); ok && n != "" {
+		return n
+	}
+	return repo
+}
+
+// censusDrift lists where the priorities file, the config's repos and the
+// routing file disagree. It makes no GitHub call: the routing check is the
+// local seam spawn uses, and a nil seam skips that finding. A name in the
+// priorities file that no repository carries never starts; a repository the
+// file does not name ranks last; a repository without a routing key fails
+// every spawn. Without a priorities file only the routing finding applies.
+func (r *queueRunner) censusDrift(projects []string) []censusDrift {
+	drift := []censusDrift{}
+	for _, p := range projects {
+		found := false
+		for _, repo := range r.cfg.Repos {
+			if strings.EqualFold(repoName(repo), p) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			drift = append(drift, censusDrift{Kind: driftPriorityNoRepo, Subject: p,
+				Detail: "named in priorities but in no repos entry, so it never starts\nfix: add its owner/name to repos, or remove the line"})
+		}
+	}
+	for _, repo := range r.cfg.Repos {
+		if len(projects) > 0 && projectRank(repo, projects) == len(projects) {
+			drift = append(drift, censusDrift{Kind: driftNotInPriority, Subject: repo,
+				Detail: "in repos but not in priorities, so it ranks after every named project\nfix: add " + repoName(repo) + " to the priorities file"})
+		}
+		if r.env.route == nil {
+			continue
+		}
+		if err := r.env.route(repo); err != nil {
+			drift = append(drift, censusDrift{Kind: driftNoRoutingKey, Subject: repo, Detail: err.Error()})
+		}
+	}
+	return drift
+}
+
 // writeCensus writes census.json atomically on every pick, and appends one
 // row to census.jsonl when an hour has passed since the last row. A dry run
 // or a config without census does nothing. A failed write is logged and
 // never stops the queue.
-func (r *queueRunner) writeCensus(ranked []queuedIssue, skipped map[string]bool) {
+func (r *queueRunner) writeCensus(ranked []queuedIssue, skipped map[string]bool, projects []string) {
 	if r.dry || r.cfg.Census == "" {
 		return
 	}
-	c := r.buildCensus(ranked, skipped)
+	c := r.buildCensus(ranked, skipped, projects)
 	if err := writeFileAtomic(r.cfg.Census, c); err != nil {
 		r.logf("queue: census: %v", err)
 	}

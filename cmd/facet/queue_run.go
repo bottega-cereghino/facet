@@ -58,7 +58,7 @@ type queueEnv struct {
 	issue func(repo string, number int) (*ghx.Issue, error)
 	spawn func(repo string, number int) (string, error)
 	// route runs spawn's routing checks for a repository, without the
-	// network. Only --dry-run calls it; nil skips it.
+	// network. --dry-run and the census call it; nil skips it.
 	route func(repo string) error
 	// diskFree reports free bytes on the volume that holds path. Nil uses
 	// diskFreeBytes. A test sets it so the floor does not depend on the machine.
@@ -579,7 +579,7 @@ func (r *queueRunner) candidate(ctx context.Context) (run []queuedIssue, err err
 	r.recordBlockedSkips(ranked)
 	skip := map[string]bool{}
 	// The census is written after the pick, from what the pick read.
-	defer func() { r.writeCensus(ranked, skip) }()
+	defer func() { r.writeCensus(ranked, skip, projects) }()
 	for {
 		if err := r.skipCapped(ctx, ranked, skip); err != nil {
 			return nil, err
