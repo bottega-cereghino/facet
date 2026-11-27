@@ -153,3 +153,82 @@ func TestQueueCensusConfigIsRelativeToTheConfigFile(t *testing.T) {
 		t.Fatalf("census = %q", cfg.Census)
 	}
 }
+
+func readCensus(t *testing.T, path string) queueCensus {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c queueCensus
+	if err := json.Unmarshal(b, &c); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// driftRig runs one pick over two repositories. widgets is in the priorities
+// file; gadgets is not; "ghost" is in the file and in no repos entry. The
+// route seam refuses gadgets, as spawn does for a repository with no key.
+func driftRig(t *testing.T, priorities string, route func(string) error) queueCensus {
+	t.Helper()
+	dir := t.TempDir()
+	pfile := filepath.Join(dir, "priorities")
+	if err := os.WriteFile(pfile, []byte(priorities), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := oneAgentConfig([]string{"acme/widgets", "acme/gadgets"})
+	cfg.Census = filepath.Join(dir, "census.json")
+	cfg.Priorities = pfile
+	r, err := newQueueRunner(cfg, queueEnv{
+		list: func(repo, _ string) ([]ghx.Issue, error) {
+			if repo == "acme/widgets" {
+				return []ghx.Issue{openIssue(1, "2026-01-01T00:00:00Z")}, nil
+			}
+			return nil, nil
+		},
+		route: route,
+		now:   func() time.Time { return time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC) },
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.candidate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return readCensus(t, cfg.Census)
+}
+
+func TestQueueCensusReportsConfigurationDrift(t *testing.T) {
+	route := func(repo string) error {
+		if repo == "acme/gadgets" {
+			return os.ErrNotExist
+		}
+		return nil
+	}
+	c := driftRig(t, "widgets\nghost\n", route)
+	got := map[string]string{}
+	for _, d := range c.Drift {
+		got[d.Kind] = d.Subject
+	}
+	want := map[string]string{
+		driftPriorityNoRepo: "ghost",
+		driftNotInPriority:  "acme/gadgets",
+		driftNoRoutingKey:   "acme/gadgets",
+	}
+	if len(c.Drift) != len(want) {
+		t.Fatalf("drift = %+v, want %d findings", c.Drift, len(want))
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("drift %s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestQueueCensusWithoutDriftHasNoFindings(t *testing.T) {
+	c := driftRig(t, "widgets\ngadgets\n", func(string) error { return nil })
+	if len(c.Drift) != 0 {
+		t.Fatalf("drift = %+v, want none", c.Drift)
+	}
+}

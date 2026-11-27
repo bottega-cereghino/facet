@@ -663,6 +663,14 @@ row per issue. The counts in `by_reason` sum to `total`. It is written
 atomically. One row an hour, without the per-issue rows, is appended to
 `census.jsonl`, the same path with an `l` added.
 
+The file also holds `drift`, a list of findings where the config, the priorities
+file and the routing file disagree. Each has a `kind`, a `subject` and a `detail`
+with the fix. `priority_not_in_repos`: a name in the priorities file that no
+`repos` entry carries, so the project never starts. `repo_not_in_priorities`: a
+repository in `repos` that the file does not name, so it ranks last.
+`repo_no_routing_key`: a repository that spawn's routing check refuses, so every
+spawn for it fails.
+
 The census makes no GitHub call. It reads the listings the tick already made, so
 a pull request is judged only in a repository whose pull requests the tick
 listed. Where the tick did not list them, the issue gets the reason that
