@@ -39,6 +39,22 @@ type queueReport struct {
 	// TornLines is how many lines of the decision log could not be read.
 	// They are skipped, never counted.
 	TornLines int `json:"torn_lines"`
+	// Census is the latest census row in the window and the starved minutes,
+	// read from census.jsonl. It is null when the config sets no census.
+	Census *censusReport `json:"census"`
+}
+
+// censusReport is the census part of the report. Rows is how many census.jsonl
+// rows fall in the window; with none, the counts are zero and At is empty, so
+// a window without data is told apart from a quiet queue.
+type censusReport struct {
+	Rows              int            `json:"rows"`
+	At                string         `json:"at"`
+	Startable         int            `json:"startable"`
+	Running           int            `json:"running"`
+	FreeSlots         int            `json:"free_slots"`
+	ByReason          map[string]int `json:"by_reason"`
+	StarvedMinutes24h int            `json:"starved_minutes_24h"`
 }
 
 type holdReport struct {
@@ -64,7 +80,9 @@ func newQueueReportCmd() *cobra.Command {
 		Long: "Reads the decision log and the state file named in the queue config, and\n" +
 			"prints, per agent label, the runs started, the exits with status 0 and not 0,\n" +
 			"the fix runs, the pull requests landed, the issues blocked and the skips by\n" +
-			"reason; then the holds and the last error. It makes no GitHub call.\n" +
+			"reason; then the holds and the last error. When the config sets census, it\n" +
+			"also reads census.jsonl: the latest counts, and the minutes in the last 24\n" +
+			"hours with a free slot and nothing startable. It makes no GitHub call.\n" +
 			"Without --json it prints the same as a short table. A line of the log that\n" +
 			"cannot be read is counted in torn_lines and skipped.\n\n" +
 			"The log has no exit, landed or blocked rows from before this command\n" +
@@ -172,6 +190,82 @@ func buildQueueReport(cfg queueConfig, now time.Time, since time.Duration) (queu
 		}
 		sort.Strings(rep.BlockedNow)
 	}
+	if cfg.Census != "" {
+		c, err := buildCensusReport(cfg.Census, now)
+		if err != nil {
+			return rep, err
+		}
+		rep.Census = &c
+	}
+	return rep, nil
+}
+
+// buildCensusReport reads census.jsonl. Each row stands for the time until the
+// next row, at most censusLogEvery, because the queue writes one row an hour
+// and a longer gap means it was not running. The last row stands until now,
+// at most censusLogEvery. A minute is starved when a slot was free, nothing
+// was startable and labelled issues existed. The window is always the last
+// 24 hours, whatever --since says, as the field name says.
+func buildCensusReport(census string, now time.Time) (censusReport, error) {
+	path := censusLogPath(census)
+	rep := censusReport{ByReason: map[string]int{}}
+	f, err := os.Open(path)
+	if err != nil {
+		return rep, fmt.Errorf("read census log %s: %w\nfix: the queue writes it once an hour when census is set; check the path in the config", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	var rows []censusRow
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), maxDecisionLineBytes)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var row censusRow
+		if err := json.Unmarshal([]byte(line), &row); err != nil || row.At.IsZero() {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	if err := sc.Err(); err != nil {
+		return rep, fmt.Errorf("read census log %s: %w", path, err)
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].At.Before(rows[j].At) })
+	from := now.Add(-24 * time.Hour)
+	var starved time.Duration
+	for i, row := range rows {
+		end := now
+		if i+1 < len(rows) {
+			end = rows[i+1].At
+		}
+		if end.After(row.At.Add(censusLogEvery)) {
+			end = row.At.Add(censusLogEvery)
+		}
+		start := row.At
+		if start.Before(from) {
+			start = from
+		}
+		if end.After(now) {
+			end = now
+		}
+		if !end.After(start) {
+			continue
+		}
+		if row.FreeSlots > 0 && row.Startable == 0 && row.Total > 0 {
+			starved += end.Sub(start)
+		}
+		if !row.At.After(now) {
+			rep.Rows++
+			rep.At = row.At.UTC().Format(time.RFC3339)
+			rep.Startable, rep.Running, rep.FreeSlots = row.Startable, row.Running, row.FreeSlots
+			rep.ByReason = row.ByReason
+		}
+	}
+	if rep.ByReason == nil {
+		rep.ByReason = map[string]int{}
+	}
+	rep.StarvedMinutes24h = int(starved / time.Minute)
 	return rep, nil
 }
 
@@ -252,6 +346,9 @@ func printQueueReport(out io.Writer, rep queueReport) {
 	}
 	if len(rep.BlockedNow) > 0 {
 		_, _ = fmt.Fprintf(out, "blocked now: %s\n", strings.Join(rep.BlockedNow, ", "))
+	}
+	if c := rep.Census; c != nil {
+		_, _ = fmt.Fprintf(out, "census: %d startable, %d running, %d free slots, %d starved minutes in 24h\n", c.Startable, c.Running, c.FreeSlots, c.StarvedMinutes24h)
 	}
 	if rep.TornLines > 0 {
 		_, _ = fmt.Fprintf(out, "torn lines skipped: %d\n", rep.TornLines)

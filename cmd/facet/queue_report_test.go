@@ -139,3 +139,88 @@ func TestQueueReportBlockedNowFromState(t *testing.T) {
 		t.Errorf("blocked now = %v", rep.BlockedNow)
 	}
 }
+
+func censusLine(at string, total, startable, running, free int, by map[string]int) string {
+	ts, _ := time.Parse(time.RFC3339, at)
+	b, _ := json.Marshal(censusRow{At: ts, Total: total, Startable: startable, Running: running, FreeSlots: free, ByReason: by})
+	return string(b)
+}
+
+func writeCensusLog(t *testing.T, cfg queueConfig, lines ...string) queueConfig {
+	t.Helper()
+	cfg.Census = filepath.Join(t.TempDir(), "census.json")
+	if err := os.WriteFile(censusLogPath(cfg.Census), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// The golden file is the report's JSON for a fixed log and clock. Compare by
+// bytes; to change it on purpose, edit the file and say why in the PR.
+func TestQueueReportCarriesTheCensusGolden(t *testing.T) {
+	cfg := writeReportLog(t, row("2026-11-24T10:00:00Z", "codex", "start", "a"))
+	cfg = writeCensusLog(t, cfg,
+		"not json",
+		// Before the window: starved, but only the part after 12:00 the day
+		// before counts, and this row ends at 11:00 that day.
+		censusLine("2026-11-23T10:00:00Z", 5, 0, 0, 2, map[string]int{"pr_pending": 5}),
+		// 11:30 to 12:00 the day before is inside the window: 30 starved minutes.
+		censusLine("2026-11-23T11:30:00Z", 5, 0, 0, 2, map[string]int{"pr_pending": 5}),
+		// Startable work: not starved.
+		censusLine("2026-11-24T08:00:00Z", 4, 2, 1, 1, map[string]int{"startable": 2, "running": 1, "pr_pending": 1}),
+		// No free slot: not starved.
+		censusLine("2026-11-24T09:00:00Z", 3, 0, 2, 0, map[string]int{"running": 2, "blocked_label": 1}),
+		// Free slot, nothing startable: starved 60 minutes, then the queue
+		// was down, which is not counted.
+		censusLine("2026-11-24T10:00:00Z", 3, 0, 0, 2, map[string]int{"pr_pending": 2, "blocked_label": 1}),
+		// Nothing labelled: not starved. Stands from 11:30 to 12:00 now.
+		censusLine("2026-11-24T11:30:00Z", 0, 0, 0, 2, map[string]int{}),
+	)
+	var out bytes.Buffer
+	if err := runQueueReport(cfg, reportNow, 24*time.Hour, true, &out); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Census json.RawMessage `json:"census"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, got.Census, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("..", "..", "testdata", "queue_report_census.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(pretty.String()) != strings.TrimSpace(string(want)) {
+		t.Errorf("census differs from the golden file\ngot:\n%s\nwant:\n%s", pretty.String(), want)
+	}
+}
+
+func TestQueueReportCensusIsNullWithoutCensusInTheConfig(t *testing.T) {
+	rep := reportJSON(t, writeReportLog(t, row("2026-11-24T10:00:00Z", "codex", "start", "a")))
+	if rep.Census != nil {
+		t.Errorf("census = %+v, want null", rep.Census)
+	}
+}
+
+func TestQueueReportRefusesAMissingCensusLog(t *testing.T) {
+	cfg := writeReportLog(t, row("2026-11-24T10:00:00Z", "codex", "start", "a"))
+	cfg.Census = filepath.Join(t.TempDir(), "census.json")
+	var out bytes.Buffer
+	err := runQueueReport(cfg, reportNow, 24*time.Hour, true, &out)
+	if err == nil || !strings.Contains(err.Error(), "fix:") {
+		t.Fatalf("want a refusal with a fix, got %v", err)
+	}
+}
+
+func TestQueueReportCensusWithNoRowsIsToldApartFromQuiet(t *testing.T) {
+	cfg := writeCensusLog(t, writeReportLog(t, row("2026-11-24T10:00:00Z", "codex", "start", "a")),
+		censusLine("2026-11-01T00:00:00Z", 3, 0, 0, 2, nil))
+	rep := reportJSON(t, cfg)
+	if rep.Census == nil || rep.Census.Rows != 0 || rep.Census.At != "" || rep.Census.StarvedMinutes24h != 0 {
+		t.Errorf("census = %+v", rep.Census)
+	}
+}
