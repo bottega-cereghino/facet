@@ -6,6 +6,13 @@ release-please writes each entry from the Conventional Commit titles on `main`
 (AGENTS.md, section Releases); the entries before it were written by hand in the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.22.0](https://github.com/bottega-cereghino/facet/compare/v0.21.0...v0.22.0) (2026-11-28)
+
+
+### Added
+
+* **reap:** let tool environments and test run leftovers go with a clone ([#592](https://github.com/bottega-cereghino/facet/issues/592)) ([eba8c19](https://github.com/bottega-cereghino/facet/commit/eba8c19e68461a2223337c9352292da7c0647205))
+
 ## [0.21.0](https://github.com/bottega-cereghino/facet/compare/v0.20.0...v0.21.0) (2026-11-27)
 
 
