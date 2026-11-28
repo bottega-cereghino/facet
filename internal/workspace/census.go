@@ -174,6 +174,9 @@ func (w *censusWalk) walk(abs string, repo *censusRepo, base string) {
 // the regular file Finder writes: a directory of that name holds what anyone
 // put there (#401).
 func rebuiltEntry(rel string, regular bool) bool {
+	if rebuiltPath(rel) {
+		return true
+	}
 	steps := strings.Split(rel, "/")
 	for i, step := range steps {
 		if step == ".DS_Store" {
