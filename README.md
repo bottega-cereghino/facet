@@ -297,7 +297,10 @@ clearing what it names and re-running should not turn up more.
 Last, `reap` takes a census: it hashes every file under the workspace's real
 path and deletes only when each one is in a commit a remote has, in a
 directory something rebuilds (`node_modules`, `.venv`, `target`, `dist` and
-the like), or is facet's own. Anything else holds, named, whatever the other
+the like), in a tool environment or test run leftover (`.tools/venv`,
+`.tools/pip-cache`, `.venv-types`, `.import_linter_cache`,
+`test-results/.last-run.json`, `test-results/.playwright-artifacts-<n>`), or is
+facet's own. Anything else holds, named, whatever the other
 checks found.
 
 A long-lived workspace can also hold files of its own beside its clones: notes,
@@ -1439,6 +1442,15 @@ it can be adopted by an existing, versioned set of workspaces without churn.
   output do not hold: prune's rebuildable list (`node_modules`, `.venv`, the
   Python tool caches, `.next`, `.turbo`, `.parcel-cache`), plus `target`,
   `dist`, `__pycache__` and `.DS_Store`, at any depth.
+  Reap also lets go of tool environments and test run leftovers, named by
+  their path from the clone's top: under `.tools/venv/` or `.tools/pip-cache/`,
+  under `.venv-types/` or `.import_linter_cache/`, `test-results/.last-run.json`
+  and under `test-results/.playwright-artifacts-<n>/`. Prune does not delete
+  them. A bare `venv`, `.tools` or `pip-cache`, `.tools/notes` and anything
+  else in `test-results/` still hold, and so does a repository inside any of
+  these (`TestReapReleasesToolEnvironmentsAndTestRunLeftovers`,
+  `TestReapHoldsTheNearMissesOfToolEnvironments`,
+  `TestReapHoldsWorkBesideToolEnvironments`).
 - **What `reap` does not protect:** what those rebuildable directories hold;
   commits reachable only from a local tag (a clone carries every upstream tag,
   so a tag cannot tell your work from a release); and commits reachable only

@@ -20,9 +20,46 @@ var rebuiltIgnored = map[string]bool{
 	".DS_Store":   true, // Finder's view settings
 }
 
+// rebuiltPrefixes are tool environments and test run leftovers that reap
+// lets go with a clone, named by their path from the clone's top, not by a
+// step at any depth: a bare venv, .tools or pip-cache still holds. Reap only;
+// prune does not delete them.
+var rebuiltPrefixes = []string{
+	".tools/venv",
+	".tools/pip-cache",
+	".venv-types",
+	".import_linter_cache",
+	"test-results/.last-run.json",
+}
+
+// playwrightArtifacts is the start of the directories Playwright writes its
+// run artifacts to, under test-results, followed by a number.
+const playwrightArtifacts = "test-results/.playwright-artifacts-"
+
+// rebuiltPath reports whether the slash-separated path, relative to a clone's
+// top, is one of rebuiltPrefixes or lies under one, or is under a Playwright
+// artifacts directory of test-results.
+func rebuiltPath(rel string) bool {
+	rel = strings.TrimSuffix(rel, "/")
+	for _, prefix := range rebuiltPrefixes {
+		if rel == prefix || strings.HasPrefix(rel, prefix+"/") {
+			return true
+		}
+	}
+	if n, ok := strings.CutPrefix(rel, playwrightArtifacts); ok {
+		num, _, _ := strings.Cut(n, "/")
+		return num != "" && strings.Trim(num, "0123456789") == ""
+	}
+	return false
+}
+
 // rebuilt reports whether the slash-separated path, relative to a clone, lies
-// in a directory something rebuilds (rebuiltIgnored, regenNames).
+// in a directory something rebuilds (rebuiltIgnored, regenNames) or is one of
+// the tool environments rebuiltPath names.
 func rebuilt(rel string) bool {
+	if rebuiltPath(rel) {
+		return true
+	}
 	for _, step := range strings.Split(strings.TrimSuffix(rel, "/"), "/") {
 		if _, ok := regenNames[step]; ok || rebuiltIgnored[step] {
 			return true
